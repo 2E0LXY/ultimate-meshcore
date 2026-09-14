@@ -234,7 +234,8 @@ All nodes in a mesh must use the same **frequency, bandwidth and spreading facto
 | Advert path hash size | `set path.hash.mode 0\|1\|2` | 0 (1 byte) | Size of this node's ID in its own adverts. 2- and 3-byte IDs are safe on firmware 1.14+. Doesn't affect what it forwards. |
 | Max flood hops | `set flood.max <n>` | 0–64, 64 | Floods that have already travelled more hops are not repeated. |
 | Max hops, unscoped | `set flood.max.unscoped <n>` | 0–64 | Hop limit for packets without a region. |
-| Max hops, adverts | `set flood.max.advert <n>` | 0–64, 8 | Hop limit for flooded adverts. |
+| Max hops, adverts | `set flood.max.advert <n>` (alias `advert.hops.max`) | 0–64, 8 | Hop limit for flooded adverts. |
+| Max hops, channel messages | `set group.hops.max <n>` | 0–64, 64 | How far public/group channel messages are relayed. 0 = never relay them. |
 | Extra ACKs | `set multi.acks 0\|1` | — | Sends acknowledgements twice for reliability. |
 | Flood retransmit delay | `set txdelay <0–2>` | 0.5 | Random wait before repeating floods, which reduces collisions. |
 | Direct retransmit delay | `set direct.txdelay <0–2>` | 0.2 | The same for direct (routed) packets. |
@@ -410,6 +411,7 @@ The repeater learns a **route table** from every advert it hears. Each advert ca
 | `trace route <node>` | Trace out and back along the node's route |
 | `trace <a1,b2,a1>` | Trace a custom list of repeaters |
 | `get trace` | Result: `waiting`, `timeout` or `done` with the SNR for each hop and the final SNR |
+- **Live traffic** page: the last 16 packets (direction, type, flood/direct, hops, RSSI, SNR, size), totals and packets per minute, with RX/TX and type filters and pause. Refreshes every 3 s.
 - `get traffic`: total packets and the last 16 packets with age, type, route (F flood / D direct), hops, RSSI and SNR.
 - `stats-core`, `stats-radio`, `stats-packets`: JSON statistics. `clear stats` resets them.
 - `log start|stop|erase` and `log` (USB): a packet log stored on the device.
@@ -562,7 +564,8 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get/set dutycycle <%>` | Transmit duty cycle limit |
 | `get/set flood.advert.interval <h>` | Flood advert interval (0, 3–168) *(R)* |
 | `get/set flood.max <n>` | Max flood hops *(R)* |
-| `get/set flood.max.advert <n>` | Max hops for flooded adverts *(R)* |
+| `get/set flood.max.advert <n>` / `advert.hops.max` | Max hops for flooded adverts *(R)* |
+| `get/set group.hops.max <n>` | Max hops for channel messages *(R)* |
 | `get/set flood.max.unscoped <n>` | Max hops for unscoped floods *(R)* |
 | `get/set freq <MHz>` | Frequency only (prefer `set radio`) |
 | `get/set guest.password <pw>` | Guest password *(R)* |

@@ -771,6 +771,13 @@ bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
       && mesh::isFloodHopLimitExceeded(packet, _prefs.flood_max, _prefs.flood_max_unscoped, _prefs.flood_max_advert)) {
     return false;
   }
+#ifdef UMC_BUILD
+  if (packet->isRouteFlood()
+      && (packet->getPayloadType() == PAYLOAD_TYPE_GRP_TXT || packet->getPayloadType() == PAYLOAD_TYPE_GRP_DATA)
+      && packet->getPathHashCount() >= umc.prefs().group_hops_max) {
+    return false;  // channel messages limited by group.hops.max
+  }
+#endif
   if (packet->isRouteFlood() && recv_pkt_region == NULL) {
     MESH_DEBUG_PRINTLN("allowPacketForward: unknown transport code, or wildcard not allowed for FLOOD packet");
     return false;

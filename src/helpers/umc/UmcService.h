@@ -54,6 +54,7 @@ public:
   // Public, unauthenticated device summary for the login / setup screens.
   void formatInfoJson(char* out, size_t out_size) const;
   void formatRoutesJson(char* out, size_t out_size) const;
+  void formatTrafficJson(char* out, size_t out_size) const;
   static size_t appendJsonEscaped(char* out, size_t out_size, size_t pos, const char* text);
 
 private:

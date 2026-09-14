@@ -36,7 +36,7 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 ### Web interface (every setting)
 - **Dashboard**: uptime, battery, clock, packets, neighbours, queue, memory, WiFi, hotspot, MQTT, radio preset, noise floor, RSSI/SNR, airtime, quick actions, update banner.
 - **Radio**: regional presets (same list as the MeshCore apps), frequency/BW/SF/CR **applied without reboot**, TX power, duty cycle, RX gain, AGC reset, CAD, interference threshold, temporary radio test.
-- **Mesh & routing**: repeat, loop detection, path hash size, flood/unscoped/advert hop limits, extra ACKs, TX/direct/RX delays, advert intervals, send adverts, discover neighbours.
+- **Mesh & routing**: repeat, loop detection, path hash size, flood/unscoped/advert/**channel** hop limits, extra ACKs, TX/direct/RX delays, advert intervals, send adverts, discover neighbours.
 - **Identity & access**: name, location (map picker), owner info, admin/guest passwords, public key, private key export/import, ACL permissions.
 - **Regions**: tree view with per-region **flooding switch, set home, remove** (sub-regions first), **UK presets** (`yorkshire`, `northwest`, `uk`), add, one-line definitions, unsaved-change reminder.
 - **Network**: 3 saved WiFi networks with scan, static IP / DHCP, hostname and `.local` name, hotspot mode (auto/on/off), rescue delay, hotspot password/PIN, session timeout, telnet, NTP servers, time zone.
@@ -44,6 +44,7 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 - **Bridge**: ESP-NOW (channel, secret, delay, source) and RS-232 settings.
 - **Power & hardware**: power saving, battery calibration, GPS, **display cycle settings**, board info.
 - **Neighbours**: list with age/SNR, forget, discover.
+- **Live traffic**: packet list with type/route/hops/RSSI/SNR, filters and per-minute counts.
 - **Routes & trace**: route table learned from adverts (hop chain with repeater names), find, **add/pin a route**, **trace** out and back with per-hop SNR, forget.
 - **Console**: full command line with history.
 - **Firmware & maintenance**: internet update, file update, clock sync, reboot, stats/log controls, legacy OTA, re-run setup, power off, factory reset.
@@ -77,7 +78,7 @@ net.ip, net.hostname, net.mdns, get net.status
 ap.mode, ap.password, ap.rescue, get ap.status, pin
 http, http.timeout, telnet, timezone
 display.mode, display.ip, display.page, display.traffic, display.timeout
-region preset yorkshire|northwest|uk, get traffic
+region preset yorkshire|northwest|uk, get traffic, group.hops.max, advert.hops.max
 routes, route <node>, route find|pin|unpin|forget, trace <path>, trace route <node>, get trace
 update check, update install, get update.status, update.auto, update.interval, update.url, get build
 get ota.state, ota rollback

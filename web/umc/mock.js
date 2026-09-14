@@ -56,6 +56,9 @@
     if (url === "/api/login") { if (body === "wrong") throw new Error("Wrong password"); return {token: "mocktoken"}; }
     if (url === "/api/logout") return {ok: true};
     if (url.startsWith("/api/scan")) return [{ssid: "HomeNetwork 2.4G", rssi: -48, ch: 6, auth: "wpa2"}, {ssid: "BT-Hub", rssi: -71, ch: 11, auth: "wpa2"}, {ssid: "Guest", rssi: -80, ch: 1, auth: "open"}];
+    if (url === "/api/traffic") return {rx_total: 1204, tx_total: 377, packets: [
+      {age: 2, tx: false, type: "CHAN", flood: true, hops: 3, rssi: -97, snr: 6.25, len: 58}, {age: 3, tx: true, type: "CHAN", flood: true, hops: 0, rssi: 0, snr: 0, len: 59},
+      {age: 20, tx: false, type: "ADVERT", flood: true, hops: 1, rssi: -88, snr: 9.5, len: 140}, {age: 75, tx: false, type: "ACK", flood: false, hops: 2, rssi: -103, snr: -2.25, len: 12}]};
     if (url === "/api/routes") return {routes: [
       {key: "271e2ee5a1b2", name: "Leeds Hill", type: "repeater", hops: 0, hash: 1, path: "", pin: "", snr: 12.5, ago: 95, adverts: 4},
       {key: "da8f72dfcc34", name: "Wakefield Roof", type: "repeater", hops: 1, hash: 1, path: "27", pin: "", snr: 11.8, ago: 320, adverts: 2},

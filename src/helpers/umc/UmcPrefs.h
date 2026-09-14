@@ -19,6 +19,7 @@ struct UmcPrefs {
   uint8_t display_ip_s;        // seconds the flashing IP screen shows each cycle
   uint8_t display_page_s;      // seconds per settings page
   uint16_t display_traffic_s;  // seconds on the live traffic screen
+  uint8_t group_hops_max;      // flood hop limit for channel (group) messages, 64 = no extra limit
 };
 
 class UmcPrefsStore {

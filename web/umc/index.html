@@ -123,6 +123,7 @@ const api = {
   logout: () => http("POST", "/api/logout", ""),
   scan: refresh => http("GET", "/api/scan" + (refresh ? "?refresh=1" : "")),
   routes: () => http("GET", "/api/routes"),
+  traffic: () => http("GET", "/api/traffic"),
   // CLI batches are serialised: one request in flight at a time keeps the device's socket pool free.
   cli: cmds => {
     const run = async () => {
@@ -216,6 +217,7 @@ const SECTIONS = [
       F("flood.max", "Max flood hops", {type: "number", min: 0, max: 64}),
       F("flood.max.unscoped", "Max hops, unscoped floods", {type: "number", min: 0, max: 64}),
       F("flood.max.advert", "Max hops, flooded adverts", {type: "number", min: 0, max: 64}),
+      F("group.hops.max", "Max hops, channel messages", {type: "number", min: 0, max: 64, help: "Limits how far public/group channel messages are relayed. 64 = no extra limit, 0 = never relay them."}),
       F("multi.acks", "Extra ACK transmissions", {type: "select", options: [["0", "Off"], ["1", "On"]]}),
       F("allow.read.only", "Allow read-only logins", Object.assign({roles: ["room_server"]}, onoff)),
     ]},
@@ -296,6 +298,7 @@ const SECTIONS = [
   ], actions: [["Set GPS as location", "gps setloc"], ["Sync clock from GPS", "gps sync"]]},
   {id: "neigh", title: "Neighbours", ico: "👥", special: "neigh", roles: RS},
   {id: "routes", title: "Routes & trace", ico: "🧭", special: "routes", roles: RS},
+  {id: "traffic", title: "Live traffic", ico: "📶", special: "traffic"},
   {id: "console", title: "Console", ico: "⌨", special: "console"},
   {id: "fw", title: "Firmware & maintenance", ico: "⚙", special: "fw"},
   {id: "backup", title: "Backup & restore", ico: "💾", special: "backup"},
@@ -553,6 +556,34 @@ async function renderNeigh(view) {
     } catch (err) { toast(err.message, "bad"); }
   });
   await load();
+}
+
+async function renderTraffic(view) {
+  view.innerHTML = `<div class="card"><h2>Live traffic</h2><p class="sub">Packets this node received (RX) and sent (TX), newest first. Refreshes every 3 seconds.</p>
+    <div class="grid" id="tfStats" style="margin-bottom:12px"></div>
+    <div class="row" style="margin-bottom:10px"><label class="row"><input type="checkbox" id="tfRx" checked> RX</label><label class="row"><input type="checkbox" id="tfTx" checked> TX</label>
+      <select id="tfType" style="max-width:180px"><option value="">All types</option>${["ADVERT","CHAN","MSG","ACK","PATH","REQ","RESP","ANON","TRACE","CTRL","MULTI","CHDATA","RAW"].map(t => `<option>${t}</option>`).join("")}</select>
+      <button class="btn" id="tfPause">Pause</button></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Age</th><th>Dir</th><th>Type</th><th>Route</th><th>Hops</th><th>RSSI</th><th>SNR</th><th>Bytes</th></tr></thead><tbody id="tfBody"></tbody></table></div>
+    <p class="val">Types: ADVERT node announcement · CHAN channel message · MSG direct message · ACK · PATH route reply · REQ/RESP logins, stats · TRACE · CTRL discovery.</p></div>`;
+  let paused = false, timer = null;
+  const stat = (v, l) => `<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`;
+  const load = async () => {
+    if (paused) return;
+    const d = await api.traffic();
+    const rx = $("#tfRx").checked, tx = $("#tfTx").checked, ty = $("#tfType").value;
+    const list = (d.packets || []).filter(p => (p.tx ? tx : rx) && (!ty || p.type === ty));
+    const perMin = dir => (d.packets || []).filter(p => p.tx === dir && p.age < 60).length;
+    $("#tfStats").innerHTML = stat(d.rx_total, "Received since boot") + stat(d.tx_total, "Sent since boot") + stat(perMin(false), "RX last minute") + stat(perMin(true), "TX last minute");
+    $("#tfBody").innerHTML = list.map(p => `<tr><td>${p.age}s</td><td>${p.tx ? '<span class="pill warn">TX</span>' : '<span class="pill ok">RX</span>'}</td><td>${esc(p.type)}</td>
+      <td>${p.flood ? "flood" : "direct"}</td><td>${p.tx ? "—" : p.hops}</td><td>${p.tx ? "—" : p.rssi}</td><td>${p.tx ? "—" : (+p.snr).toFixed(1)}</td><td>${p.len}</td></tr>`).join("")
+      || `<tr><td colspan="8" class="val">No packets yet.</td></tr>`;
+  };
+  $("#tfPause").onclick = () => { paused = !paused; $("#tfPause").textContent = paused ? "Resume" : "Pause"; if (!paused) load(); };
+  ["tfRx", "tfTx", "tfType"].forEach(id => $("#" + id).addEventListener("change", () => { const p = paused; paused = false; load().finally(() => paused = p); }));
+  await load();
+  timer = setInterval(() => load().catch(() => {}), 3000);
+  window.addEventListener("hashchange", () => clearInterval(timer), {once: true});
 }
 
 async function renderRoutes(view) {
@@ -1057,7 +1088,7 @@ async function go(id) {
   const old = $("#view"), view = old.cloneNode(false); old.replaceWith(view);  // drop old listeners
   view.innerHTML = `<p class="val">Loading…</p>`;
   try {
-    const fn = {dash: renderDash, neigh: renderNeigh, routes: renderRoutes, regions: renderRegions, net: renderNet, console: renderConsole, fw: renderFw, backup: renderBackup}[sec.special];
+    const fn = {dash: renderDash, neigh: renderNeigh, routes: renderRoutes, traffic: renderTraffic, regions: renderRegions, net: renderNet, console: renderConsole, fw: renderFw, backup: renderBackup}[sec.special];
     if (fn) await fn(view); else await renderSchemaSection(sec, view);
   } catch (err) { view.innerHTML = `<div class="card"><h2>Couldn't load</h2><p class="msg bad">${esc(err.message)}</p></div>`; }
 }

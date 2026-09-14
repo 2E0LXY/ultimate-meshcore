@@ -77,7 +77,7 @@ bool UmcWebServer::start() {
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.server_port = _umc.prefs().http_port;
   cfg.ctrl_port = 32770;  // distinct from any other httpd instance
-  cfg.max_uri_handlers = 16;
+  cfg.max_uri_handlers = 24;
   cfg.max_open_sockets = 5;
   cfg.lru_purge_enable = true;
   cfg.stack_size = 6144;
@@ -100,6 +100,7 @@ bool UmcWebServer::start() {
       {.uri = "/api/cli", .method = HTTP_POST, .handler = handleCli, .user_ctx = this},
       {.uri = "/api/scan", .method = HTTP_GET, .handler = handleScan, .user_ctx = this},
       {.uri = "/api/routes", .method = HTTP_GET, .handler = handleRoutes, .user_ctx = this},
+      {.uri = "/api/traffic", .method = HTTP_GET, .handler = handleTraffic, .user_ctx = this},
       {.uri = "/api/ota", .method = HTTP_POST, .handler = handleOta, .user_ctx = this},
       {.uri = "/generate_204", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
       {.uri = "/gen_204", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
@@ -312,6 +313,18 @@ esp_err_t UmcWebServer::handleRoutes(httpd_req_t* req) {
   char* buf = static_cast<char*>(malloc(kMax));
   if (buf == nullptr) return httpd_resp_send_500(req);
   s->_umc.formatRoutesJson(buf, kMax);
+  esp_err_t rc = sendJson(req, buf);
+  free(buf);
+  return rc;
+}
+
+esp_err_t UmcWebServer::handleTraffic(httpd_req_t* req) {
+  auto* s = self(req);
+  setCommonHeaders(req);
+  if (!s->isAuthorized(req)) return sendJson(req, "{\"error\":\"Unauthorized\"}", "401 Unauthorized");
+  char* buf = static_cast<char*>(malloc(3072));
+  if (buf == nullptr) return httpd_resp_send_500(req);
+  s->_umc.formatTrafficJson(buf, 3072);
   esp_err_t rc = sendJson(req, buf);
   free(buf);
   return rc;

@@ -6,6 +6,8 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ## Done in 0.1.0
 
+- ✅ Routes & trace: route table from adverts, pinned routes, per-hop SNR trace
+
 - ✅ Web UI for every repeater setting, setup wizard, open setup hotspot, rescue hotspot, captive portal
 - ✅ 3 WiFi networks, static IP, hostname/mDNS, scan, gateway watchdog
 - ✅ Browser file OTA, internet OTA (check/install/auto), USB web flasher, CI builds + Pages + releases
@@ -19,7 +21,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 | # | Item | Source | Status |
 |---|---|---|---|
-| 1.1 | Heltec V4 OLED / TFT / R8 repeater targets | upstream variants | 🔜 |
+| 1.1 | Heltec V4 OLED / TFT / R8 repeater targets | upstream variants | ✅ builds (hardware test pending) |
 | 1.2 | **Client (companion) firmware** with USB + BLE + WiFi TCP (5000) + WebSocket (8765) at the same time, web UI, internet OTA | meshcomod, upstream companion, UMC | 🔜 |
 | 1.3 | Room server firmware with the UMC web UI | upstream | 📋 |
 | 1.4 | LilyGo T-TWR + SX1262 variant (after hardware identification) | new | 📋 |
@@ -29,7 +31,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 | # | Item | Status |
 |---|---|---|
-| 2.1 | Merge upstream `dev`: NUL-terminated command buffers (security), `set af` validation, LR2021 fixes, CommonRadioPrefs refactor | 🔜 |
+| 2.1 | Upstream `dev` fixes: NUL-terminated command buffers (security), `set af` validation, LR2021 fixes, V4 R8 LNA, BLE flash size | ✅ cherry-picked (full `dev` merge waits for the next upstream release) |
 | 2.2 | `TXT_TYPE_CLI_COMMAND`: CLI to companions over the mesh / app | 📋 (with 1.2) |
 | 2.3 | Repeater "discover" screen on the display | 📋 |
 | 2.4 | `loop.detect minimal` default, BMP/BME sensor probe fixes, charging indicator | 🔜 (merge) |
@@ -48,7 +50,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 | # | Item | Source | Status |
 |---|---|---|---|
-| 4.1 | OTA rollback: mark new image valid only after the mesh + web are healthy; otherwise boot the previous slot | Offband | 🔜 |
+| 4.1 | OTA rollback: mark new image valid only after a healthy run; otherwise boot the previous slot | Offband | ✅ |
 | 4.2 | SafeBoot low-battery boot guard (V3.2 ADC polarity autodetect) | Offband | 📋 |
 | 4.3 | Crash/safety log persisted across reboots, viewable in the web UI | Offband | 📋 |
 | 4.4 | UDP syslog forwarding window (`caplog forward`) | Offband | 📋 |
@@ -60,7 +62,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 | # | Item | Source | Status |
 |---|---|---|---|
-| 5.1 | Per-type relay hop caps: `advert.hops.max`, `group.hops.max` | Low-Power | 🔜 |
+| 5.1 | Per-type relay hop caps: `advert.hops.max`, `group.hops.max` | Low-Power | ✅ |
 | 5.2 | RX duty cycle (sniff mode) for solar repeaters: `rx.duty` | Low-Power, ZephCore | 📋 |
 | 5.3 | Adaptive contention window (dupe counting → dynamic retransmit delay) | ZephCore | 💡 |
 | 5.4 | Fault alerts to a mesh channel (WiFi/MQTT down, OTA milestones): `alert.*` | agessaman | 📋 |
@@ -76,7 +78,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 | # | Item | Status |
 |---|---|---|
-| 6.1 | Live traffic page (streaming packet list, filters) | 🔜 |
+| 6.1 | Live traffic page (packet list, filters) | ✅ |
 | 6.2 | Stats history graphs (battery, noise, airtime, packets) on no-PSRAM boards | 📋 |
 | 6.3 | Neighbours map (with lat/lon from adverts) | 💡 |
 | 6.4 | MQTT broker presets for UK networks (ukmesh / meshrank) once endpoints are confirmed | 📋 |

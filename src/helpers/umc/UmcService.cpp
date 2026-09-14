@@ -64,6 +64,20 @@ size_t appendHexPath(char* out, size_t n, const uint8_t* path, uint8_t len, uint
 }
 }  // namespace
 
+void UmcService::formatTrafficJson(char* out, size_t out_size) const {
+  size_t pos = snprintf(out, out_size, "{\"rx_total\":%lu,\"tx_total\":%lu,\"packets\":[",
+                        static_cast<unsigned long>(umc_traffic.rxTotal()), static_cast<unsigned long>(umc_traffic.txTotal()));
+  const uint32_t now = millis();
+  for (int i = 0; i < umc_traffic.count() && pos + 120 < out_size; i++) {
+    const UmcTraffic::Entry e = *umc_traffic.get(i);  // copy: the loop task may be writing
+    pos += snprintf(out + pos, out_size - pos,
+                    "%s{\"age\":%lu,\"tx\":%s,\"type\":\"%s\",\"flood\":%s,\"hops\":%u,\"rssi\":%d,\"snr\":%.2f,\"len\":%u}",
+                    i ? "," : "", static_cast<unsigned long>((now - e.ms) / 1000), e.tx ? "true" : "false",
+                    UmcTraffic::typeName(e.type), e.flood ? "true" : "false", e.hops, e.rssi, e.snr4 / 4.0f, e.len);
+  }
+  snprintf(out + pos, out_size - pos, "]}");
+}
+
 void UmcService::formatRoutesJson(char* out, size_t out_size) const {
   size_t pos = snprintf(out, out_size, "{\"routes\":[");
   UmcRoutes::Route r;
@@ -581,6 +595,29 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
         snprintf(reply, reply_size, "OK");
       }
     }
+    return true;
+  }
+
+  // ---- per-type flood hop caps (Low-Power firmware compatible names) ----
+  if (strcmp(command, "get group.hops.max") == 0) {
+    snprintf(reply, reply_size, "> %u", _prefs.group_hops_max);
+    return true;
+  }
+  if (startsWith(command, "set group.hops.max ")) {
+    int v = atoi(command + 19);
+    if (v < 0 || v > 64) {
+      snprintf(reply, reply_size, "Err - 0..64 (0 = never relay channel messages, 64 = no extra limit)");
+    } else {
+      _prefs.group_hops_max = static_cast<uint8_t>(v);
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK");
+    }
+    return true;
+  }
+  if ((strcmp(command, "get advert.hops.max") == 0 || startsWith(command, "set advert.hops.max ")) && _host != nullptr) {
+    char alias[48];
+    snprintf(alias, sizeof(alias), "%s flood.max.advert%s", command[0] == 'g' ? "get" : "set", command[0] == 'g' ? "" : command + 19);
+    _host->umcCommand(alias, reply, reply_size);
     return true;
   }
 
