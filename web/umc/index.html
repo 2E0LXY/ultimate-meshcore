@@ -100,7 +100,9 @@ async function http(method, url, body, headers = {}) {
   if (window.UMC_MOCK) return window.UMC_MOCK(method, url, body);
   const h = Object.assign({}, headers);
   if (TOKEN) h["X-Auth-Token"] = TOKEN;
-  const r = await fetch(url, {method, headers: h, body});
+  let r;
+  try { r = await fetch(url, {method, headers: h, body}); }
+  catch (err) { showOffline(); throw new Error("Lost connection to the device"); }
   const txt = await r.text();
   let data; try { data = JSON.parse(txt); } catch { data = {error: txt || r.statusText}; }
   if (r.status === 401 && url !== "/api/login") { TOKEN = ""; sessionStorage.removeItem("umc_token"); showLogin(); }
@@ -122,6 +124,28 @@ const api = {
 const one = async c => (await api.cli([c]))[0] || "";
 const val = r => String(r ?? "").replace(/^\s*>\s?/, "").trim();
 const isErr = r => /^\s*(err|error|\?\?|unknown|invalid|bad )/i.test(String(r ?? ""));
+
+// Shown when the browser can't reach the device: rebooting, or it moved from the hotspot to home WiFi.
+let offlineTimer = null;
+function showOffline() {
+  if (offlineTimer || window.UMC_MOCK) return;
+  const net = (INFO && INFO.net) || {}, sta = net.sta || {};
+  const links = [];
+  if (sta.ip && location.hostname !== sta.ip) links.push(`http://${sta.ip}/`);
+  if (net.hostname && location.hostname !== net.hostname + ".local") links.push(`http://${net.hostname}.local/`);
+  const box = document.createElement("div");
+  box.className = "overlay"; box.id = "offline";
+  box.innerHTML = `<div class="panel"><h1>Device not reachable</h1>
+    <p>It may be rebooting (e.g. after an update), or it has left the setup hotspot and joined your home WiFi.</p>
+    ${links.length ? `<p>Reconnect this ${/Mobi/.test(navigator.userAgent) ? "phone" : "computer"} to your home WiFi, then open:</p>${links.map(l => `<pre><a href="${esc(l)}">${esc(l)}</a></pre>`).join("")}` : ""}
+    <p class="val" id="offlineRetry">Retrying automatically…</p></div>`;
+  document.body.appendChild(box);
+  let tries = 0;
+  offlineTimer = setInterval(async () => {
+    tries++; $("#offlineRetry").textContent = `Retrying automatically… (${tries})`;
+    try { const r = await fetch("/api/info", {cache: "no-store"}); if (r.ok) location.reload(); } catch {}
+  }, 4000);
+}
 
 function toast(text, kind = "") {
   const d = document.createElement("div"); d.className = kind; d.textContent = text;
@@ -870,7 +894,7 @@ async function startApp() {
 }
 async function boot() {
   try { INFO = await api.info(); }
-  catch (err) { document.body.innerHTML = `<div class="panel"><h1>Can't reach the device</h1><p>${esc(err.message)}</p></div>`; return; }
+  catch (err) { return; }  // showOffline() already took over
   if (INFO.setup && !INFO.auth_required) return showWizard();
   if (INFO.auth_required) return showLogin();
   startApp();
