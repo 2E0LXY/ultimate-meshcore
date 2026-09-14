@@ -350,6 +350,12 @@ const char* NetworkService::getHostname() const {
     }
   }
   while (pos > 4 && out[pos - 1] == '-') pos--;
+  out[pos] = 0;
+  // "UMC Repeater" would otherwise become "umc-umc-repeater": drop the duplicated prefix.
+  if (pos > 8 && strncmp(out + 4, "umc-", 4) == 0) {
+    memmove(out, out + 4, pos - 4 + 1);
+    pos -= 4;
+  }
   if (pos == 4) {
     const char* fallback = "node";
     while (*fallback && pos < 32) out[pos++] = *fallback++;
