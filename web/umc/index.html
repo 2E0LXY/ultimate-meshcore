@@ -1,0 +1,888 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Ultimate MeshCore</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#1b1f24;--muted:#626b75;--line:#dde1e6;--acc:#0b6bcb;--acc-ink:#fff;--ok:#1a7f37;--warn:#9a6700;--bad:#cf222e;--chip:#eef1f4;--code:#0f1419;--code-ink:#d6dde6;--r:10px}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ed;--muted:#98a2ad;--line:#2a313a;--acc:#4c9aff;--acc-ink:#07121f;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--chip:#222831;--code:#0a0d10;--code-ink:#c9d1d9}}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+a{color:var(--acc)}button,input,select,textarea{font:inherit;color:inherit}
+.hidden{display:none!important}
+#app{display:flex;min-height:100vh}
+nav{width:220px;flex:none;background:var(--card);border-right:1px solid var(--line);padding:14px 10px;position:sticky;top:0;height:100vh;overflow:auto}
+nav .brand{font-weight:700;font-size:15px;padding:4px 10px 12px}nav .brand small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+nav button{display:flex;gap:10px;align-items:center;width:100%;text-align:left;border:0;background:none;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--ink)}
+nav button:hover{background:var(--chip)}nav button.on{background:var(--acc);color:var(--acc-ink)}
+nav .ico{width:18px;text-align:center}
+main{flex:1;min-width:0;padding:18px 22px 60px;max-width:1100px}
+header.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+header.top h1{font-size:20px;margin:0;flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:99px;background:var(--chip);color:var(--muted);font-size:12px;white-space:nowrap}
+.pill.ok{color:var(--ok)}.pill.bad{color:var(--bad)}.pill.warn{color:var(--warn)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.card h2{font-size:15px;margin:0 0 4px}.card .sub{color:var(--muted);margin:0 0 12px;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.stat{background:var(--chip);border-radius:8px;padding:10px}.stat b{display:block;font-size:18px}.stat span{color:var(--muted);font-size:12px}
+.field{display:grid;grid-template-columns:minmax(160px,240px) 1fr auto;gap:8px 12px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.field:first-of-type{border-top:0}
+.field label{font-weight:600}.field .help{grid-column:1/-1;color:var(--muted);font-size:12px;margin-top:-4px}
+.field .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
+input[type=text],input[type=password],input[type=number],select,textarea{width:100%;max-width:420px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+textarea{min-height:70px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:-1px}
+.dirty input,.dirty select,.dirty textarea{border-color:var(--warn)}
+.btn{border:1px solid var(--line);background:var(--card);padding:7px 12px;border-radius:8px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--acc)}.btn.pri{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+.btn.danger{color:var(--bad);border-color:var(--bad)}.btn.sm{padding:4px 9px;font-size:12px}.btn:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.switch{position:relative;width:42px;height:24px;flex:none}.switch input{opacity:0;width:0;height:0}
+.switch span{position:absolute;inset:0;background:var(--line);border-radius:99px;transition:.15s;cursor:pointer}
+.switch span:before{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.15s}
+.switch input:checked+span{background:var(--acc)}.switch input:checked+span:before{transform:translateX(18px)}
+.val{color:var(--muted);font-size:12px;word-break:break-all}
+.msg{font-size:12px}.msg.ok{color:var(--ok)}.msg.bad{color:var(--bad)}
+pre,.term{background:var(--code);color:var(--code-ink);border-radius:8px;padding:10px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+.term{height:340px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-top:1px solid var(--line);font-size:13px}th{color:var(--muted);font-weight:600;border-top:0}
+.toast{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50}
+.toast div{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--acc);padding:9px 12px;border-radius:8px;box-shadow:0 4px 18px #0003;max-width:360px}
+.toast .bad{border-left-color:var(--bad)}.toast .ok{border-left-color:var(--ok)}
+.overlay{position:fixed;inset:0;background:var(--bg);z-index:40;overflow:auto;padding:24px 16px}
+.panel{max-width:560px;margin:5vh auto;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
+.panel h1{margin:0 0 6px;font-size:22px}.panel p{color:var(--muted)}
+.steps{display:flex;gap:4px;margin:10px 0 18px}.steps i{flex:1;height:4px;border-radius:4px;background:var(--line)}.steps i.on{background:var(--acc)}
+.stack>*{margin-bottom:12px}.stack label{display:block;font-weight:600;margin-bottom:4px}
+.list{border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto}
+.list button{display:flex;justify-content:space-between;width:100%;border:0;border-top:1px solid var(--line);background:none;padding:8px 10px;cursor:pointer;text-align:left}
+.list button:first-child{border-top:0}.list button:hover{background:var(--chip)}
+.warnbox{border:1px solid var(--warn);color:var(--warn);border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:12px}
+.progress{height:8px;background:var(--line);border-radius:8px;overflow:hidden}.progress i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+#menuBtn{display:none}
+@media (max-width:820px){#app{display:block}nav{position:fixed;left:0;top:0;z-index:30;transform:translateX(-100%);transition:.2s;box-shadow:0 0 30px #0005}nav.open{transform:none}#menuBtn{display:inline-block}main{padding:14px 16px 60px}.field{grid-template-columns:1fr}.field .act{justify-self:start}}
+</style>
+</head>
+<body>
+<div id="login" class="overlay hidden"><div class="panel stack">
+  <h1>Ultimate MeshCore</h1><p id="loginInfo">Sign in with the admin password.</p>
+  <div><label for="pw">Admin password</label><input id="pw" type="password" autocomplete="current-password"></div>
+  <div class="row"><button class="btn pri" id="loginBtn">Sign in</button><span id="loginMsg" class="msg bad"></span></div>
+</div></div>
+
+<div id="wizard" class="overlay hidden"><div class="panel"><div id="wiz"></div></div></div>
+
+<div id="app" class="hidden">
+  <nav id="nav"><div class="brand">Ultimate MeshCore<small id="navSub"></small></div><div id="navItems"></div></nav>
+  <main>
+    <header class="top">
+      <button class="btn" id="menuBtn" aria-label="Menu">☰</button>
+      <h1 id="title">Dashboard</h1>
+      <span class="pill" id="pillNet"></span><span class="pill" id="pillRole"></span>
+      <button class="btn sm" id="logoutBtn">Sign out</button>
+    </header>
+    <div id="view"></div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script data-dev-only src="mock.js"></script>
+<script>
+"use strict";
+// ================================================================ API
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let TOKEN = sessionStorage.getItem("umc_token") || "";
+let INFO = null;
+
+async function http(method, url, body, headers = {}) {
+  if (window.UMC_MOCK) return window.UMC_MOCK(method, url, body);
+  const h = Object.assign({}, headers);
+  if (TOKEN) h["X-Auth-Token"] = TOKEN;
+  const r = await fetch(url, {method, headers: h, body});
+  const txt = await r.text();
+  let data; try { data = JSON.parse(txt); } catch { data = {error: txt || r.statusText}; }
+  if (r.status === 401 && url !== "/api/login") { TOKEN = ""; sessionStorage.removeItem("umc_token"); showLogin(); }
+  if (!r.ok) throw new Error((data && data.error) || r.statusText);
+  return data;
+}
+const api = {
+  info: () => http("GET", "/api/info"),
+  login: pw => http("POST", "/api/login", pw),
+  logout: () => http("POST", "/api/logout", ""),
+  scan: refresh => http("GET", "/api/scan" + (refresh ? "?refresh=1" : "")),
+  cli: async cmds => {
+    const list = Array.isArray(cmds) ? cmds : [cmds];
+    const out = [];
+    for (let i = 0; i < list.length; i += 40) out.push(...await http("POST", "/api/cli", list.slice(i, i + 40).join("\n")));
+    return out;
+  },
+};
+const one = async c => (await api.cli([c]))[0] || "";
+const val = r => String(r ?? "").replace(/^\s*>\s?/, "").trim();
+const isErr = r => /^\s*(err|error|\?\?|unknown|invalid|bad )/i.test(String(r ?? ""));
+
+function toast(text, kind = "") {
+  const d = document.createElement("div"); d.className = kind; d.textContent = text;
+  $("#toast").appendChild(d); setTimeout(() => d.remove(), kind === "bad" ? 7000 : 3500);
+}
+function has(f) { return !f || (INFO && INFO.features.includes(f)); }
+function roleOk(roles) { return !roles || (INFO && roles.includes(INFO.role)); }
+const RS = ["repeater", "room_server"];
+
+// ================================================================ presets / constants
+const PRESETS = [
+  ["EU/UK (Narrow)", 869.618, 62.5, 8, 5], ["EU/UK (Medium Range)", 869.525, 250, 10, 5], ["EU/UK (Long Range)", 869.525, 250, 11, 5],
+  ["Switzerland", 869.618, 62.5, 8, 5], ["Czech Republic", 869.432, 62.5, 7, 5], ["Portugal 869", 869.618, 62.5, 7, 5],
+  ["Portugal 433", 433.375, 62.5, 9, 5], ["EU 433MHz", 433.65, 250, 11, 5], ["USA/Canada", 910.525, 62.5, 7, 5],
+  ["USA Arizona", 908.205, 62.5, 9, 8], ["USA Philly", 902.25, 500, 11, 5], ["Australia", 915.8, 250, 10, 5],
+  ["Australia (Narrow)", 916.575, 62.5, 7, 5], ["Australia (Mid)", 915.075, 125, 9, 5], ["Australia SA, WA, QLD", 923.125, 62.5, 8, 5],
+  ["New Zealand", 917.375, 250, 11, 5], ["New Zealand (Narrow)", 917.375, 62.5, 7, 5], ["Vietnam", 920.25, 250, 11, 5],
+];
+const BWS = [7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, 500];
+const TZS = [["Europe/London", "GMT0BST,M3.5.0/1,M10.5.0"], ["Europe/Dublin", "IST-1GMT0,M10.5.0,M3.5.0/1"], ["Central Europe", "CET-1CEST,M3.5.0,M10.5.0/3"],
+  ["Eastern Europe", "EET-2EEST,M3.5.0/3,M10.5.0/4"], ["US Eastern", "EST5EDT,M3.2.0,M11.1.0"], ["US Central", "CST6CDT,M3.2.0,M11.1.0"],
+  ["US Mountain", "MST7MDT,M3.2.0,M11.1.0"], ["US Pacific", "PST8PDT,M3.2.0,M11.1.0"], ["Australia Eastern", "AEST-10AEDT,M10.1.0,M4.1.0/3"],
+  ["New Zealand", "NZST-12NZDT,M9.5.0,M4.1.0/3"], ["UTC", "UTC0"]];
+const presetFor = (f, bw, sf, cr) => PRESETS.find(p => Math.abs(p[1] - f) < 0.002 && p[2] == bw && p[3] == sf && p[4] == cr);
+const presetLoose = (f, bw, sf) => PRESETS.find(p => Math.abs(p[1] - f) < 0.002 && p[2] == bw && p[3] == sf);
+
+// ================================================================ settings schema
+// type: text|password|number|select|toggle|textarea|readonly|radio
+// k: CLI key -> "get k" / "set k v" unless get/set overridden. secret: never read back.
+const onoff = {type: "toggle", on: "on", off: "off"};
+const F = (k, label, o = {}) => Object.assign({k, label, type: "text"}, o);
+const SECTIONS = [
+  {id: "dash", title: "Dashboard", ico: "◉", special: "dash"},
+  {id: "radio", title: "Radio", ico: "📡", groups: [
+    {title: "LoRa parameters", sub: "All nodes in a mesh must share frequency, bandwidth and spreading factor.", fields: [
+      F("radio", "Frequency / BW / SF / CR", {type: "radio", help: "Applies without a reboot on UMC. Coding rate may differ between nodes."}),
+      F("tx", "TX power (dBm)", {type: "number", min: 1, max: 22, help: "Radio chip power. Boards with a PA (Heltec V4) add gain on top — stay within your local limit."}),
+      F("dutycycle", "Duty cycle limit (%)", {type: "number", min: 1, max: 100, help: "UK/EU 869.40–869.65 MHz allows 10%.", parse: v => parseFloat(v)}),
+      F("radio.rxgain", "RX boosted gain", onoff),
+      F("radio.fem.rxgain", "External LNA (FEM)", Object.assign({feature: "fem"}, onoff)),
+    ]},
+    {title: "Interference handling", fields: [
+      F("agc.reset.interval", "AGC reset interval (s)", {type: "number", min: 0, max: 1020, step: 4, help: "4 cures 'deafness' from nearby strong signals. 0 = off."}),
+      F("cad", "Channel activity detect", onoff),
+      F("int.thresh", "Interference threshold", {type: "number", min: 0, max: 50}),
+    ]},
+  ], actions: [["Temporary radio test…", "tempradio"]]},
+  {id: "mesh", title: "Mesh & routing", ico: "🔀", roles: RS, groups: [
+    {title: "Forwarding", fields: [
+      F("repeat", "Repeat packets", onoff),
+      F("loop.detect", "Loop detection", {type: "select", options: ["off", "minimal", "moderate", "strict"]}),
+      F("path.hash.mode", "Advert path hash size", {type: "select", options: [["0", "1 byte (default)"], ["1", "2 bytes"], ["2", "3 bytes"]]}),
+      F("flood.max", "Max flood hops", {type: "number", min: 0, max: 64}),
+      F("flood.max.unscoped", "Max hops, unscoped floods", {type: "number", min: 0, max: 64}),
+      F("flood.max.advert", "Max hops, flooded adverts", {type: "number", min: 0, max: 64}),
+      F("multi.acks", "Extra ACK transmissions", {type: "select", options: [["0", "Off"], ["1", "On"]]}),
+      F("allow.read.only", "Allow read-only logins", Object.assign({roles: ["room_server"]}, onoff)),
+    ]},
+    {title: "Timing", fields: [
+      F("txdelay", "Flood retransmit delay factor", {type: "number", min: 0, max: 2, step: 0.1}),
+      F("direct.txdelay", "Direct retransmit delay factor", {type: "number", min: 0, max: 2, step: 0.1}),
+      F("rxdelay", "RX delay base (experimental)", {type: "number", min: 0, max: 20, step: 0.5}),
+    ]},
+    {title: "Adverts", sub: "UK guidance: use an odd number of hours for flood adverts (e.g. 51) to avoid synchronised congestion.", fields: [
+      F("advert.interval", "Zero-hop advert (minutes)", {type: "number", min: 0, max: 240, step: 2, help: "0 = off, otherwise 60–240."}),
+      F("flood.advert.interval", "Flood advert (hours)", {type: "number", min: 0, max: 168, help: "0 = off, otherwise 3–168."}),
+    ]},
+  ], actions: [["Send flood advert", "advert"], ["Send zero-hop advert", "advert.zerohop"], ["Discover neighbours", "discover.neighbors"]]},
+  {id: "id", title: "Identity & access", ico: "🪪", groups: [
+    {title: "Node", fields: [
+      F("name", "Node name", {help: "Up to 23 bytes with location, 31 without."}),
+      F("lat", "Latitude", {type: "number", step: "any", min: -90, max: 90, help: "Round to 2–3 decimals to avoid pinpointing your home."}),
+      F("lon", "Longitude", {type: "number", step: "any", min: -180, max: 180}),
+      F("owner.info", "Owner info", {type: "textarea", help: "Shown to others on request. '|' becomes a new line.", roles: RS}),
+      F("public.key", "Public key", {type: "readonly"}),
+      F("role", "Firmware role", {type: "readonly"}),
+    ]},
+    {title: "Passwords", sub: "The admin password protects remote admin, this web UI and telnet.", fields: [
+      F("__adminpw", "Admin password", {type: "password", secret: true, set: v => `password ${v}`, min: 8, help: "At least 8 characters.", roles: RS}),
+      F("guest.password", "Guest password", {type: "text", roles: RS, help: "Blank = guests can log in without a password. Never reuse other passwords."}),
+    ]},
+  ], actions: [["Location from this browser (rounded)", "geo"], ["Private key…", "prvkey"], ["Set permissions (ACL)…", "setperm"]]},
+  {id: "regions", title: "Regions", ico: "🗺", special: "regions", roles: RS},
+  {id: "net", title: "Network", ico: "📶", special: "net"},
+  {id: "mqtt", title: "MQTT", ico: "☁", feature: "mqtt", groups: [
+    {title: "Status", fields: [F("mqtt.status", "Status", {type: "readonly"}), F("mqtt.client_version", "Client version", {type: "readonly"})]},
+    {title: "Identity", sub: "IATA/location code is used in topics: meshcore/<IATA>/<device>/… — brokers stay idle while it is UNSET.", fields: [
+      F("mqtt.iata", "IATA / location code", {help: "e.g. LBA (Leeds Bradford), MAN, LHR"}),
+      F("mqtt.owner", "Owner public key", {help: "64 hex characters, used in JWT auth metadata."}),
+      F("mqtt.email", "Owner email"),
+    ]},
+    {title: "What to publish", fields: [
+      F("mqtt.packets", "Packets", onoff), F("mqtt.raw", "Raw payloads", onoff), F("mqtt.tx", "Include transmitted", onoff), F("mqtt.status", "Periodic status", Object.assign({get: "get mqtt.statuscfg"}, onoff)),
+    ]},
+    {title: "Brokers", sub: "At most two brokers can be enabled at once.", fields: [
+      F("mqtt.meshmapper", "MeshMapper (global)", onoff), F("mqtt.waev", "waev", onoff), F("mqtt.eastmesh-au", "EastMesh AU", onoff),
+      F("mqtt.letsmesh-eu", "LetsMesh EU (retired)", onoff), F("mqtt.letsmesh-us", "LetsMesh US (retired)", onoff),
+    ]},
+    {title: "Custom broker", fields: [
+      F("mqtt.custom", "Enabled", onoff), F("mqtt.custom.host", "Host"), F("mqtt.custom.port", "Port", {type: "number", min: 1, max: 65535}),
+      F("mqtt.custom.transport", "Transport", {type: "select", options: ["tcp", "wss"]}),
+      F("mqtt.custom.username", "Username"), F("mqtt.custom.password", "Password", {type: "password", secret: true}),
+    ]},
+  ]},
+  {id: "bridge", title: "Bridge", ico: "🔗", feature: "bridge", groups: [
+    {title: "Bridge", sub: "Links two LoRa segments (ESP-NOW over 2.4 GHz, or RS-232).", fields: [
+      F("bridge.type", "Bridge type", {type: "readonly"}),
+      F("bridge.enabled", "Enabled", onoff),
+      F("bridge.source", "Packets to bridge", {type: "select", options: [["logTx", "Transmitted (logTx)"], ["logRx", "Received (logRx)"]]}),
+      F("bridge.delay", "Delay (ms)", {type: "number", min: 0, max: 10000}),
+      F("bridge.channel", "ESP-NOW channel", {type: "number", min: 1, max: 14, feature: "espnow", help: "Must match the WiFi channel when connected to WiFi."}),
+      F("bridge.secret", "ESP-NOW secret", {feature: "espnow", help: "Up to 15 characters, same on both ends."}),
+      F("bridge.baud", "RS-232 baud", {type: "select", options: ["9600", "19200", "38400", "57600", "115200"], feature: "rs232"}),
+    ]},
+  ]},
+  {id: "power", title: "Power & hardware", ico: "🔋", groups: [
+    {title: "Power", fields: [
+      F("powersaving", "Power saving (sleep between packets)", Object.assign({get: "powersaving", set: v => `powersaving ${v}`, roles: RS, help: "Disables WiFi services while asleep."}, onoff)),
+      F("adc.multiplier", "Battery ADC multiplier", {type: "number", min: 0, max: 10, step: 0.01, help: "0 = board default."}),
+    ]},
+    {title: "GPS", feature: "gps", fields: [
+      F("gps", "GPS", Object.assign({get: "gps", set: v => `gps ${v}`, parse: v => v.startsWith("on") ? "on" : "off"}, onoff)),
+      F("gps.advert", "Location in adverts", {type: "select", options: ["none", "share", "prefs"], get: "gps advert", set: v => `gps advert ${v}`}),
+    ]},
+    {title: "Display", feature: "display", sub: "Cycle: the IP address flashes, then each settings page shows, then live traffic. The button steps through pages.", fields: [
+      F("display.mode", "Display mode", {type: "select", options: [["cycle", "Cycle (IP → settings → traffic)"], ["status", "Network status only"], ["off", "Off (button wakes)"]]}),
+      F("display.ip", "Flashing IP screen (s)", {type: "number", min: 0, max: 60}),
+      F("display.page", "Each settings page (s)", {type: "number", min: 1, max: 60}),
+      F("display.traffic", "Live traffic screen (s)", {type: "number", min: 0, max: 600}),
+      F("display.timeout", "Blank after (s, 0 = never)", {type: "number", min: 0, max: 3600, help: "Blanking reduces OLED burn-in on long-term installs."}),
+    ]},
+    {title: "Hardware", fields: [F("__board", "Board", {type: "readonly", get: "board"}), F("pwrmgt.bootreason", "Boot reason", {type: "readonly"})]},
+  ], actions: [["Set GPS as location", "gps setloc"], ["Sync clock from GPS", "gps sync"]]},
+  {id: "neigh", title: "Neighbours", ico: "👥", special: "neigh", roles: RS},
+  {id: "console", title: "Console", ico: "⌨", special: "console"},
+  {id: "fw", title: "Firmware & maintenance", ico: "⚙", special: "fw"},
+  {id: "backup", title: "Backup & restore", ico: "💾", special: "backup"},
+];
+
+// ================================================================ rendering helpers
+function visibleFields(sec) {
+  const out = [];
+  for (const g of sec.groups || []) if (has(g.feature) && roleOk(g.roles)) for (const f of g.fields) if (has(f.feature) && roleOk(f.roles)) out.push(f);
+  return out;
+}
+const getCmd = f => f.get || (f.k.startsWith("__") ? null : `get ${f.k}`);
+const setCmd = (f, v) => f.set ? f.set(v) : `set ${f.k} ${v}`;
+
+function controlHtml(f, id) {
+  const a = `id="${id}" data-k="${esc(f.k)}"`;
+  switch (f.type) {
+    case "toggle": return `<label class="switch"><input type="checkbox" ${a}><span></span></label><span class="val" id="${id}_v"></span>`;
+    case "select": return `<select ${a}>${f.options.map(o => Array.isArray(o) ? `<option value="${esc(o[0])}">${esc(o[1])}</option>` : `<option>${esc(o)}</option>`).join("")}</select>`;
+    case "number": return `<input type="number" ${a} ${f.min != null ? `min="${f.min}"` : ""} ${f.max != null ? `max="${f.max}"` : ""} step="${f.step ?? 1}">`;
+    case "password": return `<input type="password" ${a} autocomplete="new-password" placeholder="${f.secret ? "unchanged" : ""}">`;
+    case "textarea": return `<textarea ${a}></textarea>`;
+    case "readonly": return `<span class="val" ${a} style="font-size:13px;color:var(--ink)"></span>`;
+    case "radio": return `<div style="width:100%"><select id="${id}_p" style="margin-bottom:6px"><option value="">Custom</option>${PRESETS.map((p, i) => `<option value="${i}">${esc(p[0])} — ${p[1]} MHz, ${p[2]} kHz, SF${p[3]}</option>`).join("")}</select>
+      <div class="row"><input type="number" id="${id}_f" step="0.001" min="150" max="2500" style="max-width:130px" title="MHz"> MHz
+      <select id="${id}_b" style="max-width:110px">${BWS.map(b => `<option>${b}</option>`).join("")}</select> kHz
+      SF<select id="${id}_s" style="max-width:70px">${[5,6,7,8,9,10,11,12].map(s => `<option>${s}</option>`).join("")}</select>
+      CR 4/<select id="${id}_c" style="max-width:60px">${[5,6,7,8].map(s => `<option>${s}</option>`).join("")}</select></div></div>`;
+    default: return `<input type="text" ${a}>`;
+  }
+}
+
+function setControl(f, id, raw) {
+  const v = f.parse ? f.parse(val(raw)) : val(raw);
+  const el = $("#" + id);
+  if (!el && f.type !== "radio") return;
+  if (isErr(raw)) { const m = $("#" + id + "_m"); if (m) { m.textContent = "not supported"; m.className = "msg"; } }
+  switch (f.type) {
+    case "toggle": el.checked = v === (f.on || "on") || v === "1" || v === "true"; $("#" + id + "_v").textContent = isErr(raw) ? "" : v; break;
+    case "readonly": el.textContent = v; break;
+    case "password": el.value = ""; break;
+    case "radio": {
+      const [fr, bw, sf, cr] = v.split(",").map(Number);
+      $("#" + id + "_f").value = fr ? fr.toFixed(3) : ""; $("#" + id + "_b").value = String(bw); $("#" + id + "_s").value = String(sf); $("#" + id + "_c").value = String(cr);
+      const p = presetFor(fr, bw, sf, cr) || presetLoose(fr, bw, sf); $("#" + id + "_p").value = p ? PRESETS.indexOf(p) : "";
+      break;
+    }
+    case "select":
+      if (![...el.options].some(o => o.value === v) && v) el.add(new Option(v, v));
+      el.value = v; break;
+    default: el.value = v;
+  }
+}
+
+function readControl(f, id) {
+  const el = $("#" + id);
+  switch (f.type) {
+    case "toggle": return el.checked ? (f.on || "on") : (f.off || "off");
+    case "radio": return [$("#" + id + "_f").value, $("#" + id + "_b").value, $("#" + id + "_s").value, $("#" + id + "_c").value].join(",");
+    default: return el.value.trim();
+  }
+}
+
+async function renderSchemaSection(sec, view) {
+  let html = "", n = 0; const map = [];
+  for (const g of sec.groups) {
+    if (!has(g.feature) || !roleOk(g.roles)) continue;
+    const fields = g.fields.filter(f => has(f.feature) && roleOk(f.roles));
+    if (!fields.length) continue;
+    html += `<div class="card"><h2>${esc(g.title)}</h2>${g.sub ? `<p class="sub">${esc(g.sub)}</p>` : ""}`;
+    for (const f of fields) {
+      const id = "f" + (n++); map.push([f, id]);
+      const editable = f.type !== "readonly";
+      html += `<div class="field" id="${id}_row"><label for="${id}">${esc(f.label)}</label><div class="ctl">${controlHtml(f, id)}<span class="msg" id="${id}_m"></span></div>
+        <div class="act">${editable ? `<button class="btn sm" data-save="${id}">Save</button>` : ""}</div>${f.help ? `<div class="help">${esc(f.help)}</div>` : ""}</div>`;
+    }
+    html += `</div>`;
+  }
+  if (sec.actions) html += `<div class="card"><h2>Actions</h2><div class="row">${sec.actions.map(([l, c]) => `<button class="btn" data-act="${esc(c)}">${esc(l)}</button>`).join("")}</div></div>`;
+  view.innerHTML = html + `<div class="row"><button class="btn" id="reloadSec">Reload values</button><button class="btn pri" id="saveAll">Save all changes</button></div>`;
+
+  const dirty = new Set();
+  const mark = id => { dirty.add(id); $("#" + id + "_row").classList.add("dirty"); };
+  for (const [f, id] of map) {
+    const row = $("#" + id + "_row");
+    row.addEventListener("input", () => mark(id)); row.addEventListener("change", () => mark(id));
+    if (f.type === "radio") $("#" + id + "_p").addEventListener("change", e => {
+      const p = PRESETS[e.target.value]; if (!p) return;
+      $("#" + id + "_f").value = p[1].toFixed(3); $("#" + id + "_b").value = String(p[2]); $("#" + id + "_s").value = String(p[3]); $("#" + id + "_c").value = String(p[4]);
+    });
+  }
+  const load = async () => {
+    const withGet = map.filter(([f]) => getCmd(f));
+    const replies = await api.cli(withGet.map(([f]) => getCmd(f)));
+    withGet.forEach(([f, id], i) => setControl(f, id, replies[i]));
+    dirty.clear(); view.querySelectorAll(".dirty").forEach(r => r.classList.remove("dirty"));
+  };
+  const save = async ids => {
+    const items = map.filter(([, id]) => ids.includes(id)).map(([f, id]) => [f, id, readControl(f, id)]);
+    const cmds = [];
+    for (const [f, id, v] of items) {
+      const m = $("#" + id + "_m");
+      if (f.type === "password" && !v) { dirty.delete(id); continue; }
+      if (f.min != null && f.type === "password" && v.length < f.min) { m.textContent = `min ${f.min} chars`; m.className = "msg bad"; return; }
+      const el = $("#" + id);
+      if (el && el.type === "number" && el.value !== "" && !el.checkValidity()) { m.textContent = "out of range"; m.className = "msg bad"; return; }
+      cmds.push([id, setCmd(f, v)]);
+    }
+    if (!cmds.length) return toast("Nothing to save");
+    const replies = await api.cli(cmds.map(c => c[1]));
+    let bad = 0;
+    cmds.forEach(([id], i) => {
+      const m = $("#" + id + "_m"), r = replies[i] || "";
+      m.textContent = r.length > 60 ? r.slice(0, 60) + "…" : r; m.className = "msg " + (isErr(r) ? "bad" : "ok");
+      if (isErr(r)) bad++; else { dirty.delete(id); $("#" + id + "_row").classList.remove("dirty"); }
+      if (/reboot/i.test(r)) toast(r, "");
+    });
+    toast(bad ? `${bad} setting(s) rejected` : "Saved", bad ? "bad" : "ok");
+    await load();
+  };
+  view.addEventListener("click", async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    try {
+      if (b.dataset.save) await save([b.dataset.save]);
+      else if (b.id === "saveAll") await save([...dirty]);
+      else if (b.id === "reloadSec") await load();
+      else if (b.dataset.act) await runAction(b.dataset.act, load);
+    } catch (err) { toast(err.message, "bad"); }
+  });
+  await load();
+}
+
+async function runAction(act, reload) {
+  if (act === "geo") {
+    if (!navigator.geolocation) return toast("Browser has no geolocation", "bad");
+    navigator.geolocation.getCurrentPosition(async p => {
+      const r = await api.cli([`set lat ${p.coords.latitude.toFixed(3)}`, `set lon ${p.coords.longitude.toFixed(3)}`]);
+      toast(r.join(" / "), r.some(isErr) ? "bad" : "ok"); reload && reload();
+    }, e => toast(e.message, "bad"), {enableHighAccuracy: false, timeout: 15000});
+    return;
+  }
+  if (act === "prvkey") {
+    if (!confirm("Show this node's PRIVATE key? Anyone with it can impersonate the node.")) return;
+    const k = val(await one("get prv.key"));
+    const nk = prompt("Private key (copy it somewhere safe). Paste a new 64-hex key to replace it, or Cancel:", k);
+    if (nk && nk !== k) { const r = await one(`set prv.key ${nk}`); toast(r, isErr(r) ? "bad" : "ok"); }
+    return;
+  }
+  if (act === "setperm") {
+    const pk = prompt("Companion public key (hex):"); if (!pk) return;
+    const perm = prompt("Permission: 0 guest, 1 read-only, 2 read-write, 3 admin, blank = remove", "3"); if (perm === null) return;
+    const r = await one(`setperm ${pk} ${perm}`.trim()); return toast(r, isErr(r) ? "bad" : "ok");
+  }
+  if (act === "tempradio") {
+    const s = prompt("Temporary radio: freq,bw,sf,cr,minutes", "869.618,62.5,8,8,10"); if (!s) return;
+    const r = await one(`tempradio ${s}`); return toast(r, isErr(r) ? "bad" : "ok");
+  }
+  const r = await one(act); toast(r || "Sent", isErr(r) ? "bad" : "ok");
+}
+
+// ================================================================ special pages
+const parseJson = r => { try { return JSON.parse(val(r)); } catch { return null; } };
+const fmtUp = s => { s = +s || 0; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + "d " : "") + h + "h " + m + "m"; };
+
+let dashTimer = null;
+async function renderDash(view) {
+  view.innerHTML = `<div class="card"><h2 id="dName">…</h2><p class="sub" id="dSub"></p><div class="grid" id="dStats"></div></div>
+    <div class="card"><h2>Network</h2><div class="grid" id="dNet"></div></div>
+    <div class="card"><h2>Radio</h2><div class="grid" id="dRadio"></div></div>
+    <div class="card"><h2>Quick actions</h2><div class="row">
+      <button class="btn" data-q="advert">Flood advert</button><button class="btn" data-q="advert.zerohop">Zero-hop advert</button>
+      <button class="btn" data-q="clocksync">Set clock from this browser</button><button class="btn" data-q="refresh">Refresh</button></div></div>`;
+  const stat = (v, l) => `<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`;
+  const refresh = async () => {
+    const cmds = ["get name", "ver", "clock", "stats-core", "stats-radio", "stats-packets", "get radio", "get tx", "get net.status", "memory"];
+    if (roleOk(RS)) cmds.push("get repeat", "neighbors");
+    if (has("mqtt")) cmds.push("get mqtt.status");
+    const r = await api.cli(cmds); const g = i => r[i] || "";
+    const core = parseJson(g(3)) || {}, radio = parseJson(g(4)) || {}, pk = parseJson(g(5)) || {}, net = parseJson(g(8)) || {};
+    $("#dName").textContent = val(g(0)); $("#dSub").textContent = `${INFO.board} · ${INFO.role} · ${val(g(1))} · UMC ${INFO.umc}`;
+    const batt = core.battery_mv ? (core.battery_mv / 1000).toFixed(2) + " V" : "—";
+    let neigh = "—"; if (roleOk(RS)) { const t = val(g(11)); neigh = t === "-none-" || !t ? "0" : String(t.split("\n").filter(Boolean).length); }
+    $("#dStats").innerHTML = stat(fmtUp(core.uptime_secs), "Uptime") + stat(batt, "Battery") + stat(val(g(2)), "Clock (UTC)") +
+      stat((pk.recv ?? "—") + " / " + (pk.sent ?? "—"), "Packets rx / tx") + stat(neigh, "Neighbours") + stat(core.queue_len ?? "—", "TX queue") +
+      (roleOk(RS) ? stat(val(g(10)), "Repeat") : "") + stat((() => { const m = parseJson(g(9)); return m && m.heap_free ? Math.round(m.heap_free / 1024) + " KB free" : "—"; })(), "Memory");
+    const sta = net.sta || {}, ap = net.ap || {};
+    $("#dNet").innerHTML = stat(sta.connected ? sta.ssid : "not connected", "WiFi") + stat(sta.ip || "—", "LAN IP") + stat(sta.connected ? sta.rssi + " dBm" : "—", "WiFi signal") +
+      stat(ap.active ? ap.ssid : "off", "Access point") + stat(net.hostname ? net.hostname + ".local" : "—", "mDNS name") +
+      (has("mqtt") ? stat(val(g(roleOk(RS) ? 12 : 10)).slice(0, 40), "MQTT") : "");
+    const [fr, bw, sf, cr] = val(g(6)).split(",").map(Number); const p = presetFor(fr, bw, sf, cr) || presetLoose(fr, bw, sf);
+    $("#dRadio").innerHTML = stat(p ? p[0] : "Custom", "Preset") + stat(`${fr ? fr.toFixed(3) : "?"} MHz`, "Frequency") + stat(`${bw} kHz · SF${sf} · 4/${cr}`, "BW · SF · CR") +
+      stat(val(g(7)) + " dBm", "TX power") + stat((radio.noise_floor ?? "—") + " dBm", "Noise floor") + stat(radio.last_rssi != null ? `${radio.last_rssi} / ${radio.last_snr}` : "—", "Last RSSI / SNR") +
+      stat((radio.tx_air_secs ?? "—") + " s", "TX airtime");
+  };
+  view.addEventListener("click", async e => {
+    const q = e.target.closest("[data-q]")?.dataset.q; if (!q) return;
+    try {
+      if (q === "refresh") return refresh();
+      if (q === "clocksync") { const r = await one(`time ${Math.floor(Date.now() / 1000)}`); toast(r, isErr(r) ? "bad" : "ok"); return refresh(); }
+      const r = await one(q); toast(r, isErr(r) ? "bad" : "ok");
+    } catch (err) { toast(err.message, "bad"); }
+  });
+  await refresh();
+  dashTimer = setInterval(() => refresh().catch(() => {}), 15000);
+}
+
+async function renderNeigh(view) {
+  view.innerHTML = `<div class="card"><h2>Neighbours</h2><p class="sub">Repeaters heard directly (most recent adverts). SNR in dB.</p>
+    <div class="row" style="margin-bottom:10px"><button class="btn" id="nRef">Refresh</button><button class="btn" id="nDisc">Discover neighbours</button></div>
+    <table><thead><tr><th>Key prefix</th><th>Heard</th><th>SNR</th><th></th></tr></thead><tbody id="nBody"></tbody></table></div>`;
+  const load = async () => {
+    const [nb, clk] = await api.cli(["neighbors", "clock"]);
+    const t = val(nb); const now = Math.floor(Date.now() / 1000);
+    const rows = t === "-none-" || !t ? [] : t.split("\n").filter(Boolean).map(l => l.split(":"));
+    $("#nBody").innerHTML = rows.length ? rows.map(([k, ts, snr]) => {
+      const age = now - (+ts || now); const a = age < 120 ? age + " s" : age < 7200 ? Math.round(age / 60) + " min" : Math.round(age / 3600) + " h";
+      return `<tr><td><code>${esc(k)}</code></td><td>${esc(a)} ago</td><td>${(+snr / 4).toFixed(1)}</td><td><button class="btn sm" data-rm="${esc(k)}">Forget</button></td></tr>`;
+    }).join("") : `<tr><td colspan="4" class="val">No neighbours heard yet.</td></tr>`;
+  };
+  view.addEventListener("click", async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    try {
+      if (b.id === "nRef") await load();
+      else if (b.id === "nDisc") { toast(await one("discover.neighbors")); setTimeout(load, 8000); }
+      else if (b.dataset.rm) { toast(await one(`neighbor.remove ${b.dataset.rm}`)); await load(); }
+    } catch (err) { toast(err.message, "bad"); }
+  });
+  await load();
+}
+
+async function renderRegions(view) {
+  view.innerHTML = `<div class="card"><h2>Region tree</h2><p class="sub">Regions scope flood traffic. F = flooding allowed. Changes are live until you press Save.</p>
+    <pre id="rTree">…</pre><div class="row"><button class="btn" id="rRef">Refresh</button><button class="btn pri" id="rSave">Save regions</button></div></div>
+    <div class="card"><h2>UK presets</h2><p class="sub">Names are case-sensitive and must match other repeaters exactly. These use the lowercase names seen on the public map.</p>
+      <div class="row"><button class="btn" data-preset="yorkshire">Add yorkshire</button><button class="btn" data-preset="northwest">Add northwest</button><button class="btn" data-preset="uk">uk → yorkshire + northwest</button></div></div>
+    <div class="card"><h2>Edit</h2>
+      <div class="field"><label>Add region</label><div class="ctl"><input id="rName" type="text" placeholder="#Leeds" style="max-width:180px"> under <input id="rParent" type="text" placeholder="parent (blank = *)" style="max-width:180px"></div><div class="act"><button class="btn sm" id="rPut">Add</button></div></div>
+      <div class="field"><label>Region</label><div class="ctl"><input id="rSel" type="text" placeholder="name or *" style="max-width:180px">
+        <button class="btn sm" data-r="allowf">Allow flood</button><button class="btn sm" data-r="denyf">Deny flood</button><button class="btn sm" data-r="home">Set home</button><button class="btn sm" data-r="default">Set default scope</button><button class="btn sm danger" data-r="remove">Remove</button></div><div></div></div>
+      <div class="field"><label>Define in one line</label><div class="ctl"><input id="rDef" type="text" placeholder="#UK #Yorkshire #Leeds|#Yorkshire #Wakefield"></div><div class="act"><button class="btn sm" id="rDefBtn">Apply</button></div><div class="help">Uses <code>region def</code>: each name becomes a child of the previous; <code>name|jump</code> moves back up.</div></div>
+    </div>`;
+  const load = async () => { $("#rTree").textContent = val(await one("region")) || "(empty)"; };
+  view.addEventListener("click", async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    try {
+      let r;
+      if (b.id === "rRef") return load();
+      if (b.id === "rSave") r = await one("region save");
+      if (b.id === "rPut") r = await one(`region put ${$("#rName").value.trim()} ${$("#rParent").value.trim()}`.trim());
+      if (b.id === "rDefBtn") r = await one(`region def ${$("#rDef").value.trim()}`);
+      if (b.dataset.r) r = await one(`region ${b.dataset.r} ${$("#rSel").value.trim()}`);
+      if (b.dataset.preset) r = await one(`region preset ${b.dataset.preset}`);
+      if (r != null) { toast(r, isErr(r) ? "bad" : "ok"); await load(); }
+    } catch (err) { toast(err.message, "bad"); }
+  });
+  await load();
+}
+
+async function renderNet(view) {
+  const slot = n => `<div class="field"><label>Network ${n}${n === 1 ? " (primary)" : ""}</label><div class="ctl">
+      <input type="text" id="ss${n}" placeholder="SSID" style="max-width:200px"><input type="password" id="pw${n}" placeholder="password (unchanged)" autocomplete="new-password" style="max-width:200px">
+      <span class="val" id="pws${n}"></span></div><div class="act row"><button class="btn sm" data-scan="${n}">Scan…</button><button class="btn sm" data-wsave="${n}">Save</button><button class="btn sm danger" data-wclear="${n}">Clear</button></div></div>`;
+  view.innerHTML = `<div class="card"><h2>Status</h2><pre id="netStat">…</pre><div class="row"><button class="btn" id="netRef">Refresh</button><button class="btn" id="netRecon">Reconnect WiFi</button></div></div>
+    <div class="card"><h2>WiFi networks</h2><p class="sub">Up to three networks, tried in order. Passwords are never shown.</p>${slot(1)}${slot(2)}${slot(3)}
+      <div id="scanBox" class="hidden" style="margin-top:10px"><div class="row" style="justify-content:space-between"><b>Nearby networks</b><button class="btn sm" id="scanRef">Rescan</button></div><div class="list" id="scanList"></div></div></div>
+    <div id="netSchema"></div>`;
+  const netSec = {groups: [
+    {title: "WiFi", fields: [
+      F("wifi.enabled", "WiFi enabled", onoff),
+      F("wifi.powersaving", "WiFi power saving", {type: "select", options: ["none", "min", "max"]}),
+    ]},
+    {title: "IP address", fields: [
+      F("net.ip", "IP configuration", {help: "'dhcp', or static: <ip> <mask> <gateway> [dns] e.g. 192.168.1.50 255.255.255.0 192.168.1.1"}),
+      F("net.hostname", "Hostname", {help: "Blank = automatic (umc-<name>). Reachable as http://<hostname>.local"}),
+      F("net.mdns", "mDNS (.local name)", onoff),
+    ]},
+    {title: "Access point", sub: "Auto: the AP appears for first setup and whenever the home network is unreachable (rescue).", fields: [
+      F("ap.mode", "AP mode", {type: "select", options: [["auto", "Auto (setup + rescue)"], ["on", "Always on"], ["off", "Never"]]}),
+      F("ap.rescue", "Rescue after (seconds offline)", {type: "number", min: 15, max: 3600}),
+      F("ap.password", "AP password", {type: "password", secret: true, help: "Blank field = unchanged. Type 'pin' to go back to using the device PIN. 8–63 chars."}),
+      F("pin", "Device PIN", {help: "8 digits. Default AP password and Bluetooth pairing PIN."}),
+    ]},
+    {title: "Services", fields: [
+      F("http.timeout", "Web session timeout (min)", {type: "number", min: 1, max: 1440}),
+      F("telnet", "Telnet CLI (port 23)", Object.assign({help: "Password protected. Plain text — use only on trusted networks."}, onoff)),
+      F("ble", "Bluetooth", Object.assign({feature: "ble", help: "Reboot to apply."}, onoff)),
+      F("ble.idle", "Bluetooth auto-off (min idle)", {type: "number", min: 0, max: 1440, feature: "ble"}),
+      F("web.stats", "Stats history (web panel)", Object.assign({feature: "webstats", get: "get web.stats.status", parse: v => /enabled:on/.test(v) ? "on" : "off"}, onoff)),
+    ]},
+    {title: "Time", fields: [
+      F("ntp.server1", "NTP server 1"), F("ntp.server2", "NTP server 2"), F("ntp.server3", "NTP server 3"),
+      F("timezone", "Time zone", {type: "select", options: TZS.map(t => [t[1], t[0]]), help: "Display only — mesh time is always UTC."}),
+    ]},
+  ]};
+  const loadStat = async () => {
+    const r = await api.cli(["get wifi.status", "get ap.status", "get net.hostname", "get wifi.ssid", "get wifi.pwd", "get wifi.ssid2", "get wifi.pwd2", "get wifi.ssid3", "get wifi.pwd3"]);
+    $("#netStat").textContent = `${val(r[0])}\nAP: ${val(r[1])}\nhttp://${val(r[2])}.local/`;
+    for (let n = 1; n <= 3; n++) { const s = val(r[1 + n * 2]); $("#ss" + n).value = s === "-" ? "" : s; $("#pws" + n).textContent = val(r[2 + n * 2]) === "set" ? "password set" : ""; }
+  };
+  let scanTarget = 1;
+  const doScan = async refresh => {
+    $("#scanBox").classList.remove("hidden"); $("#scanList").innerHTML = `<div class="val" style="padding:8px">Scanning…</div>`;
+    let res = await api.scan(refresh);
+    for (let i = 0; i < 12 && res === null; i++) { await new Promise(r => setTimeout(r, 1000)); res = await api.scan(false); }
+    const seen = new Map(); (res || []).forEach(n => { if (!seen.has(n.ssid) || seen.get(n.ssid).rssi < n.rssi) seen.set(n.ssid, n); });
+    const list = [...seen.values()].sort((a, b) => b.rssi - a.rssi);
+    $("#scanList").innerHTML = list.length ? list.map(n => `<button data-pick="${esc(n.ssid)}"><span>${esc(n.ssid)}</span><span class="val">${n.rssi} dBm · ch ${n.ch} · ${esc(n.auth)}</span></button>`).join("") : `<div class="val" style="padding:8px">No networks found.</div>`;
+  };
+  view.addEventListener("click", async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    try {
+      if (b.id === "netRef") return loadStat();
+      if (b.id === "netRecon") { toast(await one("wifi reconnect")); return; }
+      if (b.dataset.scan) { scanTarget = +b.dataset.scan; return doScan(true); }
+      if (b.id === "scanRef") return doScan(true);
+      if (b.dataset.pick) { $("#ss" + scanTarget).value = b.dataset.pick; $("#pw" + scanTarget).focus(); return; }
+      if (b.dataset.wsave) {
+        const n = +b.dataset.wsave, suf = n === 1 ? "" : n, cmds = [`set wifi.ssid${suf} ${$("#ss" + n).value.trim()}`.trim()];
+        if ($("#pw" + n).value) cmds.push(`set wifi.pwd${suf} ${$("#pw" + n).value}`);
+        const r = await api.cli(cmds); $("#pw" + n).value = ""; toast(r.join(" / "), r.some(isErr) ? "bad" : "ok"); return loadStat();
+      }
+      if (b.dataset.wclear) { if (!confirm("Forget this network?")) return; toast(await one(`wifi clear ${b.dataset.wclear}`)); return loadStat(); }
+    } catch (err) { toast(err.message, "bad"); }
+  });
+  await loadStat();
+  await renderSchemaSection(netSec, $("#netSchema"));
+}
+
+async function renderConsole(view) {
+  view.innerHTML = `<div class="card"><h2>Console</h2><p class="sub">Runs commands exactly like the USB serial CLI. ↑/↓ for history. Try <code>help</code>, <code>ver</code>, <code>stats-radio</code>.</p>
+    <div class="term" id="term"></div><div class="row" style="margin-top:8px"><input type="text" id="cmd" placeholder="command" style="max-width:none;flex:1;font-family:ui-monospace,Consolas,monospace" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn pri" id="run">Run</button></div></div>`;
+  const hist = JSON.parse(sessionStorage.getItem("umc_hist") || "[]"); let hi = hist.length;
+  const term = $("#term"), inp = $("#cmd");
+  const print = (t, cls) => { const d = document.createElement("div"); d.textContent = t; if (cls) d.style.color = cls; term.appendChild(d); term.scrollTop = term.scrollHeight; };
+  const run = async () => {
+    const c = inp.value.trim(); if (!c) return; inp.value = ""; hist.push(c); if (hist.length > 50) hist.shift(); hi = hist.length; sessionStorage.setItem("umc_hist", JSON.stringify(hist));
+    print("> " + c, "#7ee787");
+    try { const r = await one(c); print(r || "(no reply)", isErr(r) ? "#ff7b72" : null); } catch (err) { print(err.message, "#ff7b72"); }
+  };
+  $("#run").onclick = run;
+  inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") run();
+    else if (e.key === "ArrowUp" && hi > 0) { inp.value = hist[--hi]; e.preventDefault(); }
+    else if (e.key === "ArrowDown") { hi = Math.min(hist.length, hi + 1); inp.value = hist[hi] || ""; e.preventDefault(); }
+  });
+  inp.focus();
+}
+
+async function renderFw(view) {
+  const r = await api.cli(["ver", "get umc.version", "board", "clock"]);
+  view.innerHTML = `<div class="card"><h2>Firmware</h2><div class="grid">
+      <div class="stat"><b>${esc(val(r[0]))}</b><span>MeshCore</span></div><div class="stat"><b>${esc(INFO.umc)}</b><span>Ultimate MeshCore</span></div>
+      <div class="stat"><b>${esc(val(r[2]))}</b><span>Board</span></div><div class="stat"><b>${esc(INFO.role)}</b><span>Role</span></div></div></div>
+    <div class="card"><h2>Update firmware</h2><p class="sub">Choose the <b>non-merged</b> <code>.bin</code> for this board and role. The device keeps its identity and settings, and falls back to the previous version if the new one fails to boot.</p>
+      <div class="row"><input type="file" id="fwFile" accept=".bin"><button class="btn pri" id="fwGo" disabled>Upload &amp; install</button></div>
+      <div class="warnbox hidden" id="fwWarn"></div>
+      <div class="progress" style="margin-top:10px"><i id="fwBar"></i></div><p class="msg" id="fwMsg"></p></div>
+    <div class="card"><h2>Maintenance</h2><div class="row">
+      <button class="btn" data-m="clock">Set clock from browser</button><button class="btn" data-m="reboot">Reboot</button>
+      <button class="btn" data-m="clear stats">Clear stats</button><button class="btn" data-m="log start">Start packet log</button><button class="btn" data-m="log stop">Stop packet log</button><button class="btn" data-m="log erase">Erase packet log</button>
+      <button class="btn" data-m="start ota">Legacy OTA hotspot</button><button class="btn" data-m="setup start">Re-run setup wizard</button>
+      <button class="btn" data-m="poweroff">Power off</button><button class="btn danger" data-m="factory">Factory reset…</button></div>
+      <p class="sub" style="margin-top:10px">Device clock: ${esc(val(r[3]))}</p></div>`;
+  const file = $("#fwFile"), go = $("#fwGo");
+  file.onchange = () => {
+    const f = file.files[0]; go.disabled = !f; const w = $("#fwWarn"); w.classList.add("hidden");
+    if (!f) return;
+    const n = f.name.toLowerCase(), notes = [];
+    if (n.includes("merged")) notes.push("This file name contains 'merged' — use the non-merged .bin for updates.");
+    const board = (INFO.board || "").toLowerCase();
+    if (board.includes("v3") && n.includes("v4")) notes.push("File looks like a Heltec V4 build but this board is a V3.");
+    if (board.includes("v4") && n.includes("v3")) notes.push("File looks like a Heltec V3 build but this board is a V4.");
+    const role = INFO.role.replace("_", "");
+    if (["repeater", "companion", "roomserver", "room_server"].some(x => n.includes(x)) && !n.replace("_", "").includes(role)) notes.push(`File name suggests a different role than this device (${INFO.role}).`);
+    if (notes.length) { w.innerHTML = notes.map(esc).join("<br>"); w.classList.remove("hidden"); }
+  };
+  go.onclick = () => {
+    const f = file.files[0]; if (!f || !confirm(`Install ${f.name} (${Math.round(f.size / 1024)} KB)? The device reboots when done.`)) return;
+    go.disabled = true; const msg = $("#fwMsg"), bar = $("#fwBar");
+    const xhr = new XMLHttpRequest(); xhr.open("POST", "/api/ota"); if (TOKEN) xhr.setRequestHeader("X-Auth-Token", TOKEN);
+    xhr.upload.onprogress = e => { if (e.lengthComputable) { bar.style.width = (e.loaded / e.total * 100).toFixed(1) + "%"; msg.textContent = `Uploading ${Math.round(e.loaded / 1024)} / ${Math.round(e.total / 1024)} KB`; } };
+    xhr.onload = () => {
+      let d = {}; try { d = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status === 200) { msg.className = "msg ok"; msg.textContent = "Installed. Rebooting — reconnecting in 20 s…"; setTimeout(() => location.reload(), 20000); }
+      else { msg.className = "msg bad"; msg.textContent = d.error || "Upload failed"; go.disabled = false; }
+    };
+    xhr.onerror = () => { msg.className = "msg bad"; msg.textContent = "Connection lost during upload"; go.disabled = false; };
+    xhr.send(f);
+  };
+  view.addEventListener("click", async e => {
+    const m = e.target.closest("[data-m]")?.dataset.m; if (!m) return;
+    try {
+      if (m === "clock") { const x = await one(`time ${Math.floor(Date.now() / 1000)}`); return toast(x, isErr(x) ? "bad" : "ok"); }
+      if (m === "factory") {
+        if (prompt("Factory reset erases the identity, all settings, WiFi and regions. Type ERASE to confirm.") !== "ERASE") return;
+        toast(await one("factory reset confirm"), "bad"); return;
+      }
+      if (["reboot", "poweroff", "start ota", "setup start"].includes(m) && !confirm(`Run '${m}'?`)) return;
+      const x = await one(m); toast(x || "Sent", isErr(x) ? "bad" : "ok");
+      if (m === "setup start") setTimeout(() => location.reload(), 1500);
+    } catch (err) { toast(err.message, "bad"); }
+  });
+}
+
+async function renderBackup(view) {
+  view.innerHTML = `<div class="card"><h2>Backup</h2><p class="sub">Downloads every readable setting and the region tree as JSON. WiFi, MQTT and admin passwords are never included.</p>
+      <label class="row"><input type="checkbox" id="bkKey"> Include private key (lets you restore the same node identity)</label>
+      <div class="row" style="margin-top:10px"><button class="btn pri" id="bkGo">Download backup</button><span class="msg" id="bkMsg"></span></div></div>
+    <div class="card"><h2>Restore</h2><p class="sub">Applies settings from a backup file. You will see every command before it runs.</p>
+      <input type="file" id="rsFile" accept=".json"><pre id="rsPrev" class="hidden"></pre>
+      <div class="row"><button class="btn pri hidden" id="rsGo">Apply</button><span class="msg" id="rsMsg"></span></div></div>`;
+  const all = [];
+  for (const s of SECTIONS) for (const f of visibleFields(s)) if (!f.secret && f.type !== "readonly" && getCmd(f) && f.type !== "password") all.push(f);
+  const extra = [F("net.ip", ""), F("net.hostname", ""), F("net.mdns", ""), F("ap.mode", ""), F("ap.rescue", ""), F("http.timeout", ""), F("telnet", ""),
+    F("wifi.powersaving", ""), F("ntp.server1", ""), F("ntp.server2", ""), F("ntp.server3", ""), F("timezone", "")];
+  all.push(...extra);
+  $("#bkGo").onclick = async () => {
+    try {
+      $("#bkMsg").textContent = "Reading…";
+      const cmds = all.map(getCmd); if ($("#bkKey").checked) cmds.push("get prv.key"); cmds.push("region", "get wifi.ssid", "get wifi.ssid2", "get wifi.ssid3");
+      const r = await api.cli(cmds); const settings = {};
+      all.forEach((f, i) => { if (!isErr(r[i]) && r[i]) settings[f.k] = f.parse ? f.parse(val(r[i])) : val(r[i]); });
+      let j = all.length; if ($("#bkKey").checked) settings["prv.key"] = val(r[j++]);
+      const data = {format: "umc-backup", version: 1, created: new Date().toISOString(), device: {name: INFO.name, role: INFO.role, board: INFO.board, fw: INFO.ver, umc: INFO.umc},
+        settings, regions: val(r[j++]), wifi_ssids: [val(r[j++]), val(r[j++]), val(r[j++])]};
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
+      a.download = `umc-backup-${(INFO.name || "node").replace(/[^a-z0-9-]+/gi, "_")}-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+      $("#bkMsg").textContent = `Saved ${Object.keys(settings).length} settings`; $("#bkMsg").className = "msg ok";
+    } catch (err) { toast(err.message, "bad"); }
+  };
+  let plan = [];
+  $("#rsFile").onchange = async () => {
+    const f = $("#rsFile").files[0]; if (!f) return;
+    try {
+      const d = JSON.parse(await f.text()); if (d.format !== "umc-backup") throw new Error("Not a UMC backup file");
+      const byKey = new Map(all.map(x => [x.k, x])); plan = [];
+      for (const [k, v] of Object.entries(d.settings || {})) {
+        if (k === "prv.key") { plan.push(`set prv.key ${v}`); continue; }
+        const fld = byKey.get(k); if (fld && v !== "" && v != null) plan.push(setCmd(fld, v));
+      }
+      $("#rsPrev").textContent = plan.join("\n") + (d.regions ? "\n\n# regions (apply manually on the Regions page):\n" + d.regions : "");
+      $("#rsPrev").classList.remove("hidden"); $("#rsGo").classList.remove("hidden");
+    } catch (err) { toast(err.message, "bad"); }
+  };
+  $("#rsGo").onclick = async () => {
+    if (!confirm(`Apply ${plan.length} settings?`)) return;
+    try { const r = await api.cli(plan); const bad = r.filter(isErr).length; $("#rsMsg").textContent = `${plan.length - bad} applied, ${bad} rejected`; $("#rsMsg").className = "msg " + (bad ? "bad" : "ok"); }
+    catch (err) { toast(err.message, "bad"); }
+  };
+}
+
+// ================================================================ setup wizard
+const W = {step: 0, data: {}};
+function wizardSteps() {
+  const s = ["welcome", "radio", "identity", "security", "wifi", "services", "finish"];
+  return s;
+}
+async function showWizard() {
+  $("#wizard").classList.remove("hidden"); $("#app").classList.add("hidden"); $("#login").classList.add("hidden");
+  const r = await api.cli(["get radio", "get tx", "get name", "get lat", "get lon", "get dutycycle", "get wifi.ssid", "get pin", "get mqtt.iata", "get guest.password", "get telnet"]);
+  const [fr, bw, sf, cr] = val(r[0]).split(",").map(Number);
+  const duty = parseFloat(val(r[5])) || 10;
+  const guest = isErr(r[9]) ? "" : val(r[9]);
+  Object.assign(W.data, {fr, bw, sf, cr, tx: +val(r[1]) || 22, name: val(r[2]), lat: val(r[3]), lon: val(r[4]),
+    // UK/EU 869.40–869.65 MHz sub-band is limited to 10 % duty cycle: suggest it (the user can still change it).
+    duty: fr >= 869.4 && fr <= 869.65 && duty > 10 ? 10 : duty,
+    ssid: val(r[6]) === "-" ? "" : val(r[6]), pin: val(r[7]), iata: isErr(r[8]) ? "" : val(r[8]),
+    guest, guest0: guest, telnet: val(r[10]) === "on"});
+  W.data.orig = {name: W.data.name, lat: W.data.lat, lon: W.data.lon, tx: W.data.tx, duty, ssid: W.data.ssid, telnet: W.data.telnet, iata: W.data.iata};
+  const p = presetLoose(fr, bw, sf);
+  W.data.preset = p ? PRESETS.indexOf(p) : "";
+  W.data.preset0 = W.data.preset;
+  renderWizard();
+}
+function renderWizard() {
+  const steps = wizardSteps(), st = steps[W.step], d = W.data;
+  const bar = `<div class="steps">${steps.map((_, i) => `<i class="${i <= W.step ? "on" : ""}"></i>`).join("")}</div>`;
+  const nav = (next = "Next") => `<div class="row" style="margin-top:18px;justify-content:space-between">${W.step ? `<button class="btn" id="wBack">Back</button>` : "<span></span>"}<button class="btn pri" id="wNext">${next}</button></div>`;
+  let h = "";
+  if (st === "welcome") h = `<h1>Welcome</h1><p>Let's set up this <b>${esc(INFO.board)}</b> as a <b>${esc(INFO.role.replace("_", " "))}</b>.</p>
+    <div class="grid"><div class="stat"><b>${esc(INFO.ver)}</b><span>MeshCore</span></div><div class="stat"><b>UMC ${esc(INFO.umc)}</b><span>Ultimate MeshCore</span></div></div>
+    <p>Existing settings (name, radio, identity) are kept and pre-filled. Nothing is saved until the last step.</p>${nav("Start")}`;
+  if (st === "radio") h = `<h1>Region &amp; radio</h1><p>Choose the preset used by your local mesh. Currently: ${d.fr ? d.fr.toFixed(3) : "?"} MHz, ${d.bw} kHz, SF${d.sf}, CR 4/${d.cr}.</p><div class="stack">
+    <div><label>Preset</label><select id="wPreset"><option value="">Keep current settings</option>${PRESETS.map((p, i) => `<option value="${i}" ${d.preset === i ? "selected" : ""}>${esc(p[0])} — ${p[1]} MHz · ${p[2]} kHz · SF${p[3]}${i === d.preset0 ? " (current)" : ""}</option>`).join("")}</select></div>
+    <div><label>TX power (dBm)</label><input type="number" id="wTx" min="1" max="22" value="${d.tx}"></div>
+    <div><label>Duty cycle limit (%)</label><input type="number" id="wDuty" min="1" max="100" value="${d.duty}"><div class="val">UK/EU 869.4–869.65 MHz: 10%.</div></div></div>${nav()}`;
+  if (st === "identity") h = `<h1>Name &amp; location</h1><div class="stack">
+    <div><label>Node name</label><input type="text" id="wName" value="${esc(d.name)}" maxlength="31"></div>
+    <div><label>Location (optional)</label><div class="row"><input type="number" id="wLat" step="any" placeholder="latitude" value="${esc(d.lat)}" style="max-width:160px"><input type="number" id="wLon" step="any" placeholder="longitude" value="${esc(d.lon)}" style="max-width:160px"><button class="btn sm" id="wGeo">Use this phone's location</button></div>
+      <div class="val">Rounded to 3 decimals (~100 m) so your exact address isn't published.</div></div></div>${nav()}`;
+  if (st === "security") h = `<h1>Admin password</h1><p>Protects remote admin over the mesh, this web page and telnet. At least 8 characters.</p><div class="stack">
+    <div><label>New admin password</label><input type="password" id="wPw" autocomplete="new-password" value="${esc(d.pw || "")}"></div>
+    <div><label>Confirm</label><input type="password" id="wPw2" autocomplete="new-password" value="${esc(d.pw || "")}"></div>
+    ${roleOk(RS) ? `<div><label>Guest password (optional)</label><input type="text" id="wGuest" value="${esc(d.guest || "")}"><div class="val">Blank lets anyone view basic stats. Don't reuse other passwords.</div></div>` : ""}
+    <p class="msg bad" id="wErr"></p></div>${nav()}`;
+  if (st === "wifi") h = `<h1>Home WiFi</h1><p>Connect the device to your network so you can manage it from anywhere on the LAN. You can skip this and keep using this hotspot.</p><div class="stack">
+    <div class="row" style="justify-content:space-between"><b>Networks nearby</b><button class="btn sm" id="wScan">Scan</button></div><div class="list" id="wList"><div class="val" style="padding:8px">Press Scan.</div></div>
+    <div><label>Network name (SSID)</label><input type="text" id="wSsid" value="${esc(d.ssid)}"></div>
+    <div><label>WiFi password</label><input type="password" id="wWpw" autocomplete="new-password" value="${esc(d.wpw || "")}"><div class="val">Leave blank for an open network, or to keep a saved password.</div></div></div>${nav()}`;
+  if (st === "services") h = `<h1>Services</h1><div class="stack">
+    <label class="row"><input type="checkbox" id="wTelnet" ${d.telnet ? "checked" : ""}> Telnet command line on port 23</label>
+    ${has("mqtt") ? `<div><label>MQTT location code (IATA)</label><input type="text" id="wIata" value="${esc(d.iata === "UNSET" ? "" : d.iata)}" placeholder="e.g. LBA"><div class="val">Leave blank to keep MQTT off. Brokers can be chosen later on the MQTT page.</div></div>` : ""}
+    <p class="val">The device clock will be set from this ${/Mobi/.test(navigator.userAgent) ? "phone" : "computer"} (${new Date().toUTCString()}).</p></div>${nav()}`;
+  if (st === "finish") h = `<h1>Review</h1><pre id="wPlan"></pre><p class="msg" id="wMsg"></p>${nav("Apply & finish")}`;
+  $("#wiz").innerHTML = bar + h;
+  const g = id => $("#" + id);
+  if (st === "identity") g("wGeo").onclick = () => navigator.geolocation?.getCurrentPosition(p => { g("wLat").value = p.coords.latitude.toFixed(3); g("wLon").value = p.coords.longitude.toFixed(3); }, e => toast(e.message, "bad"));
+  if (st === "wifi") g("wScan").onclick = async () => {
+    g("wList").innerHTML = `<div class="val" style="padding:8px">Scanning… the hotspot may blink briefly.</div>`;
+    let res = await api.scan(true).catch(() => null); for (let i = 0; i < 12 && res === null; i++) { await new Promise(r => setTimeout(r, 1000)); res = await api.scan(false).catch(() => null); }
+    const m = new Map(); (res || []).forEach(n => { if (!m.has(n.ssid) || m.get(n.ssid).rssi < n.rssi) m.set(n.ssid, n); });
+    g("wList").innerHTML = [...m.values()].sort((a, b) => b.rssi - a.rssi).map(n => `<button data-ss="${esc(n.ssid)}"><span>${esc(n.ssid)}</span><span class="val">${n.rssi} dBm · ${esc(n.auth)}</span></button>`).join("") || `<div class="val" style="padding:8px">Nothing found.</div>`;
+    g("wList").onclick = e => { const b = e.target.closest("[data-ss]"); if (b) { g("wSsid").value = b.dataset.ss; g("wWpw").focus(); } };
+  };
+  if (st === "finish") $("#wPlan").textContent = wizardPlan().map(c => c.replace(/^(password|set wifi\.pwd|set guest\.password) .*/, "$1 ••••••")).join("\n");
+  const back = $("#wBack"); if (back) back.onclick = () => { collect(st); W.step--; renderWizard(); };
+  $("#wNext").onclick = async () => {
+    if (!collect(st)) return;
+    if (st === "finish") return applyWizard();
+    W.step++; renderWizard();
+  };
+}
+function collect(st) {
+  const d = W.data, g = id => $("#" + id);
+  if (st === "radio") { d.preset = g("wPreset").value === "" ? "" : +g("wPreset").value; d.tx = +g("wTx").value; d.duty = +g("wDuty").value; }
+  if (st === "identity") { d.name = g("wName").value.trim(); d.lat = g("wLat").value; d.lon = g("wLon").value; }
+  if (st === "security") {
+    const a = g("wPw").value, b = g("wPw2").value;
+    if (a.length < 8) { g("wErr").textContent = "Use at least 8 characters."; return false; }
+    if (a !== b) { g("wErr").textContent = "Passwords don't match."; return false; }
+    if (a === "password") { g("wErr").textContent = "Choose something other than the default."; return false; }
+    d.pw = a; if (g("wGuest")) d.guest = g("wGuest").value;
+  }
+  if (st === "wifi") { d.ssid = g("wSsid").value.trim(); d.wpw = g("wWpw").value; }
+  if (st === "services") { d.telnet = g("wTelnet").checked; if (g("wIata")) d.iata = g("wIata").value.trim().toUpperCase(); }
+  return true;
+}
+function wizardPlan() {
+  const d = W.data, o = d.orig || {}, c = [];
+  // Only send what actually changes, so re-running setup never disturbs working settings.
+  if (d.preset !== "" && d.preset !== d.preset0) { const p = PRESETS[d.preset]; c.push(`set radio ${p[1]},${p[2]},${p[3]},${p[4]}`); }
+  if (d.tx !== o.tx) c.push(`set tx ${d.tx}`);
+  if (d.duty !== o.duty) c.push(`set dutycycle ${d.duty}`);
+  if (d.name && d.name !== o.name) c.push(`set name ${d.name}`);
+  if (d.lat !== "" && d.lon !== "" && (d.lat !== o.lat || d.lon !== o.lon)) c.push(`set lat ${(+d.lat).toFixed(3)}`, `set lon ${(+d.lon).toFixed(3)}`);
+  if (roleOk(RS) && d.guest != null && d.guest !== d.guest0) c.push(`set guest.password ${d.guest}`);
+  if (d.ssid && d.ssid !== o.ssid) c.push(`set wifi.ssid ${d.ssid}`);
+  if (d.ssid && d.wpw) c.push(`set wifi.pwd ${d.wpw}`);
+  if (d.telnet !== o.telnet) c.push(`set telnet ${d.telnet ? "on" : "off"}`);
+  if (has("mqtt") && d.iata && d.iata !== o.iata) c.push(`set mqtt.iata ${d.iata}`);
+  c.push(`time ${Math.floor(Date.now() / 1000)}`);
+  c.push(`password ${d.pw}`);
+  return c;
+}
+async function applyWizard() {
+  const msg = $("#wMsg"); $("#wNext").disabled = true; msg.className = "msg"; msg.textContent = "Applying…";
+  try {
+    const plan = wizardPlan(); const r = await api.cli(plan);
+    const bad = plan.map((c, i) => [c, r[i]]).filter(([, x]) => isErr(x) && !/time/.test(x));
+    if (bad.length) { msg.className = "msg bad"; msg.textContent = "Some settings were rejected: " + bad.map(([c, x]) => `${c.split(" ")[1]}: ${x}`).join("; "); $("#wNext").disabled = false; return; }
+    const lg = await api.login(W.data.pw); TOKEN = lg.token; sessionStorage.setItem("umc_token", TOKEN);
+    const done = await one("setup done");
+    if (isErr(done)) throw new Error(done);
+    INFO = await api.info();
+    const host = INFO.net && INFO.net.hostname;
+    $("#wiz").innerHTML = `<h1>All set 🎉</h1><p>Settings saved. ${W.data.ssid ? `The device is joining <b>${esc(W.data.ssid)}</b>. Once your phone or computer is back on that network, open:` : "Keep using this hotspot, or add WiFi later from the Network page."}</p>
+      ${W.data.ssid ? `<pre>http://${esc(host)}.local/</pre><p class="val">If .local names don't work on your device, use the IP shown on the Network page or the device display.</p>` : ""}
+      <p class="val">Some radio changes may need a reboot to take effect.</p><div class="row"><button class="btn" id="wReboot">Reboot now</button><button class="btn pri" id="wOpen">Open dashboard</button></div>`;
+    $("#wOpen").onclick = () => { $("#wizard").classList.add("hidden"); startApp(); };
+    $("#wReboot").onclick = async () => { await one("reboot").catch(() => {}); toast("Rebooting…"); };
+  } catch (err) { msg.className = "msg bad"; msg.textContent = err.message; $("#wNext").disabled = false; }
+}
+
+// ================================================================ shell
+let current = "dash";
+function buildNav() {
+  $("#navItems").innerHTML = SECTIONS.filter(s => has(s.feature) && roleOk(s.roles)).map(s => `<button data-sec="${s.id}"><span class="ico">${s.ico}</span>${esc(s.title)}</button>`).join("");
+  $("#navItems").onclick = e => { const b = e.target.closest("[data-sec]"); if (b) { go(b.dataset.sec); $("#nav").classList.remove("open"); } };
+}
+async function go(id) {
+  current = id; location.hash = id; clearInterval(dashTimer);
+  document.querySelectorAll("#navItems button").forEach(b => b.classList.toggle("on", b.dataset.sec === id));
+  const sec = SECTIONS.find(s => s.id === id) || SECTIONS[0];
+  $("#title").textContent = sec.title;
+  const old = $("#view"), view = old.cloneNode(false); old.replaceWith(view);  // drop old listeners
+  view.innerHTML = `<p class="val">Loading…</p>`;
+  try {
+    const fn = {dash: renderDash, neigh: renderNeigh, regions: renderRegions, net: renderNet, console: renderConsole, fw: renderFw, backup: renderBackup}[sec.special];
+    if (fn) await fn(view); else await renderSchemaSection(sec, view);
+  } catch (err) { view.innerHTML = `<div class="card"><h2>Couldn't load</h2><p class="msg bad">${esc(err.message)}</p></div>`; }
+}
+function updatePills() {
+  const n = INFO.net || {}, sta = n.sta || {};
+  const p = $("#pillNet"); p.className = "pill " + (sta.connected ? "ok" : n.ap && n.ap.active ? "warn" : "bad");
+  p.textContent = sta.connected ? `WiFi · ${sta.ip}` : n.ap && n.ap.active ? `Hotspot · ${n.ap.ssid}` : "Offline";
+  $("#pillRole").textContent = `${INFO.name} · ${INFO.role}`;
+  $("#navSub").textContent = `${INFO.board} · v${INFO.umc}`;
+  document.title = `${INFO.name} · Ultimate MeshCore`;
+}
+function showLogin() {
+  $("#app").classList.add("hidden"); $("#wizard").classList.add("hidden"); $("#login").classList.remove("hidden");
+  if (INFO) $("#loginInfo").textContent = `${INFO.name} — ${INFO.board} ${INFO.role}. Sign in with the admin password.`;
+  if (INFO && INFO.default_pw) $("#loginMsg").textContent = "Admin password is still the default — change it over USB or re-run setup from the hotspot.";
+  $("#pw").focus();
+}
+async function startApp() {
+  $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
+  buildNav(); updatePills();
+  const id = location.hash.slice(1); await go(SECTIONS.some(s => s.id === id) ? id : "dash");
+  setInterval(async () => { try { INFO = await api.info(); updatePills(); } catch {} }, 30000);
+}
+async function boot() {
+  try { INFO = await api.info(); }
+  catch (err) { document.body.innerHTML = `<div class="panel"><h1>Can't reach the device</h1><p>${esc(err.message)}</p></div>`; return; }
+  if (INFO.setup && !INFO.auth_required) return showWizard();
+  if (INFO.auth_required) return showLogin();
+  startApp();
+}
+$("#loginBtn").onclick = async () => {
+  $("#loginMsg").textContent = "";
+  try { const r = await api.login($("#pw").value); TOKEN = r.token; sessionStorage.setItem("umc_token", TOKEN); $("#pw").value = ""; INFO = await api.info(); startApp(); }
+  catch (err) { $("#loginMsg").textContent = err.message; }
+};
+$("#pw").addEventListener("keydown", e => { if (e.key === "Enter") $("#loginBtn").click(); });
+$("#logoutBtn").onclick = async () => { await api.logout().catch(() => {}); TOKEN = ""; sessionStorage.removeItem("umc_token"); showLogin(); };
+$("#menuBtn").onclick = () => $("#nav").classList.toggle("open");
+boot();
+</script>
+</body>
+</html>

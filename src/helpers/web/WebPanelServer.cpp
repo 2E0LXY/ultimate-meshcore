@@ -3400,6 +3400,11 @@ bool WebPanelServer::start() {
   httpd_register_uri_handler(_server, &firmware_update_uri);
   httpd_register_uri_handler(_server, &stats_uri);
 
+#ifdef UMC_BUILD
+  // Port 80 belongs to the UMC web UI; the classic panel stays HTTPS-only.
+  WEB_PANEL_LOG("server started t=%lu on https://%s/", static_cast<unsigned long>(millis()), WiFi.localIP().toString().c_str());
+  return true;
+#endif
   httpd_config_t redirect_config = HTTPD_DEFAULT_CONFIG();
   redirect_config.server_port = 80;
   // HTTPS already uses the default control port from HTTPD_SSL_CONFIG_DEFAULT().

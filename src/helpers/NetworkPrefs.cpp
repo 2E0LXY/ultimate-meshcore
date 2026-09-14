@@ -9,9 +9,26 @@
 
 namespace {
 
-constexpr const char* kDefaultNtpServer1 = "au.pool.ntp.org";
-constexpr const char* kDefaultNtpServer2 = "time.google.com";
-constexpr const char* kDefaultNtpServer3 = "time.cloudflare.com";
+#ifndef DEFAULT_NTP_SERVER1
+  #ifdef UMC_BUILD
+    #define DEFAULT_NTP_SERVER1 "uk.pool.ntp.org"
+  #else
+    #define DEFAULT_NTP_SERVER1 "au.pool.ntp.org"
+  #endif
+#endif
+#ifndef DEFAULT_NTP_SERVER2
+  #define DEFAULT_NTP_SERVER2 "time.cloudflare.com"
+#endif
+#ifndef DEFAULT_NTP_SERVER3
+  #define DEFAULT_NTP_SERVER3 "time.google.com"
+#endif
+#ifndef UMC_DEFAULT_TIMEZONE
+  #define UMC_DEFAULT_TIMEZONE "GMT0BST,M3.5.0/1,M10.5.0"  // Europe/London
+#endif
+
+constexpr const char* kDefaultNtpServer1 = DEFAULT_NTP_SERVER1;
+constexpr const char* kDefaultNtpServer2 = DEFAULT_NTP_SERVER2;
+constexpr const char* kDefaultNtpServer3 = DEFAULT_NTP_SERVER3;
 
 struct LegacyWebPrefsV1 {
   uint32_t magic;
@@ -124,9 +141,33 @@ void applyNtpDefaults(NetworkPrefs& prefs) {
   if (prefs.ntp_server3[0] == 0) {
     StrHelper::strncpy(prefs.ntp_server3, kDefaultNtpServer3, sizeof(prefs.ntp_server3));
   }
+  // Every load path funnels through here, so UMC fields get initialised on upgrade too.
+  NetworkPrefsStore::applyUmcDefaults(prefs);
 }
 
 }  // namespace
+
+void NetworkPrefsStore::applyUmcDefaults(NetworkPrefs& prefs) {
+  if (prefs.umc_magic == kUmcMagic) {
+    if (prefs.ap_rescue_secs == 0) prefs.ap_rescue_secs = 60;
+    return;
+  }
+  // First boot of UMC on this device (or upgraded from EastMesh/upstream): zero the
+  // appended block but keep any existing primary SSID/password and NTP servers.
+  prefs.umc_magic = kUmcMagic;
+  prefs.wifi_ssid2[0] = prefs.wifi_pwd2[0] = 0;
+  prefs.wifi_ssid3[0] = prefs.wifi_pwd3[0] = 0;
+  prefs.ip_static = 0;
+  prefs.ap_mode = 0;
+  prefs.wifi_mode = 0;
+  prefs.mdns_enabled = 1;
+  prefs.ip_addr = prefs.ip_mask = prefs.ip_gw = prefs.ip_dns = 0;
+  prefs.hostname[0] = 0;
+  prefs.ap_password[0] = 0;
+  StrHelper::strncpy(prefs.timezone, UMC_DEFAULT_TIMEZONE, sizeof(prefs.timezone));
+  prefs.ap_rescue_secs = 60;
+  prefs.reserved_umc = 0;
+}
 
 void NetworkPrefsStore::setDefaults(NetworkPrefs& prefs) {
   memset(&prefs, 0, sizeof(prefs));
@@ -134,6 +175,7 @@ void NetworkPrefsStore::setDefaults(NetworkPrefs& prefs) {
   prefs.wifi_powersave = 0;
   prefs.wifi_channel = 0;
   applyNtpDefaults(prefs);
+  applyUmcDefaults(prefs);
 }
 
 bool NetworkPrefsStore::load(FILESYSTEM* fs, NetworkPrefs& prefs,

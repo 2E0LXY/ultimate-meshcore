@@ -5,6 +5,8 @@
 #include <time.h>
 
 #if defined(ESP_PLATFORM)
+  #include <DNSServer.h>
+  #include <ESPmDNS.h>
   #include <WiFi.h>
   #include <esp_netif.h>
   #include <esp_netif_net_stack.h>
@@ -20,11 +22,15 @@ namespace {
 constexpr unsigned long kWifiRetryMillis = 15000;
 constexpr unsigned long kWifiConnectTimeoutMillis = 45000;
 constexpr unsigned long kWifiChannelHintTimeoutMillis = 7000;
+// While a phone/laptop is attached to the setup/rescue AP, STA retries make the
+// AP hop channels and drop the client, so retry far less often.
+constexpr unsigned long kWifiRetryWithApClientMillis = 120000;
 constexpr unsigned long kWatchdogProbeMillis = 30000;
 constexpr unsigned long kWatchdogTimeoutMillis = 180000;
 constexpr uint8_t kWatchdogMaxBackoffShift = 4;  // 180s .. 48min between forced reconnects
 constexpr time_t kMinSaneEpoch = 1735689600;  // 2025-01-01T00:00:00Z
 constexpr size_t kNtpServerMaxLen = 64;
+constexpr uint16_t kDnsPort = 53;
 
 bool isValidWifiChannel(uint8_t channel) {
   return channel >= 1 && channel <= 14;
@@ -52,12 +58,69 @@ const char* getWifiQualityLabel(int rssi_dbm) {
   }
   return "poor";
 }
+
+const char* authModeLabel(wifi_auth_mode_t mode) {
+  switch (mode) {
+    case WIFI_AUTH_OPEN: return "open";
+    case WIFI_AUTH_WEP: return "wep";
+    case WIFI_AUTH_WPA_PSK: return "wpa";
+    case WIFI_AUTH_WPA2_PSK: return "wpa2";
+    case WIFI_AUTH_WPA_WPA2_PSK: return "wpa/wpa2";
+    case WIFI_AUTH_WPA2_ENTERPRISE: return "enterprise";
+    default: return "wpa3";
+  }
+}
 #endif
+
+// Minimal JSON string escaper for SSIDs / hostnames.
+size_t appendJsonString(char* out, size_t out_size, size_t pos, const char* s) {
+  if (pos + 1 >= out_size) return pos;
+  out[pos++] = '"';
+  for (; s != nullptr && *s && pos + 7 < out_size; s++) {
+    unsigned char c = static_cast<unsigned char>(*s);
+    if (c == '"' || c == '\\') {
+      out[pos++] = '\\';
+      out[pos++] = c;
+    } else if (c < 0x20) {
+      pos += snprintf(&out[pos], out_size - pos, "\\u%04x", c);
+    } else {
+      out[pos++] = c;
+    }
+  }
+  if (pos + 1 < out_size) out[pos++] = '"';
+  out[pos] = 0;
+  return pos;
+}
+
+bool parseIp(const char* s, uint32_t& out) {
+#if defined(ESP_PLATFORM)
+  IPAddress ip;
+  if (s == nullptr || !ip.fromString(s)) return false;
+  out = static_cast<uint32_t>(ip);
+  return true;
+#else
+  (void)s; (void)out;
+  return false;
+#endif
+}
+
+bool isValidHostname(const char* h) {
+  size_t len = strlen(h);
+  if (len == 0 || len > 32) return false;
+  for (size_t i = 0; i < len; i++) {
+    char c = h[i];
+    bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-';
+    if (!ok || (c == '-' && (i == 0 || i == len - 1))) return false;
+  }
+  return true;
+}
 
 }  // namespace
 
 NetworkService::NetworkService()
-    : _fs(nullptr), _prefs{}, _wifi_started(false), _sntp_started(false), _have_time_sync(false), _last_wifi_status(-1), _last_wifi_attempt(0) {
+    : _fs(nullptr), _prefs{}, _wifi_started(false), _sntp_started(false), _have_time_sync(false), _last_wifi_status(-1),
+      _last_wifi_attempt(0), _node_name(nullptr), _default_ap_password(nullptr), _setup_mode(false), _ap_active(false),
+      _ap_ssid{0}, _hostname_buf{0}, _slot(0), _sta_down_since(0), _mdns_active(false), _dns(nullptr) {
 #if defined(ESP_PLATFORM)
   _wd_gateway_seen = false;
   _wd_probe_pending = false;
@@ -77,16 +140,24 @@ void NetworkService::begin(FILESYSTEM* fs,
                            const char* legacy_wifi_pwd) {
   _fs = fs;
   NetworkPrefsStore::load(_fs, _prefs, legacy_wifi_powersave, legacy_wifi_ssid, legacy_wifi_pwd);
+  NetworkPrefsStore::applyUmcDefaults(_prefs);
 #if defined(ESP_PLATFORM)
-  Serial.printf("[BOOT] wifi prefs powersave=%s channel=%u ssid=%s\n",
+  Serial.printf("[BOOT] wifi prefs powersave=%s channel=%u ssid=%s networks=%u ap=%s\n",
                 getPowerSaveLabel(_prefs.wifi_powersave),
                 _prefs.wifi_channel,
-                _prefs.wifi_ssid[0] ? _prefs.wifi_ssid : "-");
+                _prefs.wifi_ssid[0] ? _prefs.wifi_ssid : "-",
+                configuredNetworkCount(),
+                getApModeLabel());
 #endif
 }
 
 void NetworkService::end() {
 #if defined(ESP_PLATFORM)
+  stopAccessPoint();
+  if (_mdns_active) {
+    MDNS.end();
+    _mdns_active = false;
+  }
   if (_wifi_started) {
     WiFi.disconnect(true, true);
     WiFi.mode(WIFI_OFF);
@@ -101,9 +172,17 @@ void NetworkService::end() {
 
 void NetworkService::loop(bool network_required) {
 #if defined(ESP_PLATFORM)
+  if (_prefs.wifi_mode != 0 && !_setup_mode) {
+    network_required = false;
+  }
+  updateAccessPoint(network_required);
   ensureWifi(network_required);
   updateTimeSync();
   updateConnectivityWatchdog();
+  updateMdns();
+  if (_dns != nullptr) {
+    _dns->processNextRequest();
+  }
 #else
   (void)network_required;
 #endif
@@ -114,29 +193,320 @@ bool NetworkService::savePrefs() {
 }
 
 bool NetworkService::setWifiSSID(const char* ssid) {
-  if (ssid == nullptr) {
+  return setWifiSSIDSlot(1, ssid);
+}
+
+bool NetworkService::setWifiPassword(const char* pwd) {
+  return setWifiPasswordSlot(1, pwd);
+}
+
+bool NetworkService::setWifiSSIDSlot(uint8_t slot, const char* ssid) {
+  if (ssid == nullptr || slot < 1 || slot > kMaxNetworks) {
     return false;
   }
-  StrHelper::strncpy(_prefs.wifi_ssid, ssid, sizeof(_prefs.wifi_ssid));
+  char* target = slot == 1 ? _prefs.wifi_ssid : (slot == 2 ? _prefs.wifi_ssid2 : _prefs.wifi_ssid3);
+  StrHelper::strncpy(target, ssid, 33);
 #if defined(ESP_PLATFORM)
   _prefs.wifi_channel = 0;
 #endif
+  bool ok = savePrefs();
+  _slot = slot - 1;
+  reconnectWifi();
+  return ok;
+}
+
+bool NetworkService::setWifiPasswordSlot(uint8_t slot, const char* pwd) {
+  if (pwd == nullptr || slot < 1 || slot > kMaxNetworks) {
+    return false;
+  }
+  char* target = slot == 1 ? _prefs.wifi_pwd : (slot == 2 ? _prefs.wifi_pwd2 : _prefs.wifi_pwd3);
+  StrHelper::strncpy(target, pwd, 65);
+#if defined(ESP_PLATFORM)
+  _prefs.wifi_channel = 0;
+#endif
+  bool ok = savePrefs();
+  _slot = slot - 1;
+  reconnectWifi();
+  return ok;
+}
+
+const char* NetworkService::getWifiSSIDSlot(uint8_t slot) const {
+  switch (slot) {
+    case 1: return _prefs.wifi_ssid;
+    case 2: return _prefs.wifi_ssid2;
+    case 3: return _prefs.wifi_ssid3;
+    default: return "";
+  }
+}
+
+bool NetworkService::hasWifiPasswordSlot(uint8_t slot) const {
+  switch (slot) {
+    case 1: return _prefs.wifi_pwd[0] != 0;
+    case 2: return _prefs.wifi_pwd2[0] != 0;
+    case 3: return _prefs.wifi_pwd3[0] != 0;
+    default: return false;
+  }
+}
+
+bool NetworkService::clearWifiSlot(uint8_t slot) {
+  if (slot < 1 || slot > kMaxNetworks) return false;
+  char* ssid = slot == 1 ? _prefs.wifi_ssid : (slot == 2 ? _prefs.wifi_ssid2 : _prefs.wifi_ssid3);
+  char* pwd = slot == 1 ? _prefs.wifi_pwd : (slot == 2 ? _prefs.wifi_pwd2 : _prefs.wifi_pwd3);
+  memset(ssid, 0, 33);
+  memset(pwd, 0, 65);
+  _prefs.wifi_channel = 0;
+  bool ok = savePrefs();
+  _slot = 0;
+  reconnectWifi();
+  return ok;
+}
+
+uint8_t NetworkService::configuredNetworkCount() const {
+  uint8_t n = 0;
+  for (uint8_t s = 1; s <= kMaxNetworks; s++) {
+    if (getWifiSSIDSlot(s)[0] != 0) n++;
+  }
+  return n;
+}
+
+bool NetworkService::setIpConfig(const char* spec) {
+  if (spec == nullptr) return false;
+  while (*spec == ' ') spec++;
+  if (strcmp(spec, "dhcp") == 0) {
+    _prefs.ip_static = 0;
+  } else {
+    char buf[96];
+    StrHelper::strncpy(buf, spec, sizeof(buf));
+    char* parts[4] = {nullptr, nullptr, nullptr, nullptr};
+    int n = 0;
+    for (char* tok = strtok(buf, " ,/"); tok != nullptr && n < 4; tok = strtok(nullptr, " ,/")) {
+      parts[n++] = tok;
+    }
+    uint32_t ip = 0, mask = 0, gw = 0, dns = 0;
+    if (n < 3 || !parseIp(parts[0], ip) || !parseIp(parts[1], mask) || !parseIp(parts[2], gw)) {
+      return false;
+    }
+    if (n == 4 && !parseIp(parts[3], dns)) return false;
+    if (n < 4) dns = gw;
+    _prefs.ip_static = 1;
+    _prefs.ip_addr = ip;
+    _prefs.ip_mask = mask;
+    _prefs.ip_gw = gw;
+    _prefs.ip_dns = dns;
+  }
   bool ok = savePrefs();
   reconnectWifi();
   return ok;
 }
 
-bool NetworkService::setWifiPassword(const char* pwd) {
-  if (pwd == nullptr) {
-    return false;
-  }
-  StrHelper::strncpy(_prefs.wifi_pwd, pwd, sizeof(_prefs.wifi_pwd));
+void NetworkService::formatIpConfig(char* reply, size_t reply_size) const {
 #if defined(ESP_PLATFORM)
-  _prefs.wifi_channel = 0;
+  if (_prefs.ip_static == 0) {
+    snprintf(reply, reply_size, "> dhcp");
+  } else {
+    snprintf(reply, reply_size, "> %s %s %s %s", IPAddress(_prefs.ip_addr).toString().c_str(),
+             IPAddress(_prefs.ip_mask).toString().c_str(), IPAddress(_prefs.ip_gw).toString().c_str(),
+             IPAddress(_prefs.ip_dns).toString().c_str());
+  }
+#else
+  snprintf(reply, reply_size, "> unsupported");
 #endif
+}
+
+bool NetworkService::setHostname(const char* hostname) {
+  if (hostname == nullptr) return false;
+  while (*hostname == ' ') hostname++;
+  if (hostname[0] != 0 && !isValidHostname(hostname)) return false;
+  StrHelper::strncpy(_prefs.hostname, hostname, sizeof(_prefs.hostname));
   bool ok = savePrefs();
+#if defined(ESP_PLATFORM)
+  if (_mdns_active) {
+    MDNS.end();
+    _mdns_active = false;
+  }
+#endif
   reconnectWifi();
   return ok;
+}
+
+const char* NetworkService::getHostname() const {
+  if (_prefs.hostname[0] != 0) return _prefs.hostname;
+  // derive "umc-<node name>" -> lowercase, [a-z0-9-] only
+  char* out = const_cast<char*>(_hostname_buf);
+  size_t pos = 0;
+  const char* prefix = "umc-";
+  while (*prefix && pos < 32) out[pos++] = *prefix++;
+  const char* name = _node_name != nullptr ? _node_name : "node";
+  bool last_dash = true;
+  for (; *name && pos < 32; name++) {
+    char c = *name;
+    if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+      out[pos++] = c;
+      last_dash = false;
+    } else if (!last_dash) {
+      out[pos++] = '-';
+      last_dash = true;
+    }
+  }
+  while (pos > 4 && out[pos - 1] == '-') pos--;
+  if (pos == 4) {
+    const char* fallback = "node";
+    while (*fallback && pos < 32) out[pos++] = *fallback++;
+  }
+  out[pos] = 0;
+  return _hostname_buf;
+}
+
+bool NetworkService::setMdnsEnabled(bool enabled) {
+  _prefs.mdns_enabled = enabled ? 1 : 0;
+#if defined(ESP_PLATFORM)
+  if (!enabled && _mdns_active) {
+    MDNS.end();
+    _mdns_active = false;
+  }
+#endif
+  return savePrefs();
+}
+
+bool NetworkService::setApMode(const char* mode) {
+  if (mode == nullptr) return false;
+  while (*mode == ' ') mode++;
+  if (strcmp(mode, "auto") == 0) {
+    _prefs.ap_mode = 0;
+  } else if (strcmp(mode, "on") == 0 || strcmp(mode, "always") == 0) {
+    _prefs.ap_mode = 1;
+  } else if (strcmp(mode, "off") == 0 || strcmp(mode, "never") == 0) {
+    _prefs.ap_mode = 2;
+  } else {
+    return false;
+  }
+  return savePrefs();
+}
+
+const char* NetworkService::getApModeLabel() const {
+  switch (_prefs.ap_mode) {
+    case 1: return "on";
+    case 2: return "off";
+    default: return "auto";
+  }
+}
+
+bool NetworkService::setApPassword(const char* pwd) {
+  if (pwd == nullptr) return false;
+  size_t len = strlen(pwd);
+  if (len != 0 && (len < 8 || len > 63)) return false;
+  StrHelper::strncpy(_prefs.ap_password, pwd, sizeof(_prefs.ap_password));
+  bool ok = savePrefs();
+#if defined(ESP_PLATFORM)
+  if (_ap_active) {
+    stopAccessPoint();  // restarted with the new password on the next loop
+  }
+#endif
+  return ok;
+}
+
+bool NetworkService::setApRescueSecs(uint16_t secs) {
+  if (secs < 15 || secs > 3600) return false;
+  _prefs.ap_rescue_secs = secs;
+  return savePrefs();
+}
+
+bool NetworkService::setWifiEnabled(bool enabled) {
+  _prefs.wifi_mode = enabled ? 0 : 1;
+  bool ok = savePrefs();
+  if (!enabled) reconnectWifi();
+  return ok;
+}
+
+bool NetworkService::setTimezone(const char* tz) {
+  if (tz == nullptr || strlen(tz) == 0 || strlen(tz) >= sizeof(_prefs.timezone)) return false;
+  StrHelper::strncpy(_prefs.timezone, tz, sizeof(_prefs.timezone));
+  return savePrefs();
+}
+
+void NetworkService::setSetupMode(bool setup) {
+  _setup_mode = setup;
+}
+
+uint8_t NetworkService::getApClientCount() const {
+#if defined(ESP_PLATFORM)
+  return _ap_active ? WiFi.softAPgetStationNum() : 0;
+#else
+  return 0;
+#endif
+}
+
+String NetworkService::getStaIp() const {
+#if defined(ESP_PLATFORM)
+  if (isWifiConnected()) return WiFi.localIP().toString();
+#endif
+  return String("");
+}
+
+bool NetworkService::startScan() {
+#if defined(ESP_PLATFORM)
+  if (WiFi.getMode() == WIFI_OFF) {
+    WiFi.mode(WIFI_STA);
+    _wifi_started = true;
+  } else if (WiFi.getMode() == WIFI_AP) {
+    WiFi.mode(WIFI_AP_STA);
+  }
+  WiFi.scanDelete();
+  return WiFi.scanNetworks(true, false) == WIFI_SCAN_RUNNING;
+#else
+  return false;
+#endif
+}
+
+void NetworkService::formatScanJson(char* out, size_t out_size) const {
+  if (out_size == 0) return;
+#if defined(ESP_PLATFORM)
+  int n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_RUNNING) {
+    snprintf(out, out_size, "null");
+    return;
+  }
+  size_t pos = 0;
+  pos += snprintf(out, out_size, "[");
+  for (int i = 0; i < n && pos + 96 < out_size; i++) {
+    String ssid = WiFi.SSID(i);
+    if (ssid.length() == 0) continue;
+    if (pos > 1) out[pos++] = ',';
+    pos += snprintf(&out[pos], out_size - pos, "{\"ssid\":");
+    pos = appendJsonString(out, out_size, pos, ssid.c_str());
+    pos += snprintf(&out[pos], out_size - pos, ",\"rssi\":%d,\"ch\":%d,\"auth\":\"%s\"}", WiFi.RSSI(i), WiFi.channel(i),
+                    authModeLabel(WiFi.encryptionType(i)));
+  }
+  if (pos + 2 < out_size) {
+    out[pos++] = ']';
+    out[pos] = 0;
+  }
+#else
+  snprintf(out, out_size, "[]");
+#endif
+}
+
+void NetworkService::formatNetJson(char* out, size_t out_size) const {
+#if defined(ESP_PLATFORM)
+  size_t pos = snprintf(out, out_size, "{\"sta\":{\"connected\":%s,\"ssid\":", isWifiConnected() ? "true" : "false");
+  pos = appendJsonString(out, out_size, pos, isWifiConnected() ? WiFi.SSID().c_str() : "");
+  pos += snprintf(&out[pos], out_size - pos, ",\"ip\":\"%s\",\"gw\":\"%s\",\"rssi\":%d,\"ch\":%d,\"mac\":\"%s\"},",
+                  isWifiConnected() ? WiFi.localIP().toString().c_str() : "",
+                  isWifiConnected() ? WiFi.gatewayIP().toString().c_str() : "", isWifiConnected() ? WiFi.RSSI() : 0,
+                  isWifiConnected() ? WiFi.channel() : 0, WiFi.macAddress().c_str());
+  pos += snprintf(&out[pos], out_size - pos, "\"ap\":{\"active\":%s,\"ssid\":", _ap_active ? "true" : "false");
+  pos = appendJsonString(out, out_size, pos, _ap_active ? _ap_ssid : "");
+  pos += snprintf(&out[pos], out_size - pos, ",\"ip\":\"%s\",\"clients\":%u,\"mode\":\"%s\"},",
+                  _ap_active ? WiFi.softAPIP().toString().c_str() : "", getApClientCount(), getApModeLabel());
+  pos += snprintf(&out[pos], out_size - pos, "\"hostname\":");
+  pos = appendJsonString(out, out_size, pos, getHostname());
+  pos += snprintf(&out[pos], out_size - pos, ",\"mdns\":%s,\"networks\":%u,\"setup\":%s,\"time_sync\":%s,\"wifi\":%s}",
+                  _mdns_active ? "true" : "false", configuredNetworkCount(), _setup_mode ? "true" : "false",
+                  _have_time_sync ? "true" : "false", isWifiEnabled() ? "true" : "false");
+#else
+  snprintf(out, out_size, "{}");
+#endif
 }
 
 bool NetworkService::isValidNtpServer(const char* server) {
@@ -260,7 +630,7 @@ void NetworkService::formatWifiStatusReply(char* reply, size_t reply_size) const
   const char* status = "disconnected";
   const char* state = "disconnected";
   wl_status_t wifi_status = WiFi.status();
-  if (_prefs.wifi_ssid[0] == 0) {
+  if (configuredNetworkCount() == 0) {
     status = "unconfigured";
     state = "unconfigured";
   } else if (wifi_status == WL_CONNECTED) {
@@ -297,16 +667,24 @@ void NetworkService::formatWifiStatusReply(char* reply, size_t reply_size) const
       break;
   }
 
+  char ap_part[64];
+  if (_ap_active) {
+    snprintf(ap_part, sizeof(ap_part), " ap:%s clients:%u", _ap_ssid, getApClientCount());
+  } else {
+    ap_part[0] = 0;
+  }
+
   if (wifi_status == WL_CONNECTED) {
     const int rssi_dbm = WiFi.RSSI();
     snprintf(reply, reply_size,
-             "> ssid:%s status:%s code:%d state:%s ip:%s channel:%d rssi:%d quality:%d%% signal:%s gw:%s wd:%u",
-             _prefs.wifi_ssid, status, static_cast<int>(wifi_status), state, WiFi.localIP().toString().c_str(),
+             "> ssid:%s status:%s code:%d state:%s ip:%s channel:%d rssi:%d quality:%d%% signal:%s gw:%s wd:%u%s",
+             WiFi.SSID().c_str(), status, static_cast<int>(wifi_status), state, WiFi.localIP().toString().c_str(),
              WiFi.channel(), rssi_dbm, getWifiQualityPercent(rssi_dbm), getWifiQualityLabel(rssi_dbm),
-             isGatewayReachable() ? "ok" : "lost", _wd_reconnect_count);
+             isGatewayReachable() ? "ok" : "lost", _wd_reconnect_count, ap_part);
   } else {
-    snprintf(reply, reply_size, "> ssid:%s status:%s code:%d state:%s", _prefs.wifi_ssid[0] ? _prefs.wifi_ssid : "-",
-             status, static_cast<int>(wifi_status), state);
+    const char* trying = slotSsid(_slot);
+    snprintf(reply, reply_size, "> ssid:%s status:%s code:%d state:%s%s", trying[0] ? trying : "-",
+             status, static_cast<int>(wifi_status), state, ap_part);
   }
 #else
   snprintf(reply, reply_size, "> wifi:unsupported");
@@ -316,12 +694,14 @@ void NetworkService::formatWifiStatusReply(char* reply, size_t reply_size) const
 void NetworkService::reconnectWifi() {
 #if defined(ESP_PLATFORM)
   if (_wifi_started) {
-    WiFi.disconnect(true, true);
-    WiFi.mode(WIFI_OFF);
+    WiFi.disconnect(false, true);
+    if (!_ap_active) {
+      WiFi.mode(WIFI_OFF);
+    }
   }
   _wd_was_connected = false;
 #endif
-  _wifi_started = false;
+  _wifi_started = _ap_active;
   _sntp_started = false;
   _have_time_sync = false;
   _last_wifi_attempt = 0;
@@ -388,9 +768,148 @@ const char* NetworkService::getPowerSaveLabel(uint8_t mode) {
   }
 }
 
+const char* NetworkService::slotSsid(uint8_t idx) const {
+  return getWifiSSIDSlot(idx + 1);
+}
+
+const char* NetworkService::slotPwd(uint8_t idx) const {
+  switch (idx) {
+    case 0: return _prefs.wifi_pwd;
+    case 1: return _prefs.wifi_pwd2;
+    case 2: return _prefs.wifi_pwd3;
+    default: return "";
+  }
+}
+
+bool NetworkService::selectNextSlot() {
+  for (uint8_t i = 1; i <= kMaxNetworks; i++) {
+    uint8_t next = (_slot + i) % kMaxNetworks;
+    if (slotSsid(next)[0] != 0) {
+      _slot = next;
+      return true;
+    }
+  }
+  return slotSsid(_slot)[0] != 0;
+}
+
+void NetworkService::applyStaConfig() {
+  WiFi.setHostname(getHostname());
+  if (_prefs.ip_static != 0 && _prefs.ip_addr != 0) {
+    WiFi.config(IPAddress(_prefs.ip_addr), IPAddress(_prefs.ip_gw), IPAddress(_prefs.ip_mask), IPAddress(_prefs.ip_dns));
+  } else {
+    WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
+  }
+}
+
+void NetworkService::startAccessPoint() {
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  if (_setup_mode) {
+    snprintf(_ap_ssid, sizeof(_ap_ssid), "UMC-Setup-%02X%02X", mac[4], mac[5]);
+  } else {
+    char short_name[17];
+    const char* n = _node_name != nullptr ? _node_name : "Node";
+    size_t j = 0;
+    for (; *n && j < sizeof(short_name) - 1; n++) {
+      char c = *n;
+      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') short_name[j++] = c;
+    }
+    short_name[j] = 0;
+    snprintf(_ap_ssid, sizeof(_ap_ssid), "UMC-%s-%02X%02X", short_name[0] ? short_name : "Node", mac[4], mac[5]);
+  }
+
+  const char* pwd = _prefs.ap_password[0] ? _prefs.ap_password
+                                           : (_default_ap_password != nullptr ? _default_ap_password : "");
+  wifi_mode_t mode = WiFi.getMode();
+  if (mode == WIFI_OFF || mode == WIFI_STA) {
+    WiFi.mode(configuredNetworkCount() > 0 && _prefs.wifi_mode == 0 ? WIFI_AP_STA : WIFI_AP);
+  }
+  IPAddress ap_ip(192, 168, 4, 1);
+  WiFi.softAPConfig(ap_ip, ap_ip, IPAddress(255, 255, 255, 0));
+  bool ok = WiFi.softAP(_ap_ssid, strlen(pwd) >= 8 ? pwd : nullptr, 0, 0, 4);
+  if (!ok) {
+    Serial.println("[NET] AP start failed");
+    return;
+  }
+  _ap_active = true;
+  _wifi_started = true;
+  if (_dns == nullptr) {
+    _dns = new DNSServer();
+  }
+  _dns->setErrorReplyCode(DNSReplyCode::NoError);
+  _dns->start(kDnsPort, "*", ap_ip);
+  Serial.printf("[NET] AP up ssid=%s ip=%s secured=%s\n", _ap_ssid, ap_ip.toString().c_str(), strlen(pwd) >= 8 ? "yes" : "no");
+}
+
+void NetworkService::stopAccessPoint() {
+  if (_dns != nullptr) {
+    _dns->stop();
+    delete _dns;
+    _dns = nullptr;
+  }
+  if (_ap_active) {
+    WiFi.softAPdisconnect(true);
+    _ap_active = false;
+    if (WiFi.getMode() == WIFI_AP_STA) {
+      WiFi.mode(WIFI_STA);
+    }
+    Serial.println("[NET] AP down");
+  }
+}
+
+void NetworkService::updateAccessPoint(bool network_required) {
+  bool want_ap = false;
+  const unsigned long now_ms = millis();
+  const bool sta_connected = isWifiConnected();
+
+  if (sta_connected) {
+    _sta_down_since = 0;
+  } else if (_sta_down_since == 0) {
+    _sta_down_since = now_ms == 0 ? 1 : now_ms;
+  }
+
+  if (_setup_mode) {
+    want_ap = true;
+  } else if (_prefs.ap_mode == 2) {
+    want_ap = false;
+  } else if (_prefs.ap_mode == 1) {
+    want_ap = true;
+  } else if (!network_required && _prefs.wifi_mode != 0) {
+    want_ap = false;  // wifi switched off entirely
+  } else if (configuredNetworkCount() == 0) {
+    want_ap = true;
+  } else if (!sta_connected) {
+    want_ap = now_ms - _sta_down_since >= static_cast<unsigned long>(_prefs.ap_rescue_secs) * 1000UL;
+  } else {
+    // Connected: keep the rescue AP only while someone is still using it.
+    want_ap = _ap_active && WiFi.softAPgetStationNum() > 0;
+  }
+
+  if (want_ap && !_ap_active) {
+    startAccessPoint();
+  } else if (!want_ap && _ap_active) {
+    stopAccessPoint();
+  }
+}
+
+void NetworkService::updateMdns() {
+  const bool want = _prefs.mdns_enabled != 0 && (isWifiConnected() || _ap_active);
+  if (want && !_mdns_active) {
+    if (MDNS.begin(getHostname())) {
+      MDNS.addService("http", "tcp", 80);
+      MDNS.addServiceTxt("http", "tcp", "fw", "umc");
+      _mdns_active = true;
+      Serial.printf("[NET] mDNS http://%s.local/\n", getHostname());
+    }
+  } else if (!want && _mdns_active) {
+    MDNS.end();
+    _mdns_active = false;
+  }
+}
+
 void NetworkService::ensureWifi(bool network_required) {
   if (!network_required) {
-    if (_wifi_started) {
+    if (_wifi_started && !_ap_active) {
       WiFi.disconnect(true, true);
       WiFi.mode(WIFI_OFF);
       _wifi_started = false;
@@ -401,9 +920,12 @@ void NetworkService::ensureWifi(bool network_required) {
     return;
   }
 
-  if (_prefs.wifi_ssid[0] == 0) {
-    reconnectWifi();
+  if (configuredNetworkCount() == 0 || _prefs.wifi_mode != 0) {
+    _last_wifi_attempt = 0;
     return;
+  }
+  if (slotSsid(_slot)[0] == 0) {
+    selectNextSlot();
   }
 
   wl_status_t status = WiFi.status();
@@ -411,12 +933,13 @@ void NetworkService::ensureWifi(bool network_required) {
     _last_wifi_status = static_cast<int>(status);
     if (status == WL_CONNECTED) {
       const int connected_channel = WiFi.channel();
-      Serial.printf("[BOOT] wifi connected t=%lu ip=%s rssi=%d channel=%d\n",
+      Serial.printf("[BOOT] wifi connected t=%lu ssid=%s ip=%s rssi=%d channel=%d\n",
                     static_cast<unsigned long>(millis()),
+                    WiFi.SSID().c_str(),
                     WiFi.localIP().toString().c_str(),
                     WiFi.RSSI(),
                     connected_channel);
-      if (connected_channel > 0 && connected_channel <= 14 && _prefs.wifi_channel != connected_channel) {
+      if (_slot == 0 && connected_channel > 0 && connected_channel <= 14 && _prefs.wifi_channel != connected_channel) {
         _prefs.wifi_channel = static_cast<uint8_t>(connected_channel);
         Serial.printf("[BOOT] wifi learned channel=%u save=%s\n",
                       _prefs.wifi_channel,
@@ -430,9 +953,10 @@ void NetworkService::ensureWifi(bool network_required) {
   }
 
   unsigned long now_ms = millis();
-  if (_wifi_started) {
-    if (isValidWifiChannel(_prefs.wifi_channel) &&
-        _last_wifi_attempt != 0 &&
+  const unsigned long retry_ms = (_ap_active && WiFi.softAPgetStationNum() > 0) ? kWifiRetryWithApClientMillis
+                                                                                 : kWifiRetryMillis;
+  if (_wifi_started && _last_wifi_attempt != 0) {
+    if (_slot == 0 && isValidWifiChannel(_prefs.wifi_channel) &&
         now_ms - _last_wifi_attempt >= kWifiChannelHintTimeoutMillis) {
       Serial.printf("[BOOT] wifi channel hint timeout t=%lu channel=%u\n",
                     static_cast<unsigned long>(millis()),
@@ -441,41 +965,47 @@ void NetworkService::ensureWifi(bool network_required) {
       savePrefs();
       WiFi.disconnect(false, false);
       _last_wifi_attempt = 0;
-    }
-    if (_last_wifi_attempt != 0 && now_ms - _last_wifi_attempt < kWifiConnectTimeoutMillis) {
+    } else if (now_ms - _last_wifi_attempt < kWifiConnectTimeoutMillis) {
       return;
-    }
-    if (_last_wifi_attempt != 0) {
-      Serial.printf("[BOOT] wifi timeout t=%lu code=%d retry\n",
-                    static_cast<unsigned long>(millis()),
+    } else {
+      Serial.printf("[BOOT] wifi timeout t=%lu ssid=%s code=%d, trying next\n",
+                    static_cast<unsigned long>(millis()), slotSsid(_slot),
                     static_cast<int>(status));
       WiFi.disconnect(false, false);
-      WiFi.mode(WIFI_OFF);
-      delay(100);
-      _wifi_started = false;
+      if (!_ap_active) {
+        WiFi.mode(WIFI_OFF);
+        delay(100);
+        _wifi_started = false;
+      }
       _sntp_started = false;
       _have_time_sync = false;
       _last_wifi_status = -1;
-    }
-    if (now_ms - _last_wifi_attempt < kWifiRetryMillis) {
-      return;
+      selectNextSlot();
+      if (now_ms - _last_wifi_attempt < retry_ms) {
+        return;
+      }
     }
   }
 
-  if (!_wifi_started) {
-    WiFi.mode(WIFI_STA);
+  if (!_wifi_started || WiFi.getMode() == WIFI_OFF) {
+    WiFi.mode(_ap_active ? WIFI_AP_STA : WIFI_STA);
     WiFi.setSleep(toEspPowerSave(_prefs.wifi_powersave));
     _wifi_started = true;
     Serial.printf("[BOOT] wifi start t=%lu\n", static_cast<unsigned long>(millis()));
+  } else if (_ap_active && WiFi.getMode() == WIFI_AP) {
+    WiFi.mode(WIFI_AP_STA);
   }
 
-  _last_wifi_attempt = now_ms;
-  if (isValidWifiChannel(_prefs.wifi_channel)) {
-    WiFi.begin(_prefs.wifi_ssid, _prefs.wifi_pwd, _prefs.wifi_channel);
-    Serial.printf("[BOOT] wifi begin t=%lu channel=%u\n", static_cast<unsigned long>(millis()), _prefs.wifi_channel);
+  applyStaConfig();
+  _last_wifi_attempt = now_ms == 0 ? 1 : now_ms;
+  const char* ssid = slotSsid(_slot);
+  const char* pwd = slotPwd(_slot);
+  if (_slot == 0 && isValidWifiChannel(_prefs.wifi_channel)) {
+    WiFi.begin(ssid, pwd[0] ? pwd : nullptr, _prefs.wifi_channel);
+    Serial.printf("[BOOT] wifi begin t=%lu ssid=%s channel=%u\n", static_cast<unsigned long>(millis()), ssid, _prefs.wifi_channel);
   } else {
-    WiFi.begin(_prefs.wifi_ssid, _prefs.wifi_pwd);
-    Serial.printf("[BOOT] wifi begin t=%lu channel=scan\n", static_cast<unsigned long>(millis()));
+    WiFi.begin(ssid, pwd[0] ? pwd : nullptr);
+    Serial.printf("[BOOT] wifi begin t=%lu ssid=%s channel=scan\n", static_cast<unsigned long>(millis()), ssid);
   }
 }
 

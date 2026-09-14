@@ -34,6 +34,10 @@
 #endif
 #include <helpers/NetworkService.h>
 #include <helpers/web/WebService.h>
+#ifdef UMC_BUILD
+#include <helpers/umc/UmcService.h>
+#include <helpers/umc/UmcTraffic.h>
+#endif
 
 #include <helpers/AdvertDataHelpers.h>
 #include <helpers/ArchiveStorage.h>
@@ -130,7 +134,11 @@ struct NeighbourInfo {
 
 #define PACKET_LOG_FILE  "/packet_log"
 
-class MyMesh : public mesh::Mesh, public CommonCLICallbacks, public WebPanelCommandRunner {
+class MyMesh : public mesh::Mesh, public CommonCLICallbacks, public WebPanelCommandRunner
+#ifdef UMC_BUILD
+             , public UmcHost
+#endif
+{
   FILESYSTEM* _fs;
   ArchiveStorage* _archive;
   uint32_t last_millis;
@@ -187,6 +195,9 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks, public WebPanelComm
 #endif
 #if defined(ESP_PLATFORM) && WITH_WEB_PANEL
   WebService web;
+#endif
+#ifdef UMC_BUILD
+  UmcService umc;
 #endif
   StatsHistory _stats_history;
   struct {
@@ -328,6 +339,19 @@ public:
   bool formatWebStatsSummaryJson(char* reply, size_t reply_size) override;
   bool formatWebStatsSeriesJson(const char* series, char* reply, size_t reply_size) override;
   void loop();
+
+#ifdef UMC_BUILD
+  // UmcHost
+  void umcCommand(const char* command, char* reply, size_t reply_size) override { runWebCommand(command, reply, reply_size); }
+  const char* umcAdminPassword() const override { return _prefs.password; }
+  const char* umcNodeName() const override { return _prefs.node_name; }
+  const char* umcRole() const override { return FIRMWARE_ROLE; }
+  const char* umcFirmwareVersion() const override { return FIRMWARE_VERSION; }
+  const char* umcBuildDate() const override { return FIRMWARE_BUILD_DATE; }
+  const char* umcBoardName() const override { return board.getManufacturerName(); }
+  void umcPrepareForOta() override;
+  UmcService& getUmc() { return umc; }
+#endif
 
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {

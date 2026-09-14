@@ -5,7 +5,12 @@
 namespace {
 
 bool defaultWebEnabled() {
+#ifdef UMC_BUILD
+  // UMC serves its own HTTP UI; the EastMesh HTTPS panel is opt-in (`set web on`).
+  return false;
+#else
   return true;
+#endif
 }
 
 bool defaultWebStatsEnabled() {

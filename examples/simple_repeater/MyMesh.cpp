@@ -811,6 +811,9 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
 }
 
 void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
+#ifdef UMC_BUILD
+  umc_traffic.add(pkt, len, false, _radio->getLastRSSI(), _radio->getLastSNR());
+#endif
 #ifdef WITH_BRIDGE
   if (_prefs.bridge_pkt_src == 1) {
     bridge.sendPacket(pkt);
@@ -841,6 +844,9 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
 }
 
 void MyMesh::logTx(mesh::Packet *pkt, int len) {
+#ifdef UMC_BUILD
+  umc_traffic.add(pkt, len, true, 0, 0);
+#endif
 #ifdef WITH_BRIDGE
   if (_prefs.bridge_pkt_src == 0) {
     bridge.sendPacket(pkt);
@@ -1351,6 +1357,10 @@ void MyMesh::begin(FILESYSTEM *fs, ArchiveStorage* archive) {
   legacy_wifi_pwd = legacy_mqtt_prefs.legacy_wifi_pwd;
 #endif
   network.begin(_fs, legacy_wifi_powersave, legacy_wifi_ssid, legacy_wifi_pwd);
+#endif
+#ifdef UMC_BUILD
+  board.setInhibitSleep(true);
+  umc.begin(this, &network);
 #endif
 #if defined(ESP_PLATFORM) && WITH_WEB_PANEL
   board.setInhibitSleep(true);
@@ -2203,6 +2213,14 @@ void MyMesh::prepareForOTAStart() {
 #endif
 }
 
+#ifdef UMC_BUILD
+void MyMesh::umcPrepareForOta() {
+#if defined(ESP_PLATFORM) && WITH_WEB_PANEL
+  web.suspendForOTA();  // free the TLS heap held by the classic panel before flashing
+#endif
+}
+#endif
+
 void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply) {
   if (region_load_active) {
     if (StrHelper::isBlank(command)) {  // empty/blank line, signal to terminate 'load' operation
@@ -2245,6 +2263,21 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     reply += 3;
     command += 3;
   }
+
+#ifdef UMC_BUILD
+  if (umc.handleCommand(command, reply, 157)) {
+    return;
+  }
+  if (memcmp(command, "set radio ", 10) == 0) {
+    // UMC: apply radio changes immediately instead of waiting for a reboot.
+    _cli.handleCommand(sender_timestamp, command, reply);
+    if (memcmp(reply, "OK", 2) == 0) {
+      radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+      strcpy(reply, "OK - radio applied");
+    }
+    return;
+  }
+#endif
 
   // handle ACL related commands
   if (memcmp(command, "setperm ", 8) == 0) {   // format:  setperm {pubkey-hex} {permissions-int8}
@@ -3035,9 +3068,15 @@ void MyMesh::loop() {
 #ifdef WITH_MQTT_UPLINK
   network_required = network_required || mqtt.isActive();
 #endif
+#ifdef UMC_BUILD
+  network_required = true;  // UMC web UI / setup AP / telnet need the radio up
+#endif
   network.loop(network_required);
 #if WITH_WEB_PANEL
   web.loop();
+#endif
+#ifdef UMC_BUILD
+  umc.loop();
 #endif
 #endif
 #ifdef WITH_MQTT_UPLINK
@@ -3074,6 +3113,9 @@ bool MyMesh::hasPendingWork() const {
 #endif
 #if defined(ESP_PLATFORM) && WITH_WEB_PANEL
   if (web.isWebEnabled()) return true;
+#endif
+#ifdef UMC_BUILD
+  return true;  // WiFi services keep the MCU awake
 #endif
   return _mgr->getOutboundTotal() > 0;
 }

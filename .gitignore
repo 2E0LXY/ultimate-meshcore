@@ -22,3 +22,7 @@ platformio.local.ini
 src/helpers/mqtt/generated/
 site/
 debug/
+
+# UMC
+.claude/
+src/helpers/umc/generated/

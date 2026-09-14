@@ -1,0 +1,715 @@
+#include "UmcService.h"
+
+#include <helpers/NetworkService.h>
+#include <helpers/TxtDataHelpers.h>
+#include <string.h>
+
+#include "UmcTelnet.h"
+#include "UmcTraffic.h"
+#include "UmcVersion.h"
+
+UmcTraffic umc_traffic;
+#include "UmcWebServer.h"
+
+#if defined(ESP_PLATFORM)
+  #include <Preferences.h>
+  #include <SPIFFS.h>
+  #include <esp_system.h>
+  #include <nvs_flash.h>
+#endif
+
+namespace {
+
+bool startsWith(const char* s, const char* prefix) {
+  return strncmp(s, prefix, strlen(prefix)) == 0;
+}
+
+bool parseOnOff(const char* v, bool& out) {
+  while (*v == ' ') v++;
+  if (strcmp(v, "on") == 0 || strcmp(v, "1") == 0 || strcmp(v, "true") == 0) {
+    out = true;
+    return true;
+  }
+  if (strcmp(v, "off") == 0 || strcmp(v, "0") == 0 || strcmp(v, "false") == 0) {
+    out = false;
+    return true;
+  }
+  return false;
+}
+
+const char* onOff(bool b) { return b ? "on" : "off"; }
+
+void appendFeature(char* out, size_t out_size, size_t& pos, const char* name) {
+  pos += snprintf(&out[pos], out_size > pos ? out_size - pos : 0, "%s\"%s\"", out[pos - 1] == '[' ? "" : ",", name);
+}
+
+}  // namespace
+
+UmcService::UmcService()
+    : _host(nullptr), _network(nullptr), _prefs{}, _web(nullptr), _telnet(nullptr), _reboot_at(0),
+#if defined(ESP_PLATFORM)
+      _mb_lock(nullptr), _mb_done(nullptr),
+#endif
+      _mb_commands(nullptr), _mb_out(nullptr), _mb_out_size(0), _mb_pending(false), _mb_busy(false), _ota_prepare(false) {
+  UmcPrefsStore::setDefaults(_prefs);
+}
+
+void UmcService::begin(UmcHost* host, NetworkService* network) {
+  _host = host;
+  _network = network;
+  UmcPrefsStore::load(_prefs);
+#if defined(ESP_PLATFORM)
+  _mb_lock = xSemaphoreCreateMutex();
+  _mb_done = xSemaphoreCreateBinary();
+#endif
+  if (_network != nullptr) {
+    _network->setNodeName(_host->umcNodeName());
+    _network->setDefaultApPassword(_prefs.pin);
+  }
+  applySetupState();
+
+  _web = new UmcWebServer(*this);
+  _telnet = new UmcTelnet(*this);
+
+  Serial.printf("[UMC] %s v%s (%s, %s) setup=%s pin=%s\n", UMC_NAME, UMC_VERSION, _host->umcRole(),
+                _host->umcFirmwareVersion(), isSetupMode() ? "pending" : "done", _prefs.pin);
+}
+
+void UmcService::applySetupState() {
+  if (_network != nullptr) {
+    _network->setSetupMode(isSetupMode());
+  }
+}
+
+void UmcService::loop() {
+  processMailbox();
+  if (_ota_prepare) {
+    _ota_prepare = false;
+    if (_host != nullptr) _host->umcPrepareForOta();
+  }
+  if (_web != nullptr) {
+    _web->loop(_prefs.http_enabled && _network != nullptr && _network->isNetworkReachable());
+  }
+  if (_telnet != nullptr) {
+    _telnet->loop(_prefs.telnet_enabled && _network != nullptr && _network->isNetworkReachable() &&
+                  !isDefaultAdminPassword());
+  }
+  if (_reboot_at != 0 && millis() >= _reboot_at) {
+    _reboot_at = 0;
+    Serial.println("[UMC] rebooting");
+    if (_host != nullptr) _host->umcBeforeReboot();
+    delay(100);
+#if defined(ESP_PLATFORM)
+    esp_restart();
+#endif
+  }
+}
+
+void UmcService::scheduleReboot(uint32_t delay_ms) {
+  unsigned long at = millis() + delay_ms;
+  _reboot_at = at == 0 ? 1 : at;
+}
+
+void UmcService::notifyOtaStarting() {
+  _ota_prepare = true;  // called from the HTTP task; the host is notified on the loop task
+}
+
+bool UmcService::checkAdminPassword(const char* password) const {
+  if (_host == nullptr || password == nullptr) return false;
+  const char* admin = _host->umcAdminPassword();
+  // constant-time compare
+  size_t la = strlen(admin), lp = strlen(password);
+  uint8_t diff = la != lp;
+  for (size_t i = 0; i < lp; i++) {
+    diff |= static_cast<uint8_t>(password[i] ^ (i < la ? admin[i] : 0));
+  }
+  return diff == 0 && la > 0;
+}
+
+bool UmcService::isDefaultAdminPassword() const {
+  if (_host == nullptr) return true;
+  const char* admin = _host->umcAdminPassword();
+  return admin[0] == 0 || strcmp(admin, "password") == 0;
+}
+
+size_t UmcService::appendJsonEscaped(char* out, size_t out_size, size_t pos, const char* text) {
+  if (pos + 2 >= out_size) return pos;
+  out[pos++] = '"';
+  for (const char* p = text; p != nullptr && *p && pos + 8 < out_size; p++) {
+    unsigned char c = static_cast<unsigned char>(*p);
+    switch (c) {
+      case '"': out[pos++] = '\\'; out[pos++] = '"'; break;
+      case '\\': out[pos++] = '\\'; out[pos++] = '\\'; break;
+      case '\n': out[pos++] = '\\'; out[pos++] = 'n'; break;
+      case '\r': out[pos++] = '\\'; out[pos++] = 'r'; break;
+      case '\t': out[pos++] = '\\'; out[pos++] = 't'; break;
+      default:
+        if (c < 0x20) {
+          pos += snprintf(&out[pos], out_size - pos, "\\u%04x", c);
+        } else {
+          out[pos++] = static_cast<char>(c);
+        }
+    }
+  }
+  out[pos++] = '"';
+  out[pos] = 0;
+  return pos;
+}
+
+void UmcService::formatInfoJson(char* out, size_t out_size) const {
+  size_t pos = snprintf(out, out_size, "{\"fw\":\"%s\",\"umc\":\"%s\",\"api\":%d,\"name\":", UMC_SHORT_NAME, UMC_VERSION,
+                        UMC_API_VERSION);
+  pos = appendJsonEscaped(out, out_size, pos, _host ? _host->umcNodeName() : "");
+  pos += snprintf(&out[pos], out_size - pos, ",\"role\":\"%s\",\"ver\":", _host ? _host->umcRole() : "");
+  pos = appendJsonEscaped(out, out_size, pos, _host ? _host->umcFirmwareVersion() : "");
+  pos += snprintf(&out[pos], out_size - pos, ",\"build\":");
+  pos = appendJsonEscaped(out, out_size, pos, _host ? _host->umcBuildDate() : "");
+  pos += snprintf(&out[pos], out_size - pos, ",\"board\":");
+  pos = appendJsonEscaped(out, out_size, pos, _host ? _host->umcBoardName() : "");
+  pos += snprintf(&out[pos], out_size - pos, ",\"setup\":%s,\"default_pw\":%s,\"features\":[",
+                  isSetupMode() ? "true" : "false", isDefaultAdminPassword() ? "true" : "false");
+  appendFeature(out, out_size, pos, "wifi");
+  appendFeature(out, out_size, pos, "ota");
+  appendFeature(out, out_size, pos, "telnet");
+#ifdef WITH_MQTT_UPLINK
+  appendFeature(out, out_size, pos, "mqtt");
+#endif
+#ifdef WITH_MQTT_BRIDGE
+  appendFeature(out, out_size, pos, "mqtt_bridge");
+#endif
+#ifdef WITH_ESPNOW_BRIDGE
+  appendFeature(out, out_size, pos, "espnow");
+#endif
+#ifdef WITH_RS232_BRIDGE
+  appendFeature(out, out_size, pos, "rs232");
+#endif
+#if defined(WITH_ESPNOW_BRIDGE) || defined(WITH_RS232_BRIDGE) || defined(WITH_MQTT_BRIDGE)
+  appendFeature(out, out_size, pos, "bridge");
+#endif
+#if ENV_INCLUDE_GPS == 1
+  appendFeature(out, out_size, pos, "gps");
+#endif
+#ifdef DISPLAY_CLASS
+  appendFeature(out, out_size, pos, "display");
+#endif
+#if defined(WITH_WEB_PANEL) && WITH_WEB_PANEL
+  appendFeature(out, out_size, pos, "webstats");
+#endif
+#ifdef UMC_WITH_BLE
+  appendFeature(out, out_size, pos, "ble");
+#endif
+#if defined(BOARD_HAS_PSRAM)
+  appendFeature(out, out_size, pos, "psram");
+#endif
+  pos += snprintf(&out[pos], out_size - pos, "],\"net\":");
+  if (_network != nullptr) {
+    char net[640];
+    _network->formatNetJson(net, sizeof(net));
+    pos += snprintf(&out[pos], out_size - pos, "%s", net);
+  } else {
+    pos += snprintf(&out[pos], out_size - pos, "null");
+  }
+  snprintf(&out[pos], out_size - pos, "}");
+}
+
+bool UmcService::runBatch(const char* commands, char* out, size_t out_size, uint32_t timeout_ms) {
+#if defined(ESP_PLATFORM)
+  if (commands == nullptr || out == nullptr || out_size < 16) return false;
+  if (xSemaphoreTake(_mb_lock, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) return false;
+  _mb_commands = commands;
+  _mb_out = out;
+  _mb_out_size = out_size;
+  xSemaphoreTake(_mb_done, 0);  // clear any stale signal
+  _mb_pending = true;
+  bool ok = xSemaphoreTake(_mb_done, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+  if (!ok) {
+    // Loop task may be mid-way through this batch: never return (and let the caller
+    // free its buffers) while it still holds pointers into them.
+    _mb_pending = false;
+    while (_mb_busy) {
+      vTaskDelay(pdMS_TO_TICKS(20));
+    }
+  }
+  _mb_commands = nullptr;
+  _mb_out = nullptr;
+  xSemaphoreGive(_mb_lock);
+  return ok;
+#else
+  (void)commands; (void)out; (void)out_size; (void)timeout_ms;
+  return false;
+#endif
+}
+
+void UmcService::processMailbox() {
+#if defined(ESP_PLATFORM)
+  if (!_mb_pending) return;
+  _mb_busy = true;
+  _mb_pending = false;
+  const char* cmds = _mb_commands;
+  char* out = _mb_out;
+  size_t out_size = _mb_out_size;
+  if (cmds == nullptr || out == nullptr || _host == nullptr) {
+    _mb_busy = false;
+    return;
+  }
+
+  size_t pos = snprintf(out, out_size, "[");
+  char line[kMaxCommandLen];
+  char reply[kMaxReplyLen];
+  const char* p = cmds;
+  int count = 0;
+  while (*p && count < 64) {
+    const char* eol = strchr(p, '\n');
+    size_t len = eol ? static_cast<size_t>(eol - p) : strlen(p);
+    if (len >= sizeof(line)) len = sizeof(line) - 1;
+    memcpy(line, p, len);
+    line[len] = 0;
+    if (len > 0 && line[len - 1] == '\r') line[len - 1] = 0;
+    p = eol ? eol + 1 : p + strlen(p);
+    if (line[0] == 0) continue;
+
+    reply[0] = 0;
+    if (strcmp(line, "reboot") == 0) {
+      // Reply first; rebooting inline would drop the HTTP/telnet response.
+      strcpy(reply, "OK - rebooting");
+      scheduleReboot(1500);
+    } else {
+      _host->umcCommand(line, reply, sizeof(reply));
+    }
+    reply[sizeof(reply) - 1] = 0;
+    if (count > 0 && pos + 1 < out_size) out[pos++] = ',';
+    pos = appendJsonEscaped(out, out_size, pos, reply);
+    count++;
+    if (pos + 16 >= out_size) break;
+  }
+  if (pos + 2 < out_size) {
+    out[pos++] = ']';
+    out[pos] = 0;
+  } else {
+    snprintf(out, out_size, "[\"Err - reply too large\"]");
+  }
+  _mb_busy = false;
+  xSemaphoreGive(_mb_done);
+#endif
+}
+
+bool UmcService::factoryReset() {
+#if defined(ESP_PLATFORM)
+  if (_host != nullptr) _host->umcBeforeReboot();
+  SPIFFS.format();
+  UmcPrefsStore::erase();
+  Preferences nvs;
+  if (nvs.begin("eastmesh-net", false)) {
+    nvs.clear();
+    nvs.end();
+  }
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool UmcService::handleCommand(const char* command, char* reply, size_t reply_size) {
+  if (command == nullptr || reply == nullptr || reply_size == 0) return false;
+  const NetworkService* net_c = _network;
+  NetworkService* net = _network;
+
+  // ---- identity / version ----
+  if (strcmp(command, "get umc.version") == 0 || strcmp(command, "umc") == 0) {
+    snprintf(reply, reply_size, "> %s %s (MeshCore %s, %s)", UMC_NAME, UMC_VERSION,
+             _host ? _host->umcFirmwareVersion() : "?", _host ? _host->umcRole() : "?");
+    return true;
+  }
+
+  // ---- setup mode ----
+  if (strcmp(command, "get setup") == 0) {
+    snprintf(reply, reply_size, "> %s", isSetupMode() ? "pending" : "done");
+    return true;
+  }
+  if (strcmp(command, "setup start") == 0) {
+    _prefs.setup_done = false;
+    UmcPrefsStore::save(_prefs);
+    applySetupState();
+    snprintf(reply, reply_size, "OK - setup mode, join WiFi AP (password = PIN)");
+    return true;
+  }
+  if (strcmp(command, "setup done") == 0) {
+    if (isDefaultAdminPassword() || (_host && strlen(_host->umcAdminPassword()) < 8)) {
+      snprintf(reply, reply_size, "Err - set an admin password (8+ chars) first");
+      return true;
+    }
+    _prefs.setup_done = true;
+    UmcPrefsStore::save(_prefs);
+    applySetupState();
+    snprintf(reply, reply_size, "OK - setup complete");
+    return true;
+  }
+
+  // ---- PIN (AP password + BLE PIN) ----
+  if (strcmp(command, "get pin") == 0) {
+    snprintf(reply, reply_size, "> %s", _prefs.pin);
+    return true;
+  }
+  if (startsWith(command, "set pin ")) {
+    const char* v = command + 8;
+    if (!UmcPrefsStore::isValidPin(v)) {
+      snprintf(reply, reply_size, "Err - PIN must be 8 digits");
+    } else {
+      StrHelper::strncpy(_prefs.pin, v, sizeof(_prefs.pin));
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK - PIN updated (AP restarts with it)");
+    }
+    return true;
+  }
+
+  // ---- services ----
+  if (strcmp(command, "get http") == 0) {
+    snprintf(reply, reply_size, "> %s", onOff(_prefs.http_enabled));
+    return true;
+  }
+  if (startsWith(command, "set http ")) {
+    bool b;
+    if (!parseOnOff(command + 9, b)) {
+      snprintf(reply, reply_size, "Err - use on|off");
+    } else {
+      _prefs.http_enabled = b;
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK");
+    }
+    return true;
+  }
+  if (strcmp(command, "get http.timeout") == 0) {
+    snprintf(reply, reply_size, "> %u", _prefs.session_timeout_min);
+    return true;
+  }
+  if (startsWith(command, "set http.timeout ")) {
+    int v = atoi(command + 17);
+    if (v < 1 || v > 1440) {
+      snprintf(reply, reply_size, "Err - 1..1440 minutes");
+    } else {
+      _prefs.session_timeout_min = static_cast<uint16_t>(v);
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK");
+    }
+    return true;
+  }
+  if (strcmp(command, "get telnet") == 0) {
+    snprintf(reply, reply_size, "> %s", onOff(_prefs.telnet_enabled));
+    return true;
+  }
+  if (startsWith(command, "set telnet ")) {
+    bool b;
+    if (!parseOnOff(command + 11, b)) {
+      snprintf(reply, reply_size, "Err - use on|off");
+    } else {
+      _prefs.telnet_enabled = b;
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, b && isDefaultAdminPassword() ? "OK - starts once admin password is changed" : "OK");
+    }
+    return true;
+  }
+  if (strcmp(command, "get ble") == 0) {
+    snprintf(reply, reply_size, "> %s", onOff(_prefs.ble_enabled));
+    return true;
+  }
+  if (startsWith(command, "set ble ")) {
+    bool b;
+    if (!parseOnOff(command + 8, b)) {
+      snprintf(reply, reply_size, "Err - use on|off");
+    } else {
+      _prefs.ble_enabled = b;
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK - reboot to apply");
+    }
+    return true;
+  }
+  if (strcmp(command, "get ble.idle") == 0) {
+    snprintf(reply, reply_size, "> %u", _prefs.ble_idle_off_min);
+    return true;
+  }
+  if (startsWith(command, "set ble.idle ")) {
+    int v = atoi(command + 13);
+    if (v < 0 || v > 1440) {
+      snprintf(reply, reply_size, "Err - 0..1440 minutes (0 = never)");
+    } else {
+      _prefs.ble_idle_off_min = static_cast<uint16_t>(v);
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK");
+    }
+    return true;
+  }
+
+  // ---- OLED display cycle ----
+  if (strcmp(command, "get display.mode") == 0) {
+    static const char* const modes[] = {"cycle", "status", "off"};
+    snprintf(reply, reply_size, "> %s", modes[_prefs.display_mode <= 2 ? _prefs.display_mode : 0]);
+    return true;
+  }
+  if (startsWith(command, "set display.mode ")) {
+    const char* v = command + 17;
+    int m = strcmp(v, "cycle") == 0 ? 0 : strcmp(v, "status") == 0 ? 1 : strcmp(v, "off") == 0 ? 2 : -1;
+    if (m < 0) {
+      snprintf(reply, reply_size, "Err - use cycle|status|off");
+    } else {
+      _prefs.display_mode = static_cast<uint8_t>(m);
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK");
+    }
+    return true;
+  }
+  struct DisplayNum { const char* key; int min; int max; };
+  static const DisplayNum display_nums[] = {
+      {"display.timeout", 0, 3600}, {"display.ip", 0, 60}, {"display.page", 1, 60}, {"display.traffic", 0, 600}};
+  for (const auto& dn : display_nums) {
+    char get_key[32], set_key[32];
+    snprintf(get_key, sizeof(get_key), "get %s", dn.key);
+    snprintf(set_key, sizeof(set_key), "set %s ", dn.key);
+    bool is_get = strcmp(command, get_key) == 0;
+    bool is_set = startsWith(command, set_key);
+    if (!is_get && !is_set) continue;
+    uint16_t* u16 = nullptr;
+    uint8_t* u8 = nullptr;
+    if (strcmp(dn.key, "display.timeout") == 0) u16 = &_prefs.display_timeout_s;
+    else if (strcmp(dn.key, "display.traffic") == 0) u16 = &_prefs.display_traffic_s;
+    else if (strcmp(dn.key, "display.ip") == 0) u8 = &_prefs.display_ip_s;
+    else u8 = &_prefs.display_page_s;
+    if (is_get) {
+      snprintf(reply, reply_size, "> %u", u16 ? *u16 : *u8);
+    } else {
+      int v = atoi(command + strlen(set_key));
+      if (v < dn.min || v > dn.max) {
+        snprintf(reply, reply_size, "Err - %d..%d seconds", dn.min, dn.max);
+      } else {
+        if (u16) *u16 = static_cast<uint16_t>(v); else *u8 = static_cast<uint8_t>(v);
+        UmcPrefsStore::save(_prefs);
+        snprintf(reply, reply_size, "OK");
+      }
+    }
+    return true;
+  }
+
+  // ---- recent traffic ----
+  if (strcmp(command, "get traffic") == 0) {
+    size_t pos = snprintf(reply, reply_size, "> rx:%lu tx:%lu", static_cast<unsigned long>(umc_traffic.rxTotal()),
+                          static_cast<unsigned long>(umc_traffic.txTotal()));
+    for (int i = 0; i < umc_traffic.count() && pos + 28 < reply_size; i++) {
+      const auto* e = umc_traffic.get(i);
+      char line[32];
+      UmcTraffic::formatShort(*e, line, sizeof(line));
+      pos += snprintf(&reply[pos], reply_size - pos, "\n%lus %s", static_cast<unsigned long>((millis() - e->ms) / 1000), line);
+    }
+    return true;
+  }
+
+  // ---- region presets (lowercase names match the public map / community catalogue) ----
+  if (startsWith(command, "region preset")) {
+    const char* v = command + 13;
+    while (*v == ' ') v++;
+    // Each preset: parent-first list, "name:parent" ("" parent = wildcard root).
+    struct Preset { const char* id; const char* const* steps; };
+    static const char* const yorkshire[] = {"yorkshire:", nullptr};
+    static const char* const northwest[] = {"northwest:", nullptr};
+    static const char* const uk[] = {"uk:", "yorkshire:uk", "northwest:uk", nullptr};
+    static const Preset presets[] = {{"yorkshire", yorkshire}, {"northwest", northwest}, {"uk", uk}};
+    const Preset* chosen = nullptr;
+    for (const auto& p : presets) {
+      if (strcmp(v, p.id) == 0) chosen = &p;
+    }
+    if (chosen == nullptr || _host == nullptr) {
+      snprintf(reply, reply_size, "Err - presets: yorkshire | northwest | uk (then 'region save')");
+      return true;
+    }
+    char cmd[64], r[160];
+    int added = 0;
+    for (const char* const* s = chosen->steps; *s != nullptr; s++) {
+      char name[32];
+      StrHelper::strncpy(name, *s, sizeof(name));
+      char* colon = strchr(name, ':');
+      const char* parent = "";
+      if (colon) {
+        *colon = 0;
+        parent = colon + 1;
+      }
+      snprintf(cmd, sizeof(cmd), parent[0] ? "region put %s %s" : "region put %s", name, parent);
+      r[0] = 0;
+      _host->umcCommand(cmd, r, sizeof(r));
+      snprintf(cmd, sizeof(cmd), "region allowf %s", name);
+      r[0] = 0;
+      _host->umcCommand(cmd, r, sizeof(r));
+      added++;
+    }
+    snprintf(reply, reply_size, "OK - added %d region(s), flood allowed; run 'region save' to keep", added);
+    return true;
+  }
+
+  // ---- factory reset ----
+  if (strcmp(command, "factory reset") == 0) {
+    snprintf(reply, reply_size, "Err - this erases identity & all settings; send 'factory reset confirm'");
+    return true;
+  }
+  if (strcmp(command, "factory reset confirm") == 0) {
+    factoryReset();
+    snprintf(reply, reply_size, "OK - erased, rebooting");
+    scheduleReboot(1500);
+    return true;
+  }
+
+  if (net == nullptr) return false;
+
+  // ---- WiFi networks (slots 1..3; slot 1 also answers to wifi.ssid / wifi.pwd) ----
+  for (uint8_t slot = 2; slot <= NetworkService::kMaxNetworks; slot++) {
+    char key[32];
+    snprintf(key, sizeof(key), "get wifi.ssid%u", slot);
+    if (strcmp(command, key) == 0) {
+      snprintf(reply, reply_size, "> %s", net_c->getWifiSSIDSlot(slot)[0] ? net_c->getWifiSSIDSlot(slot) : "-");
+      return true;
+    }
+    snprintf(key, sizeof(key), "get wifi.pwd%u", slot);
+    if (strcmp(command, key) == 0) {
+      snprintf(reply, reply_size, "> %s", net_c->hasWifiPasswordSlot(slot) ? "set" : "-");
+      return true;
+    }
+    snprintf(key, sizeof(key), "set wifi.ssid%u ", slot);
+    if (startsWith(command, key)) {
+      snprintf(reply, reply_size, net->setWifiSSIDSlot(slot, command + strlen(key)) ? "OK" : "Err - bad ssid");
+      return true;
+    }
+    snprintf(key, sizeof(key), "set wifi.pwd%u ", slot);
+    if (startsWith(command, key)) {
+      snprintf(reply, reply_size, net->setWifiPasswordSlot(slot, command + strlen(key)) ? "OK" : "Err - bad password");
+      return true;
+    }
+  }
+  if (strcmp(command, "get wifi.pwd") == 0) {
+    snprintf(reply, reply_size, "> %s", net_c->hasWifiPasswordSlot(1) ? "set" : "-");
+    return true;
+  }
+  if (strcmp(command, "set wifi.ssid") == 0 || strcmp(command, "set wifi.pwd") == 0) {
+    // allow clearing / open networks with an empty value
+    snprintf(reply, reply_size, (command[9] == 's' ? net->setWifiSSIDSlot(1, "") : net->setWifiPasswordSlot(1, "")) ? "OK" : "Err");
+    return true;
+  }
+  if (startsWith(command, "wifi clear ")) {
+    int slot = atoi(command + 11);
+    snprintf(reply, reply_size, net->clearWifiSlot(static_cast<uint8_t>(slot)) ? "OK" : "Err - slot 1..3");
+    return true;
+  }
+  if (strcmp(command, "get wifi.networks") == 0) {
+    snprintf(reply, reply_size, "> 1:%s 2:%s 3:%s", net_c->getWifiSSIDSlot(1)[0] ? net_c->getWifiSSIDSlot(1) : "-",
+             net_c->getWifiSSIDSlot(2)[0] ? net_c->getWifiSSIDSlot(2) : "-",
+             net_c->getWifiSSIDSlot(3)[0] ? net_c->getWifiSSIDSlot(3) : "-");
+    return true;
+  }
+  if (strcmp(command, "wifi scan") == 0) {
+    snprintf(reply, reply_size, net->startScan() ? "OK - scanning, then: get wifi.scan" : "Err - scan failed");
+    return true;
+  }
+  if (strcmp(command, "get wifi.scan") == 0) {
+    char json[512];
+    net_c->formatScanJson(json, sizeof(json));
+    snprintf(reply, reply_size, "> %s", json);
+    return true;
+  }
+  if (strcmp(command, "get wifi.enabled") == 0) {
+    snprintf(reply, reply_size, "> %s", onOff(net_c->isWifiEnabled()));
+    return true;
+  }
+  if (startsWith(command, "set wifi.enabled ")) {
+    bool b;
+    if (!parseOnOff(command + 17, b)) {
+      snprintf(reply, reply_size, "Err - use on|off");
+    } else {
+      net->setWifiEnabled(b);
+      snprintf(reply, reply_size, "OK");
+    }
+    return true;
+  }
+
+  // ---- IP / hostname / mDNS ----
+  if (strcmp(command, "get net.ip") == 0) {
+    net_c->formatIpConfig(reply, reply_size);
+    return true;
+  }
+  if (startsWith(command, "set net.ip ")) {
+    snprintf(reply, reply_size, net->setIpConfig(command + 11) ? "OK" : "Err - use dhcp | <ip> <mask> <gw> [dns]");
+    return true;
+  }
+  if (strcmp(command, "get net.hostname") == 0) {
+    snprintf(reply, reply_size, "> %s", net_c->getHostname());
+    return true;
+  }
+  if (startsWith(command, "set net.hostname")) {
+    const char* v = command + 16;
+    while (*v == ' ') v++;
+    snprintf(reply, reply_size, net->setHostname(v) ? "OK" : "Err - letters, digits, '-' (max 32)");
+    return true;
+  }
+  if (strcmp(command, "get net.mdns") == 0) {
+    snprintf(reply, reply_size, "> %s", onOff(net_c->isMdnsEnabled()));
+    return true;
+  }
+  if (startsWith(command, "set net.mdns ")) {
+    bool b;
+    if (!parseOnOff(command + 13, b)) {
+      snprintf(reply, reply_size, "Err - use on|off");
+    } else {
+      net->setMdnsEnabled(b);
+      snprintf(reply, reply_size, "OK");
+    }
+    return true;
+  }
+  if (strcmp(command, "get net.status") == 0) {
+    char json[640];
+    net_c->formatNetJson(json, sizeof(json));
+    snprintf(reply, reply_size, "> %s", json);
+    return true;
+  }
+
+  // ---- access point ----
+  if (strcmp(command, "get ap.mode") == 0) {
+    snprintf(reply, reply_size, "> %s", net_c->getApModeLabel());
+    return true;
+  }
+  if (startsWith(command, "set ap.mode ")) {
+    snprintf(reply, reply_size, net->setApMode(command + 12) ? "OK" : "Err - use auto|on|off");
+    return true;
+  }
+  if (strcmp(command, "get ap.password") == 0) {
+    snprintf(reply, reply_size, "> %s", net_c->hasCustomApPassword() ? "set" : "pin");
+    return true;
+  }
+  if (startsWith(command, "set ap.password ")) {
+    const char* v = command + 16;
+    if (strcmp(v, "pin") == 0 || strcmp(v, "default") == 0) v = "";
+    snprintf(reply, reply_size, net->setApPassword(v) ? "OK" : "Err - 8..63 chars, or 'pin'");
+    return true;
+  }
+  if (strcmp(command, "get ap.rescue") == 0) {
+    snprintf(reply, reply_size, "> %u", net_c->getApRescueSecs());
+    return true;
+  }
+  if (startsWith(command, "set ap.rescue ")) {
+    snprintf(reply, reply_size, net->setApRescueSecs(static_cast<uint16_t>(atoi(command + 14))) ? "OK" : "Err - 15..3600 s");
+    return true;
+  }
+  if (strcmp(command, "get ap.status") == 0) {
+    if (net_c->isApActive()) {
+      snprintf(reply, reply_size, "> up ssid:%s ip:192.168.4.1 clients:%u", net_c->getApSsid(), net_c->getApClientCount());
+    } else {
+      snprintf(reply, reply_size, "> down mode:%s", net_c->getApModeLabel());
+    }
+    return true;
+  }
+
+  // ---- time zone (display / web only; mesh time stays UTC) ----
+  if (strcmp(command, "get timezone") == 0) {
+    snprintf(reply, reply_size, "> %s", net_c->getTimezone());
+    return true;
+  }
+  if (startsWith(command, "set timezone ")) {
+    snprintf(reply, reply_size, net->setTimezone(command + 13) ? "OK" : "Err - POSIX TZ string");
+    return true;
+  }
+
+  return false;
+}

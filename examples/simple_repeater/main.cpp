@@ -117,6 +117,9 @@ void setup() {
   the_mesh.begin(fs, &archive);
 
 #ifdef DISPLAY_CLASS
+#ifdef UMC_BUILD
+  ui_task.setUmc(&the_mesh.getUmc());
+#endif
   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
 #endif
 
