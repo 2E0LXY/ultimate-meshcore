@@ -24,5 +24,4 @@ site/
 debug/
 
 # UMC
-.claude/
 src/helpers/umc/generated/
