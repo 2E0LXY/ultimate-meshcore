@@ -29,7 +29,7 @@
     if (c === "stats-packets") return JSON.stringify({recv: 1204, sent: 377, flood_tx: 201, direct_tx: 176, flood_rx: 950, direct_rx: 254, recv_errors: 3});
     if (c === "memory") return JSON.stringify({heap_free: 128400, heap_min: 98112, heap_max: 65524, psram_free: 0, psram_min: 0, psram_max: 0});
     if (c === "neighbors") return "A1B2C3D4:" + (Math.floor(Date.now() / 1000) - 340) + ":24\n9F00AB12:" + (Math.floor(Date.now() / 1000) - 5400) + ":-18";
-    if (c === "region") return "* F\n  Yorkshire^ F\n    Sheffield F\n    Wakefield F";
+    if (c === "region") return "* F\n Yorkshire^ F\n Sheffield F\n Wakefield F\n uk F\n  yorkshire F\n  northwest F";
     if (c === "get wifi.status") return "> ssid:HomeNet status:connected code:3 state:connected ip:192.168.1.77 channel:6 rssi:-58 quality:84% signal:excellent gw:ok wd:0";
     if (c === "get ap.status") return "> down mode:auto";
     if (c === "get net.status") return "> " + JSON.stringify(info().net);
