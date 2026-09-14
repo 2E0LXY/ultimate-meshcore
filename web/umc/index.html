@@ -435,7 +435,7 @@ async function renderDash(view) {
     if (has("mqtt")) cmds.push("get mqtt.status");
     const r = await api.cli(cmds); const g = i => r[i] || "";
     const core = parseJson(g(3)) || {}, radio = parseJson(g(4)) || {}, pk = parseJson(g(5)) || {}, net = parseJson(g(8)) || {};
-    $("#dName").textContent = val(g(0)); $("#dSub").textContent = `${INFO.board} · ${INFO.role} · ${val(g(1))} · UMC ${INFO.umc}`;
+    $("#dName").textContent = val(g(0)); $("#dSub").textContent = `${INFO.board} · ${INFO.role} · Ultimate MeshCore ${INFO.umc}`;
     const batt = core.battery_mv ? (core.battery_mv / 1000).toFixed(2) + " V" : "—";
     let neigh = "—"; if (roleOk(RS)) { const t = val(g(11)); neigh = t === "-none-" || !t ? "0" : String(t.split("\n").filter(Boolean).length); }
     $("#dStats").innerHTML = stat(fmtUp(core.uptime_secs), "Uptime") + stat(batt, "Battery") + stat(val(g(2)), "Clock (UTC)") +
@@ -607,8 +607,9 @@ async function renderConsole(view) {
 async function renderFw(view) {
   const r = await api.cli(["ver", "get umc.version", "board", "clock"]);
   view.innerHTML = `<div class="card"><h2>Firmware</h2><div class="grid">
-      <div class="stat"><b>${esc(val(r[0]))}</b><span>MeshCore</span></div><div class="stat"><b>${esc(INFO.umc)}</b><span>Ultimate MeshCore</span></div>
-      <div class="stat"><b>${esc(val(r[2]))}</b><span>Board</span></div><div class="stat"><b>${esc(INFO.role)}</b><span>Role</span></div></div></div>
+      <div class="stat"><b>${esc(INFO.umc)}</b><span>Ultimate MeshCore version</span></div>
+      <div class="stat"><b>${esc(val(r[2]))}</b><span>Board</span></div><div class="stat"><b>${esc(INFO.role)}</b><span>Role</span></div></div>
+      <p class="val" style="margin-top:8px">Built on MeshCore ${esc(val(r[0]).split(" ")[0])} — shown here only for compatibility checks with apps.</p></div>
     <div class="card"><h2>Update firmware</h2><p class="sub">Choose the <b>non-merged</b> <code>.bin</code> for this board and role. The device keeps its identity and settings, and falls back to the previous version if the new one fails to boot.</p>
       <div class="row"><input type="file" id="fwFile" accept=".bin"><button class="btn pri" id="fwGo" disabled>Upload &amp; install</button></div>
       <div class="warnbox hidden" id="fwWarn"></div>
@@ -736,7 +737,7 @@ function renderWizard() {
   const nav = (next = "Next") => `<div class="row" style="margin-top:18px;justify-content:space-between">${W.step ? `<button class="btn" id="wBack">Back</button>` : "<span></span>"}<button class="btn pri" id="wNext">${next}</button></div>`;
   let h = "";
   if (st === "welcome") h = `<h1>Welcome</h1><p>Let's set up this <b>${esc(INFO.board)}</b> as a <b>${esc(INFO.role.replace("_", " "))}</b>.</p>
-    <div class="grid"><div class="stat"><b>${esc(INFO.ver)}</b><span>MeshCore</span></div><div class="stat"><b>UMC ${esc(INFO.umc)}</b><span>Ultimate MeshCore</span></div></div>
+    <div class="stat"><b>Ultimate MeshCore ${esc(INFO.umc)}</b></div>
     <p>Existing settings (name, radio, identity) are kept and pre-filled. Nothing is saved until the last step.</p>${nav("Start")}`;
   if (st === "radio") h = `<h1>Region &amp; radio</h1><p>Choose the preset used by your local mesh. Currently: ${d.fr ? d.fr.toFixed(3) : "?"} MHz, ${d.bw} kHz, SF${d.sf}, CR 4/${d.cr}.</p><div class="stack">
     <div><label>Preset</label><select id="wPreset"><option value="">Keep current settings</option>${PRESETS.map((p, i) => `<option value="${i}" ${d.preset === i ? "selected" : ""}>${esc(p[0])} — ${p[1]} MHz · ${p[2]} kHz · SF${p[3]}${i === d.preset0 ? " (current)" : ""}</option>`).join("")}</select></div>

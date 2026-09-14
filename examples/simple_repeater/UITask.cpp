@@ -87,7 +87,8 @@ void UITask::renderIpPage(bool flash_on) {
   if (net != nullptr && net->isApActive() && (_umc->isSetupMode() || !net->isWifiConnected())) {
     _display->print(_umc->isSetupMode() ? "SETUP: join WiFi" : "RESCUE: join WiFi");
     _display->drawTextEllipsized(0, 24, _display->width(), net->getApSsid());
-    snprintf(tmp, sizeof(tmp), "PIN %s", _umc->getPin());
+    if (_umc->isSetupMode()) snprintf(tmp, sizeof(tmp), "Open - no password");
+    else snprintf(tmp, sizeof(tmp), "PIN %s", _umc->getPin());
     _display->setCursor(0, 34);
     _display->print(tmp);
     strcpy(tmp, "192.168.4.1");

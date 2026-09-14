@@ -14,7 +14,7 @@ It combines upstream MeshCore with the best features of the community forks and 
 ## What UMC adds (so far)
 
 - **Web interface for every setting** (`http://<device>/` or `http://umc-<name>.local/`): dashboard, radio (with regional presets), mesh & routing, identity & passwords, regions (with UK presets), network, MQTT, bridge, power & display, neighbours, console, firmware update, backup & restore.
-- **First-time setup wizard** on a WPA2 hotspot `UMC-Setup-XXXX` (password = 8-digit PIN shown on the display and serial console), with captive portal.
+- **First-time setup wizard** on an open hotspot `UMC-Setup-XXXX` (no password), with captive portal. The rescue hotspot of a configured device is WPA2 (8-digit PIN on the display).
 - **WiFi**: up to 3 saved networks, static IP, hostname + mDNS, automatic rescue hotspot when the home network is unreachable, network scan.
 - **Firmware update over WiFi** from the browser (validates the image; rejects merged/wrong-chip files). Identity and settings are kept.
 - **Telnet CLI** (password protected, off by default).

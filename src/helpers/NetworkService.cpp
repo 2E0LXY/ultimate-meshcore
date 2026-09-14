@@ -818,8 +818,11 @@ void NetworkService::startAccessPoint() {
     snprintf(_ap_ssid, sizeof(_ap_ssid), "UMC-%s-%02X%02X", short_name[0] ? short_name : "Node", mac[4], mac[5]);
   }
 
-  const char* pwd = _prefs.ap_password[0] ? _prefs.ap_password
-                                           : (_default_ap_password != nullptr ? _default_ap_password : "");
+  // First-time setup hotspot is open (no password) so anyone setting up the device can just join it.
+  // The rescue / always-on AP of an already configured device stays WPA2 (custom password or PIN).
+  const char* pwd = _setup_mode ? ""
+                  : _prefs.ap_password[0] ? _prefs.ap_password
+                  : (_default_ap_password != nullptr ? _default_ap_password : "");
   wifi_mode_t mode = WiFi.getMode();
   if (mode == WIFI_OFF || mode == WIFI_STA) {
     WiFi.mode(configuredNetworkCount() > 0 && _prefs.wifi_mode == 0 ? WIFI_AP_STA : WIFI_AP);
