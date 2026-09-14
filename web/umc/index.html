@@ -122,6 +122,7 @@ const api = {
   login: pw => http("POST", "/api/login", pw),
   logout: () => http("POST", "/api/logout", ""),
   scan: refresh => http("GET", "/api/scan" + (refresh ? "?refresh=1" : "")),
+  routes: () => http("GET", "/api/routes"),
   // CLI batches are serialised: one request in flight at a time keeps the device's socket pool free.
   cli: cmds => {
     const run = async () => {
@@ -294,6 +295,7 @@ const SECTIONS = [
     {title: "Hardware", fields: [F("__board", "Board", {type: "readonly", get: "board"}), F("pwrmgt.bootreason", "Boot reason", {type: "readonly"})]},
   ], actions: [["Set GPS as location", "gps setloc"], ["Sync clock from GPS", "gps sync"]]},
   {id: "neigh", title: "Neighbours", ico: "👥", special: "neigh", roles: RS},
+  {id: "routes", title: "Routes & trace", ico: "🧭", special: "routes", roles: RS},
   {id: "console", title: "Console", ico: "⌨", special: "console"},
   {id: "fw", title: "Firmware & maintenance", ico: "⚙", special: "fw"},
   {id: "backup", title: "Backup & restore", ico: "💾", special: "backup"},
@@ -533,11 +535,12 @@ async function renderNeigh(view) {
     <div class="row" style="margin-bottom:10px"><button class="btn" id="nRef">Refresh</button><button class="btn" id="nDisc">Discover neighbours</button></div>
     <table><thead><tr><th>Key prefix</th><th>Heard</th><th>SNR</th><th></th></tr></thead><tbody id="nBody"></tbody></table></div>`;
   const load = async () => {
-    const [nb, clk] = await api.cli(["neighbors", "clock"]);
-    const t = val(nb); const now = Math.floor(Date.now() / 1000);
+    // `neighbors` lines are "<key prefix>:<seconds since heard>:<SNR x 4>"
+    const t = val(await one("neighbors"));
     const rows = t === "-none-" || !t ? [] : t.split("\n").filter(Boolean).map(l => l.split(":"));
-    $("#nBody").innerHTML = rows.length ? rows.map(([k, ts, snr]) => {
-      const age = now - (+ts || now); const a = age < 120 ? age + " s" : age < 7200 ? Math.round(age / 60) + " min" : Math.round(age / 3600) + " h";
+    $("#nBody").innerHTML = rows.length ? rows.map(([k, secs, snr]) => {
+      const age = Math.max(0, +secs || 0);
+      const a = age < 120 ? age + " s" : age < 7200 ? Math.round(age / 60) + " min" : age < 172800 ? Math.round(age / 3600) + " h" : Math.round(age / 86400) + " days";
       return `<tr><td><code>${esc(k)}</code></td><td>${esc(a)} ago</td><td>${(+snr / 4).toFixed(1)}</td><td><button class="btn sm" data-rm="${esc(k)}">Forget</button></td></tr>`;
     }).join("") : `<tr><td colspan="4" class="val">No neighbours heard yet.</td></tr>`;
   };
@@ -550,6 +553,79 @@ async function renderNeigh(view) {
     } catch (err) { toast(err.message, "bad"); }
   });
   await load();
+}
+
+async function renderRoutes(view) {
+  view.innerHTML = `<div class="card"><h2>Routes</h2><p class="sub">Every node this repeater has heard an advert from, and the chain of repeaters that advert came through. Reverse it for the route <i>to</i> that node. Hops are shown by their key prefix, with the repeater's name when known.</p>
+      <div class="row" style="margin-bottom:10px"><input type="text" id="rtFind" placeholder="Find by name or key…" style="max-width:260px"><button class="btn" id="rtRef">Refresh</button><span class="val" id="rtCount"></span></div>
+      <div style="overflow-x:auto"><table><thead><tr><th>Node</th><th>Route to node</th><th>Hops</th><th>Heard</th><th>SNR</th><th></th></tr></thead><tbody id="rtBody"></tbody></table></div></div>
+    <div class="card"><h2>Trace</h2><p class="sub">Sends a trace packet out and back along a route. Every repeater on the way reports the signal quality (SNR) it received. <b>Trace</b> on a row uses that node's pinned route, or the learned one.</p>
+      <div class="row"><input type="text" id="trPath" placeholder="custom path, e.g. a1,b2,a1" style="max-width:260px"><button class="btn" id="trGo">Trace custom path</button></div>
+      <div id="trOut" style="margin-top:12px"></div></div>`;
+  let routes = [];
+  const nameFor = hex => { const r = routes.find(x => x.key.startsWith(hex.toLowerCase())); return r && r.name ? r.name : ""; };
+  const hopLabel = hex => { const n = nameFor(hex); return `<code>${esc(hex)}</code>${n ? ` <span class="val">${esc(n)}</span>` : ""}`; };
+  const ago = s => s < 120 ? s + " s" : s < 7200 ? Math.round(s / 60) + " min" : s < 172800 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " days";
+  const render = () => {
+    const q = $("#rtFind").value.trim().toLowerCase();
+    const list = routes.filter(r => !q || r.name.toLowerCase().includes(q) || r.key.startsWith(q)).sort((a, b) => a.ago - b.ago);
+    $("#rtCount").textContent = `${list.length} of ${routes.length} node(s)`;
+    $("#rtBody").innerHTML = list.map(r => {
+      const hops = r.path ? r.path.split(",").reverse() : [];
+      const chain = hops.length ? `this repeater → ${hops.map(hopLabel).join(" → ")} → node` : `<span class="val">direct (heard without repeaters)</span>`;
+      return `<tr><td><b>${esc(r.name || "?")}</b> <span class="pill">${esc(r.type)}</span><br><code class="val">${esc(r.key)}</code></td>
+        <td>${chain}${r.pin ? `<br><span class="pill ok">pinned trace: ${esc(r.pin)}</span>` : ""}</td>
+        <td>${r.hops}</td><td>${ago(r.ago)} ago</td><td>${(+r.snr).toFixed(1)}</td>
+        <td class="row" style="justify-content:flex-end"><button class="btn sm" data-trace="${esc(r.key)}">Trace</button><button class="btn sm" data-pin="${esc(r.key)}">${r.pin ? "Edit route" : "Add route"}</button>${r.pin ? `<button class="btn sm" data-unpin="${esc(r.key)}">Unpin</button>` : ""}<button class="btn sm danger" data-forget="${esc(r.key)}">Forget</button></td></tr>`;
+    }).join("") || `<tr><td colspan="6" class="val">No nodes heard yet. Adverts arrive over time; press <b>Send flood advert</b> on the dashboard to prompt replies.</td></tr>`;
+  };
+  const load = async () => { routes = (await api.routes()).routes || []; render(); };
+  let poll = null;
+  const showTrace = async () => {
+    const s = val(await one("get trace"));
+    const out = $("#trOut");
+    if (s.startsWith("waiting")) { out.innerHTML = `<p class="val">Waiting for the trace to come back… (${esc(s.split(" ")[1])})</p>`; return false; }
+    if (s.startsWith("timeout")) { out.innerHTML = `<p class="msg bad">No answer within 30 s — a repeater on the path didn't hear or forward it. Path: ${esc((s.match(/path:(\S+)/) || [])[1] || "")}</p>`; return true; }
+    if (s.startsWith("done")) {
+      const path = ((s.match(/path:(\S+)/) || [])[1] || "").split(",").filter(Boolean);
+      const snr = ((s.match(/snr:(\S+)/) || [])[1] || "").split(",").map(Number);
+      const fin = +((s.match(/final:(-?[\d.]+)/) || [])[1]);
+      const secs = (s.match(/done ([\d.]+)s/) || [])[1];
+      const bar = v => `<span style="display:inline-block;height:8px;width:${Math.max(4, Math.min(100, (v + 20) * 3))}px;background:${v >= 5 ? "var(--ok)" : v >= -5 ? "var(--warn)" : "var(--bad)"};border-radius:4px;vertical-align:middle"></span>`;
+      out.innerHTML = `<p class="msg ok">Trace completed in ${esc(secs)} s</p><table><thead><tr><th>#</th><th>Heard by</th><th>SNR</th></tr></thead><tbody>
+        ${path.map((h, i) => `<tr><td>${i + 1}</td><td>${hopLabel(h)}</td><td>${isNaN(snr[i]) ? "—" : snr[i].toFixed(1) + " dB " + bar(snr[i])}</td></tr>`).join("")}
+        <tr><td>↩</td><td>back at this repeater</td><td>${isNaN(fin) ? "—" : fin.toFixed(1) + " dB " + bar(fin)}</td></tr></tbody></table>`;
+      return true;
+    }
+    out.innerHTML = ""; return true;
+  };
+  const startTrace = async cmd => {
+    const r = await one(cmd); toast(r, isErr(r) ? "bad" : "ok"); if (isErr(r)) return;
+    clearInterval(poll); let n = 0;
+    poll = setInterval(async () => { n++; const fin = await showTrace().catch(() => true); if (fin || n > 35) clearInterval(poll); }, 1000);
+  };
+  window.addEventListener("hashchange", () => clearInterval(poll), {once: true});
+  $("#rtFind").addEventListener("input", render);
+  view.addEventListener("click", async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    try {
+      if (b.id === "rtRef") return load();
+      if (b.id === "trGo") { const p = $("#trPath").value.trim(); if (!p) return toast("Enter hop key prefixes, e.g. a1,b2,a1", "bad"); return startTrace(`trace ${p}`); }
+      if (b.dataset.trace) return startTrace(`trace route ${b.dataset.trace}`);
+      if (b.dataset.pin) {
+        const r = routes.find(x => x.key === b.dataset.pin);
+        const learned = r && r.path ? r.path.split(",").map(h => h.slice(0, 2)) : [];
+        const suggestion = r && r.pin ? r.pin : [...learned.slice().reverse(), ...(r && r.type === "repeater" ? [r.key.slice(0, 2)] : []), ...learned].join(",");
+        const p = prompt(`Route used when tracing ${r ? r.name || r.key : ""}.\nEnter the full out-and-back list of repeater key prefixes (2 hex digits each), e.g. a1,b2,a1:`, suggestion);
+        if (p == null) return;
+        const x = await one(`route pin ${b.dataset.pin} ${p}`); toast(x, isErr(x) ? "bad" : "ok"); return load();
+      }
+      if (b.dataset.unpin) { toast(await one(`route unpin ${b.dataset.unpin}`)); return load(); }
+      if (b.dataset.forget) { if (!confirm("Forget this node's route?")) return; toast(await one(`route forget ${b.dataset.forget}`)); return load(); }
+    } catch (err) { toast(err.message, "bad"); }
+  });
+  await load();
+  showTrace().catch(() => {});
 }
 
 async function renderRegions(view) {
@@ -981,7 +1057,7 @@ async function go(id) {
   const old = $("#view"), view = old.cloneNode(false); old.replaceWith(view);  // drop old listeners
   view.innerHTML = `<p class="val">Loading…</p>`;
   try {
-    const fn = {dash: renderDash, neigh: renderNeigh, regions: renderRegions, net: renderNet, console: renderConsole, fw: renderFw, backup: renderBackup}[sec.special];
+    const fn = {dash: renderDash, neigh: renderNeigh, routes: renderRoutes, regions: renderRegions, net: renderNet, console: renderConsole, fw: renderFw, backup: renderBackup}[sec.special];
     if (fn) await fn(view); else await renderSchemaSection(sec, view);
   } catch (err) { view.innerHTML = `<div class="card"><h2>Couldn't load</h2><p class="msg bad">${esc(err.message)}</p></div>`; }
 }

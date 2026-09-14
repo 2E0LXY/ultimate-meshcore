@@ -37,6 +37,7 @@
 #ifdef UMC_BUILD
 #include <helpers/umc/UmcService.h>
 #include <helpers/umc/UmcTraffic.h>
+#include <helpers/umc/UmcRoutes.h>
 #endif
 
 #include <helpers/AdvertDataHelpers.h>
@@ -351,6 +352,8 @@ public:
   const char* umcBoardName() const override { return board.getManufacturerName(); }
   void umcPrepareForOta() override;
   UmcService& getUmc() { return umc; }
+  void onTraceRecv(mesh::Packet* packet, uint32_t tag, uint32_t auth_code, uint8_t flags, const uint8_t* path_snrs,
+                   const uint8_t* path_hashes, uint8_t path_len) override;
 #endif
 
 #if defined(WITH_BRIDGE)

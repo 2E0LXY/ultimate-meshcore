@@ -99,6 +99,7 @@ bool UmcWebServer::start() {
       {.uri = "/api/logout", .method = HTTP_POST, .handler = handleLogout, .user_ctx = this},
       {.uri = "/api/cli", .method = HTTP_POST, .handler = handleCli, .user_ctx = this},
       {.uri = "/api/scan", .method = HTTP_GET, .handler = handleScan, .user_ctx = this},
+      {.uri = "/api/routes", .method = HTTP_GET, .handler = handleRoutes, .user_ctx = this},
       {.uri = "/api/ota", .method = HTTP_POST, .handler = handleOta, .user_ctx = this},
       {.uri = "/generate_204", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
       {.uri = "/gen_204", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
@@ -298,6 +299,19 @@ esp_err_t UmcWebServer::handleScan(httpd_req_t* req) {
   char* buf = static_cast<char*>(malloc(3072));
   if (buf == nullptr) return httpd_resp_send_500(req);
   net->formatScanJson(buf, 3072);
+  esp_err_t rc = sendJson(req, buf);
+  free(buf);
+  return rc;
+}
+
+esp_err_t UmcWebServer::handleRoutes(httpd_req_t* req) {
+  auto* s = self(req);
+  setCommonHeaders(req);
+  if (!s->isAuthorized(req)) return sendJson(req, "{\"error\":\"Unauthorized\"}", "401 Unauthorized");
+  constexpr size_t kMax = 16384;
+  char* buf = static_cast<char*>(malloc(kMax));
+  if (buf == nullptr) return httpd_resp_send_500(req);
+  s->_umc.formatRoutesJson(buf, kMax);
   esp_err_t rc = sendJson(req, buf);
   free(buf);
   return rc;

@@ -5,7 +5,7 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 
 [**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest build**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest)
 
-> **Status: 0.1.0 (early).** The Heltec V3 / V3.2 **repeater** is available and running on hardware. Heltec V4 (OLED/TFT/R8), client (companion) and room-server builds, Bluetooth and the T-TWR are in progress — see the [roadmap](docs/umc/ROADMAP.md).
+> **Status: 0.1.0 (early).** The Heltec V3 / V3.2 **repeater** is available and running on hardware. Heltec V4 (OLED/TFT/R8) repeater builds are published but not yet tested on V4 hardware. Client (companion) and room-server builds, Bluetooth and the T-TWR are in progress — see the [roadmap](docs/umc/ROADMAP.md).
 
 ---
 
@@ -14,7 +14,7 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 | Board | Repeater | Client | Room server |
 |---|---|---|---|
 | Heltec WiFi LoRa 32 V3 / V3.2 | ✅ | planned | planned |
-| Heltec V4 OLED / TFT / R8 | planned | planned | planned |
+| Heltec V4 OLED / TFT / R8 | ✅ build (hardware test pending) | planned | planned |
 | LilyGo T-TWR + SX1262 add-on | planned | planned | — |
 
 ---
@@ -43,6 +43,7 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 - **Bridge**: ESP-NOW (channel, secret, delay, source) and RS-232 settings.
 - **Power & hardware**: power saving, battery calibration, GPS, **display cycle settings**, board info.
 - **Neighbours**: list with age/SNR, forget, discover.
+- **Routes & trace**: route table learned from adverts (hop chain with repeater names), find, **add/pin a route**, **trace** out and back with per-hop SNR, forget.
 - **Console**: full command line with history.
 - **Firmware & maintenance**: internet update, file update, clock sync, reboot, stats/log controls, legacy OTA, re-run setup, power off, factory reset.
 - **Backup & restore**: JSON backup (passwords excluded, private key optional) with a preview before restore.
@@ -76,6 +77,7 @@ ap.mode, ap.password, ap.rescue, get ap.status, pin
 http, http.timeout, telnet, timezone
 display.mode, display.ip, display.page, display.traffic, display.timeout
 region preset yorkshire|northwest|uk, get traffic
+routes, route <node>, route find|pin|unpin|forget, trace <path>, trace route <node>, get trace
 update check, update install, get update.status, update.auto, update.interval, update.url, get build
 get setup, setup start, setup done, get umc.version, factory reset confirm
 ```

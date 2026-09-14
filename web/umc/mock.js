@@ -28,7 +28,7 @@
     if (c === "stats-radio") return JSON.stringify({noise_floor: -103, last_rssi: -97, last_snr: 6.25, tx_air_secs: 48, rx_air_secs: 311});
     if (c === "stats-packets") return JSON.stringify({recv: 1204, sent: 377, flood_tx: 201, direct_tx: 176, flood_rx: 950, direct_rx: 254, recv_errors: 3});
     if (c === "memory") return JSON.stringify({heap_free: 128400, heap_min: 98112, heap_max: 65524, psram_free: 0, psram_min: 0, psram_max: 0});
-    if (c === "neighbors") return "A1B2C3D4:" + (Math.floor(Date.now() / 1000) - 340) + ":24\n9F00AB12:" + (Math.floor(Date.now() / 1000) - 5400) + ":-18";
+    if (c === "neighbors") return "A1B2C3D4:340:50\n9F00AB12:5400:-18";
     if (c === "region") return "* F\n Yorkshire^ F\n Sheffield F\n Wakefield F\n uk F\n  yorkshire F\n  northwest F";
     if (c === "get wifi.status") return "> ssid:HomeNet status:connected code:3 state:connected ip:192.168.1.77 channel:6 rssi:-58 quality:84% signal:excellent gw:ok wd:0";
     if (c === "get ap.status") return "> down mode:auto";
@@ -39,6 +39,9 @@
     if (c === "powersaving") return "off";
     if (c === "get web.stats.status") return "> enabled:on history:active";
     if (c === "get umc.version") return "> Ultimate MeshCore 0.1.0";
+    if (/^trace /.test(c)) { window.__trace = Date.now(); return "OK - trace sent via 3 hop(s); then: get trace"; }
+    if (c === "get trace") return !window.__trace ? "> idle" : Date.now() - window.__trace < 2500 ? "> waiting 1s path:27,da,27" : "> done 2.3s path:27,da,27 snr:9.5,4.2,8.8 final:11.0";
+    if (/^route /.test(c)) return "OK";
     if (c === "setup done") { setupDone = true; return "OK - setup complete"; }
     if (/^get wifi\.pwd/.test(c)) return "> -";
     let m = c.match(/^get (\S+)$/); if (m) return m[1] in state ? "> " + state[m[1]] : "??: " + m[1];
@@ -53,6 +56,10 @@
     if (url === "/api/login") { if (body === "wrong") throw new Error("Wrong password"); return {token: "mocktoken"}; }
     if (url === "/api/logout") return {ok: true};
     if (url.startsWith("/api/scan")) return [{ssid: "HomeNetwork 2.4G", rssi: -48, ch: 6, auth: "wpa2"}, {ssid: "BT-Hub", rssi: -71, ch: 11, auth: "wpa2"}, {ssid: "Guest", rssi: -80, ch: 1, auth: "open"}];
+    if (url === "/api/routes") return {routes: [
+      {key: "271e2ee5a1b2", name: "Leeds Hill", type: "repeater", hops: 0, hash: 1, path: "", pin: "", snr: 12.5, ago: 95, adverts: 4},
+      {key: "da8f72dfcc34", name: "Wakefield Roof", type: "repeater", hops: 1, hash: 1, path: "27", pin: "", snr: 11.8, ago: 320, adverts: 2},
+      {key: "9f00ab120011", name: "Bob phone", type: "client", hops: 2, hash: 1, path: "da,27", pin: "27,da,27", snr: 6.0, ago: 4000, adverts: 1}]};
     if (url === "/api/cli") return body.split("\n").map(cmd);
     throw new Error("mock: unknown " + url);
   };

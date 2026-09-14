@@ -997,6 +997,9 @@ static bool isShare(const mesh::Packet *packet) {
 void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32_t timestamp,
                           const uint8_t *app_data, size_t app_data_len) {
   mesh::Mesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len); // chain to super impl
+#ifdef UMC_BUILD
+  umc_routes.onAdvert(packet, id, app_data, app_data_len);  // learn the route this advert took
+#endif
 
   // if this a zero hop advert (and not via 'Share'), add it to neighbours
   if (packet->getPathHashCount() == 0 && !isShare(packet)) {
@@ -2214,6 +2217,14 @@ void MyMesh::prepareForOTAStart() {
 }
 
 #ifdef UMC_BUILD
+void MyMesh::onTraceRecv(mesh::Packet* packet, uint32_t tag, uint32_t auth_code, uint8_t flags, const uint8_t* path_snrs,
+                         const uint8_t* path_hashes, uint8_t path_len) {
+  (void)auth_code;
+  (void)path_hashes;
+  uint8_t hops = path_len >> (flags & 0x03);
+  umc_routes.traceResult(tag, path_snrs, hops, static_cast<int8_t>(packet->getSNR() * 4));
+}
+
 void MyMesh::umcPrepareForOta() {
 #if defined(ESP_PLATFORM) && WITH_WEB_PANEL
   web.suspendForOTA();  // free the TLS heap held by the classic panel before flashing
@@ -2266,6 +2277,65 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
 
 #ifdef UMC_BUILD
   if (umc.handleCommand(command, reply, 157)) {
+    return;
+  }
+  if (memcmp(command, "trace", 5) == 0 && (command[5] == 0 || command[5] == ' ')) {
+    const char* arg = command + 5;
+    while (*arg == ' ') arg++;
+    uint8_t path[UmcRoutes::kMaxPathBytes];
+    int len = 0;
+    char via[40] = "";
+    if (memcmp(arg, "route ", 6) == 0) {
+      // Round trip through the repeaters on the learned (or pinned) route to a node.
+      int idx = umc_routes.search(arg + 6);
+      UmcRoutes::Route r;
+      if (idx < 0 || !umc_routes.copy(idx, r)) {
+        strcpy(reply, "Err - no route known for that node (wait for its advert)");
+        return;
+      }
+      snprintf(via, sizeof(via), " to %s", r.name[0] ? r.name : "node");
+      if (r.pin_len > 0) {
+        memcpy(path, r.pin, r.pin_len);   // pinned: already a complete trace path
+        len = r.pin_len;
+      } else {
+        // advert path runs node -> ... -> us; reverse it to get us -> node (1-byte hop hashes)
+        uint8_t hops = r.path_len / r.hash_size;
+        uint8_t fwd[UmcRoutes::kMaxPathBytes];
+        for (int h = 0; h < hops; h++) fwd[h] = r.path[h * r.hash_size];
+        for (int h = hops - 1; h >= 0 && len < UmcRoutes::kMaxPathBytes; h--) path[len++] = fwd[h];
+        if (r.type == ADV_TYPE_REPEATER && len < UmcRoutes::kMaxPathBytes) path[len++] = r.key[0];
+        for (int h = 0; h < hops && len < UmcRoutes::kMaxPathBytes; h++) path[len++] = fwd[h];
+        if (len == 0) {
+          strcpy(reply, "Err - that node is a direct neighbour client; nothing to trace through");
+          return;
+        }
+      }
+    } else if (*arg) {
+      len = UmcRoutes::parsePath(arg, path, sizeof(path), 1);
+      if (len == 0) {
+        strcpy(reply, "Err - use: trace a1,b2,a1  or  trace route <name|key>");
+        return;
+      }
+    } else {
+      strcpy(reply, "Err - use: trace a1,b2,a1  or  trace route <name|key>");
+      return;
+    }
+    uint32_t tag = esp_random();
+    mesh::Packet* pkt = createTrace(tag, 0, 0);   // flags 0: 1-byte hop hashes
+    if (pkt == nullptr) {
+      strcpy(reply, "Err - packet pool full, try again");
+      return;
+    }
+    sendDirect(pkt, path, len);
+    auto& t = umc_routes.trace();
+    t.tag = tag;
+    t.sent_ms = millis();
+    t.hash_size = 1;
+    t.path_len = len;
+    memcpy(t.path, path, len);
+    t.snr_count = 0;
+    t.state = UmcRoutes::Trace::Waiting;
+    snprintf(reply, 157, "OK - trace sent%s via %d hop(s); then: get trace", via, len);
     return;
   }
   if (memcmp(command, "set radio ", 10) == 0) {

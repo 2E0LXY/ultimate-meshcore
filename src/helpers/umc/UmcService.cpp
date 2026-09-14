@@ -5,11 +5,48 @@
 #include <string.h>
 
 #include "UmcTelnet.h"
+#include "UmcRoutes.h"
 #include "UmcTraffic.h"
 #include "UmcUpdater.h"
 #include "UmcVersion.h"
 
 UmcTraffic umc_traffic;
+UmcRoutes umc_routes;
+
+namespace {
+size_t appendHexPath(char* out, size_t n, const uint8_t* path, uint8_t len, uint8_t hash_size, const char* sep) {
+  size_t pos = 0;
+  if (n) out[0] = 0;
+  for (uint8_t i = 0; i + hash_size <= len && pos + 8 < n; i += hash_size) {
+    if (i) pos += snprintf(out + pos, n - pos, "%s", sep);
+    for (uint8_t b = 0; b < hash_size; b++) pos += snprintf(out + pos, n - pos, "%02x", path[i + b]);
+  }
+  return pos;
+}
+}  // namespace
+
+void UmcService::formatRoutesJson(char* out, size_t out_size) const {
+  size_t pos = snprintf(out, out_size, "{\"routes\":[");
+  UmcRoutes::Route r;
+  bool first = true;
+  for (int i = 0; i < UmcRoutes::kMaxRoutes && pos + 260 < out_size; i++) {
+    if (!umc_routes.copy(i, r)) continue;
+    char key[16], path[80], pin[80];
+    appendHexPath(key, sizeof(key), r.key, UmcRoutes::kKeyBytes, 1, "");
+    appendHexPath(path, sizeof(path), r.path, r.path_len, r.hash_size, ",");
+    appendHexPath(pin, sizeof(pin), r.pin, r.pin_len, 1, ",");
+    pos += snprintf(out + pos, out_size - pos, "%s{\"key\":\"%s\",\"name\":", first ? "" : ",", key);
+    pos = appendJsonEscaped(out, out_size, pos, r.name);
+    pos += snprintf(out + pos, out_size - pos,
+                    ",\"type\":\"%s\",\"hops\":%u,\"hash\":%u,\"path\":\"%s\",\"pin\":\"%s\",\"snr\":%.2f,\"ago\":%lu,\"adverts\":%lu",
+                    UmcRoutes::typeName(r.type), r.path_len / (r.hash_size ? r.hash_size : 1), r.hash_size, path, pin,
+                    r.snr4 / 4.0f, static_cast<unsigned long>((millis() - r.heard_ms) / 1000), static_cast<unsigned long>(r.adverts));
+    if (r.has_loc) pos += snprintf(out + pos, out_size - pos, ",\"lat\":%.4f,\"lon\":%.4f", r.lat, r.lon);
+    pos += snprintf(out + pos, out_size - pos, "}");
+    first = false;
+  }
+  snprintf(out + pos, out_size - pos, "]}");
+}
 #include "UmcWebServer.h"
 
 #if defined(ESP_PLATFORM)
@@ -100,6 +137,7 @@ void UmcService::loop() {
   if (_updater != nullptr) {
     _updater->loop(_network != nullptr && _network->isWifiConnected());
   }
+  umc_routes.loop();
   if (_reboot_at != 0 && millis() >= _reboot_at) {
     _reboot_at = 0;
     Serial.println("[UMC] rebooting");
@@ -504,6 +542,97 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
       char line[32];
       UmcTraffic::formatShort(*e, line, sizeof(line));
       pos += snprintf(&reply[pos], reply_size - pos, "\n%lus %s", static_cast<unsigned long>((millis() - e->ms) / 1000), line);
+    }
+    return true;
+  }
+
+  // ---- routes learned from adverts, pinned routes, trace results ----
+  if (strcmp(command, "routes") == 0 || strcmp(command, "get routes") == 0) {
+    size_t pos = snprintf(reply, reply_size, "> %d node(s)", umc_routes.count());
+    UmcRoutes::Route r;
+    for (int i = 0; i < UmcRoutes::kMaxRoutes && pos + 40 < reply_size; i++) {
+      if (!umc_routes.copy(i, r)) continue;
+      pos += snprintf(reply + pos, reply_size - pos, "\n%02x%02x%02x %.12s h%u", r.key[0], r.key[1], r.key[2],
+                      r.name[0] ? r.name : "?", r.path_len / (r.hash_size ? r.hash_size : 1));
+    }
+    return true;
+  }
+  if (startsWith(command, "route ")) {
+    const char* arg = command + 6;
+    while (*arg == ' ') arg++;
+    char sub[8] = "";
+    const char* rest = arg;
+    for (const char* s : {"find ", "pin ", "unpin ", "forget "}) {
+      if (startsWith(arg, s)) {
+        StrHelper::strncpy(sub, s, sizeof(sub));
+        rest = arg + strlen(s);
+      }
+    }
+    char target[32];
+    StrHelper::strncpy(target, rest, sizeof(target));
+    char* space = strchr(target, ' ');
+    const char* path_arg = "";
+    if (space != nullptr && strcmp(sub, "pin ") == 0) {
+      *space = 0;
+      path_arg = rest + (space - target) + 1;
+    }
+    int idx = umc_routes.search(target);
+    UmcRoutes::Route r;
+    if (idx < 0 || !umc_routes.copy(idx, r)) {
+      snprintf(reply, reply_size, "Err - no node matching '%s'", target);
+      return true;
+    }
+    char key[16];
+    snprintf(key, sizeof(key), "%02x%02x%02x%02x", r.key[0], r.key[1], r.key[2], r.key[3]);
+    UmcRoutes::Route* entry = umc_routes.findHex(key);
+    if (strcmp(sub, "pin ") == 0) {
+      uint8_t path[UmcRoutes::kMaxPathBytes];
+      int len = UmcRoutes::parsePath(path_arg, path, sizeof(path), 1);
+      snprintf(reply, reply_size, len > 0 && umc_routes.setPin(entry, path, len) ? "OK - route pinned (used by 'trace route')"
+                                                                                  : "Err - use: route pin <node> a1,b2,a1");
+      return true;
+    }
+    if (strcmp(sub, "unpin ") == 0) {
+      umc_routes.setPin(entry, nullptr, 0);
+      snprintf(reply, reply_size, "OK - pinned route removed");
+      return true;
+    }
+    if (strcmp(sub, "forget ") == 0) {
+      umc_routes.forget(entry);
+      snprintf(reply, reply_size, "OK - forgotten");
+      return true;
+    }
+    // show / find
+    char path[80], pin[80];
+    appendHexPath(path, sizeof(path), r.path, r.path_len, r.hash_size, ">");
+    appendHexPath(pin, sizeof(pin), r.pin, r.pin_len, 1, ",");
+    snprintf(reply, reply_size, "> %s %s [%s] %s via %s snr:%.1f %lus ago%s%s", key, r.name[0] ? r.name : "?",
+             UmcRoutes::typeName(r.type), r.path_len ? "heard" : "heard direct", r.path_len ? path : "-", r.snr4 / 4.0f,
+             static_cast<unsigned long>((millis() - r.heard_ms) / 1000), r.pin_len ? " pinned:" : "", pin);
+    return true;
+  }
+  if (strcmp(command, "get trace") == 0) {
+    auto& t = umc_routes.trace();
+    char path[80];
+    appendHexPath(path, sizeof(path), t.path, t.path_len, t.hash_size, ",");
+    switch (t.state) {
+      case UmcRoutes::Trace::Idle:
+        snprintf(reply, reply_size, "> idle");
+        break;
+      case UmcRoutes::Trace::Waiting:
+        snprintf(reply, reply_size, "> waiting %lus path:%s", static_cast<unsigned long>((millis() - t.sent_ms) / 1000), path);
+        break;
+      case UmcRoutes::Trace::Timeout:
+        snprintf(reply, reply_size, "> timeout path:%s (a hop didn't answer)", path);
+        break;
+      case UmcRoutes::Trace::Done: {
+        size_t pos = snprintf(reply, reply_size, "> done %.1fs path:%s snr:", (t.done_ms - t.sent_ms) / 1000.0f, path);
+        for (uint8_t i = 0; i < t.snr_count && pos + 8 < reply_size; i++) {
+          pos += snprintf(reply + pos, reply_size - pos, "%s%.1f", i ? "," : "", t.snr4[i] / 4.0f);
+        }
+        snprintf(reply + pos, reply_size - pos, " final:%.1f", t.snr4[t.snr_count] / 4.0f);
+        break;
+      }
     }
     return true;
   }

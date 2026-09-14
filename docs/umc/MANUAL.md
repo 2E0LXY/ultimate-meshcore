@@ -21,7 +21,7 @@
 13. [MQTT](#13-mqtt)
 14. [Bridge](#14-bridge)
 15. [Power & hardware (GPS, display)](#15-power--hardware)
-16. [Neighbours and live traffic](#16-neighbours-and-live-traffic)
+16. [Neighbours, routes, trace and live traffic](#16-neighbours-routes-trace-and-live-traffic)
 17. [Console](#17-console)
 18. [Firmware updates](#18-firmware-updates)
 19. [Backup, restore and factory reset](#19-backup-restore-and-factory-reset)
@@ -59,7 +59,7 @@ It builds on upstream MeshCore 1.17.1 and the MeshCore-EastMesh fork, and brings
 | Board | Repeater | Client |
 |---|---|---|
 | Heltec WiFi LoRa 32 V3 / V3.2 | ✅ | *(coming soon)* |
-| Heltec V4 (OLED, TFT, R8) | *(coming soon)* | *(coming soon)* |
+| Heltec V4 (OLED, TFT, R8) | ✅ (not yet tested on hardware) | *(coming soon)* |
 | LilyGo T-TWR with SX1262 add-on | *(coming soon)* | *(coming soon)* |
 
 ---
@@ -386,9 +386,30 @@ A bridge links two LoRa areas through another medium. The Heltec V3 build includ
 
 ---
 
-## 16. Neighbours and live traffic
+## 16. Neighbours, routes, trace and live traffic
 
 - **Neighbours** page: repeaters heard directly, with how long ago and SNR. **Forget** removes one. **Discover neighbours** asks nearby repeaters to answer.
+
+### Routes & trace
+
+The repeater learns a **route table** from every advert it hears. Each advert carries the chain of repeaters it passed through, so the table shows, for every node heard, the route from this repeater back to that node.
+
+- **Routes & trace** page: every node with its type, key, route (hops shown by key prefix and, when known, the repeater's name), hop count, when it was heard and SNR. Type in **Find** to filter by name or key.
+- **Trace**: sends a trace packet out along the route and back. Each repeater on the way adds the SNR it received, and the result table shows the signal quality of every hop plus the final hop back to this repeater. No answer within 30 seconds means a hop didn't hear or forward it.
+- **Add route / Edit route**: pin your own out-and-back list of repeater key prefixes (2 hex digits each, e.g. `27,da,27`) to use when tracing that node. **Unpin** goes back to the learned route.
+- **Trace custom path**: trace any list of repeaters, e.g. `a1,b2,a1`.
+- **Forget** removes a node from the table. The table holds the 48 most recently heard nodes (pinned routes are kept).
+
+| Command | Explanation |
+|---|---|
+| `routes` | Summary list of nodes and hop counts |
+| `route <name or key>` | Show a node's learned route, SNR, age and pinned route |
+| `route find <text>` | Same, searching by name or key prefix |
+| `route pin <node> <a1,b2,a1>` | Add/replace the trace route for a node |
+| `route unpin <node>` / `route forget <node>` | Remove the pinned route / forget the node |
+| `trace route <node>` | Trace out and back along the node's route |
+| `trace <a1,b2,a1>` | Trace a custom list of repeaters |
+| `get trace` | Result: `waiting`, `timeout` or `done` with the SNR for each hop and the final SNR |
 - `get traffic`: total packets and the last 16 packets with age, type, route (F flood / D direct), hops, RSSI and SNR.
 - `stats-core`, `stats-radio`, `stats-packets`: JSON statistics. `clear stats` resets them.
 - `log start|stop|erase` and `log` (USB): a packet log stored on the device.
@@ -569,6 +590,8 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get/set radio <MHz>,<kHz>,<SF>,<CR>` | Radio parameters (applied immediately) |
 | `get/set radio.rxgain on\|off` | RX boosted gain |
 | `reboot` | Restart |
+| `route <node>`, `route find\|pin\|unpin\|forget …` | Learned and pinned routes |
+| `routes` | Route table summary |
 | `region` | Show region tree |
 | `region allowf\|denyf <name>` | Allow/deny flooding for a region |
 | `region def <tokens>` | Define a region hierarchy in one line |
@@ -591,6 +614,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get/set telnet on\|off` | Telnet command line |
 | `tempradio <MHz>,<kHz>,<SF>,<CR>,<min>` | Temporary radio settings |
 | `time <epoch>` | Set clock |
+| `trace <a1,b2,…>`, `trace route <node>`, `get trace` | Trace a path and read the per-hop SNR |
 | `get/set timezone <POSIX TZ>` | Display time zone |
 | `get traffic` | Recent packets |
 | `get/set tx <dBm>` | TX power |
