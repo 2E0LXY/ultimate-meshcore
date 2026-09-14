@@ -21,6 +21,9 @@ ArchiveStorage archive;
 MyMesh the_mesh(board, radio_driver, *new ArduinoMillis(), fast_rng, rtc_clock, tables);
 
 void halt() {
+#ifdef UMC_BUILD
+  umcOtaFailBoot();  // an unconfirmed update that can't start rolls back to the previous firmware
+#endif
   while (1) ;
 }
 

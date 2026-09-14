@@ -13,6 +13,45 @@
 UmcTraffic umc_traffic;
 UmcRoutes umc_routes;
 
+#if defined(ESP_PLATFORM)
+#include <esp_ota_ops.h>
+
+// Tell the Arduino core not to confirm a freshly updated image at boot: UMC confirms it
+// only after it has run healthily (see UmcService::loop), so a firmware that crashes or
+// hangs early is rolled back to the previous slot by the bootloader.
+// The core declares this weak symbol in a C file, so it needs C linkage to override it.
+extern "C" bool verifyRollbackLater() { return true; }
+
+namespace {
+constexpr unsigned long kOtaHealthyAfterMs = 60000;
+
+const char* otaStateLabel(esp_ota_img_states_t s) {
+  switch (s) {
+    case ESP_OTA_IMG_NEW: return "new";
+    case ESP_OTA_IMG_PENDING_VERIFY: return "pending-verify";
+    case ESP_OTA_IMG_VALID: return "valid";
+    case ESP_OTA_IMG_INVALID: return "invalid";
+    case ESP_OTA_IMG_ABORTED: return "aborted";
+    default: return "undefined";
+  }
+}
+}  // namespace
+
+bool umcOtaPendingVerify() {
+  esp_ota_img_states_t state;
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  return running != nullptr && esp_ota_get_state_partition(running, &state) == ESP_OK && state == ESP_OTA_IMG_PENDING_VERIFY;
+}
+
+void umcOtaFailBoot() {
+  if (umcOtaPendingVerify()) {
+    Serial.println("[UMC] new firmware failed its boot check - rolling back to the previous version");
+    delay(200);
+    esp_ota_mark_app_invalid_rollback_and_reboot();
+  }
+}
+#endif
+
 namespace {
 size_t appendHexPath(char* out, size_t n, const uint8_t* path, uint8_t len, uint8_t hash_size, const char* sep) {
   size_t pos = 0;
@@ -138,12 +177,24 @@ void UmcService::loop() {
     _updater->loop(_network != nullptr && _network->isWifiConnected());
   }
   umc_routes.loop();
+#if defined(ESP_PLATFORM)
+  if (!_ota_confirmed && millis() > kOtaHealthyAfterMs) {
+    _ota_confirmed = true;
+    if (umcOtaPendingVerify()) {
+      esp_ota_mark_app_valid_cancel_rollback();
+      Serial.println("[UMC] new firmware ran healthily for 60 s - confirmed");
+    }
+  }
+#endif
   if (_reboot_at != 0 && millis() >= _reboot_at) {
     _reboot_at = 0;
     Serial.println("[UMC] rebooting");
     if (_host != nullptr) _host->umcBeforeReboot();
     delay(100);
 #if defined(ESP_PLATFORM)
+    if (_rollback_requested) {
+      esp_ota_mark_app_invalid_rollback_and_reboot();  // boots the other slot
+    }
     esp_restart();
 #endif
   }
@@ -677,6 +728,33 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
     snprintf(reply, reply_size, "OK - added %d region(s), flood allowed; run 'region save' to keep", added);
     return true;
   }
+
+#if defined(ESP_PLATFORM)
+  // ---- OTA slots / rollback ----
+  if (strcmp(command, "get ota.state") == 0) {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    const esp_partition_t* other = esp_ota_get_next_update_partition(nullptr);
+    esp_ota_img_states_t rs = ESP_OTA_IMG_UNDEFINED, os = ESP_OTA_IMG_UNDEFINED;
+    if (running) esp_ota_get_state_partition(running, &rs);
+    bool other_ok = other && esp_ota_get_state_partition(other, &os) == ESP_OK;
+    esp_app_desc_t other_desc;
+    bool other_app = other && esp_ota_get_partition_description(other, &other_desc) == ESP_OK;
+    snprintf(reply, reply_size, "> running:%s (%s) other:%s (%s)%s%s", running ? running->label : "?", otaStateLabel(rs),
+             other ? other->label : "?", other_ok ? otaStateLabel(os) : (other_app ? "has app" : "empty"),
+             other_app ? " other_date:" : "", other_app ? other_desc.date : "");
+    return true;
+  }
+  if (strcmp(command, "ota rollback") == 0) {
+    if (!esp_ota_check_rollback_is_possible()) {
+      snprintf(reply, reply_size, "Err - no previous firmware to roll back to");
+    } else {
+      snprintf(reply, reply_size, "OK - rolling back to the previous firmware");
+      scheduleReboot(1500);
+      _rollback_requested = true;
+    }
+    return true;
+  }
+#endif
 
   // ---- internet firmware update ----
   if (_updater != nullptr) {

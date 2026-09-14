@@ -79,4 +79,13 @@ private:
   volatile bool _mb_pending;
   volatile bool _mb_busy;
   volatile bool _ota_prepare;
+  bool _ota_confirmed = false;
+  bool _rollback_requested = false;
 };
+
+#if defined(ESP_PLATFORM)
+// True while a freshly updated image has not yet passed its boot health check.
+bool umcOtaPendingVerify();
+// Call when startup fails: rolls back to the previous firmware if this image is unconfirmed.
+void umcOtaFailBoot();
+#endif

@@ -25,6 +25,7 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 - **USB web flasher** (Chrome/Edge). It always installs the newest build, and can **update** (keeping identity and settings) or do a **fresh install**.
 - **Internet updates on the device**: check and install the latest build for the exact board and firmware type over verified HTTPS, optionally automatic.
 - **Upload a firmware file** in the browser, with image validation (rejects merged/wrong-chip images, warns about the wrong board or type).
+- **Automatic rollback**: an update must run healthily for 60 s or the device returns to the previous firmware; `ota rollback` on demand.
 - Legacy `start ota` hotspot, esptool, and **automatic CI builds** of every target on each push.
 
 ### First-time setup
@@ -79,6 +80,7 @@ display.mode, display.ip, display.page, display.traffic, display.timeout
 region preset yorkshire|northwest|uk, get traffic
 routes, route <node>, route find|pin|unpin|forget, trace <path>, trace route <node>, get trace
 update check, update install, get update.status, update.auto, update.interval, update.url, get build
+get ota.state, ota rollback
 get setup, setup start, setup done, get umc.version, factory reset confirm
 ```
 

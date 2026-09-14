@@ -442,6 +442,17 @@ Other ways to reach the same command line:
 
 Commands: `update check`, `update install`, `get update.status`, `set update.auto off|check|install`, `set update.interval <hours>`, `set update.url <https://…/>`, `get build`.
 
+### Automatic rollback
+
+Every update method that goes through the device (internet update, file upload, legacy OTA hotspot) writes the new firmware to the **spare slot** and keeps the old one.
+
+- After an update, the new firmware must run healthily for **60 seconds** before it is confirmed.
+- If it crashes, reboots or can't start the radio before then, the device automatically goes back to the **previous firmware**.
+- `get ota.state` shows which slot is running, its state (`pending-verify` / `valid`) and what's in the other slot.
+- `ota rollback` switches back to the previous firmware on purpose.
+
+Firmware flashed over USB replaces the running slot directly, so rollback only applies to on-device updates.
+
 ### 18.2 From a file (in the browser)
 
 Choose the **non-merged** `.bin` for your board and firmware type and press **Upload & install**. The device checks that it is a valid ESP32-S3 app image before writing it. Merged/full-flash files are rejected, and file names that look like the wrong board or type trigger a warning.
@@ -621,6 +632,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get/set txdelay <0-2>` | Flood retransmit delay factor *(R)* |
 | `get umc.version` | Ultimate MeshCore version |
 | `update check`, `update install`, `get update.status` | Internet firmware update |
+| `get ota.state`, `ota rollback` | Firmware slots and manual rollback |
 | `get/set update.auto off\|check\|install`, `update.interval <h>`, `update.url <https>` | Update settings |
 | `ver` | MeshCore base version (used by apps) |
 | `get/set web on\|off`, `web.stats on\|off`, `get web.status` | Classic HTTPS panel |
