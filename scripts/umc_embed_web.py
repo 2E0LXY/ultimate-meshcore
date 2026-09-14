@@ -7,11 +7,39 @@ changes, so incremental builds stay incremental.
 import gzip
 import os
 
+import subprocess
+
 try:
     Import("env")  # noqa: F821  (provided by PlatformIO)
     PROJECT_DIR = env["PROJECT_DIR"]  # noqa: F821
+    PIO_ENV = env  # noqa: F821
 except Exception:  # allow running standalone: python scripts/umc_embed_web.py
     PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    PIO_ENV = None
+
+
+def add_build_identity():
+    """Bake the build target, git commit and update URL into the firmware.
+
+    The internet updater compares UMC_COMMIT with the published builds.json and
+    downloads firmware/<UMC_ENV>/firmware.bin for exactly this board and role.
+    """
+    if PIO_ENV is None:
+        return
+    commit = os.environ.get("GITHUB_SHA", "")
+    if not commit:
+        try:
+            commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=PROJECT_DIR, text=True).strip()
+        except Exception:
+            commit = "local"
+    repo = os.environ.get("GITHUB_REPOSITORY", "2E0LXY/ultimate-meshcore")
+    owner, name = repo.split("/", 1)
+    url = f"https://{owner.lower()}.github.io/{name}/"
+    PIO_ENV.Append(CPPDEFINES=[
+        ("UMC_ENV", PIO_ENV.StringifyMacro(PIO_ENV["PIOENV"])),
+        ("UMC_COMMIT", PIO_ENV.StringifyMacro(commit)),
+        ("UMC_UPDATE_URL", PIO_ENV.StringifyMacro(url)),
+    ])
 
 SRC = os.path.join(PROJECT_DIR, "web", "umc", "index.html")
 OUT = os.path.join(PROJECT_DIR, "src", "helpers", "umc", "generated", "umc_web_index.h")
@@ -46,3 +74,4 @@ def build():
 
 
 build()
+add_build_identity()

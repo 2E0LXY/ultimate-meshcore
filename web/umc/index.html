@@ -490,12 +490,18 @@ async function renderDash(view) {
       <button class="btn" data-q="clocksync">Set clock from this browser</button><button class="btn" data-q="refresh">Refresh</button></div></div>`;
   const stat = (v, l) => `<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`;
   const refresh = async () => {
-    const cmds = ["get name", "ver", "clock", "stats-core", "stats-radio", "stats-packets", "get radio", "get tx", "get net.status", "memory"];
+    const cmds = ["get name", "get update.status", "clock", "stats-core", "stats-radio", "stats-packets", "get radio", "get tx", "get net.status", "memory"];
     if (roleOk(RS)) cmds.push("get repeat", "neighbors");
     if (has("mqtt")) cmds.push("get mqtt.status");
     const r = await api.cli(cmds); const g = i => r[i] || "";
     const core = parseJson(g(3)) || {}, radio = parseJson(g(4)) || {}, pk = parseJson(g(5)) || {}, net = parseJson(g(8)) || {};
     $("#dName").textContent = val(g(0)); $("#dSub").textContent = `${INFO.board} · ${INFO.role} · Ultimate MeshCore ${INFO.umc}`;
+    if (val(g(1)).startsWith("available") && !$("#dUpd")) {
+      const d = document.createElement("div"); d.id = "dUpd"; d.className = "warnbox";
+      d.innerHTML = `A firmware update is available. <a href="#fw">Open Firmware &amp; maintenance</a> to install it.`;
+      $("#dName").parentElement.prepend(d);
+      d.querySelector("a").onclick = e => { e.preventDefault(); go("fw"); };
+    }
     const batt = core.battery_mv ? (core.battery_mv / 1000).toFixed(2) + " V" : "—";
     let neigh = "—"; if (roleOk(RS)) { const t = val(g(11)); neigh = t === "-none-" || !t ? "0" : String(t.split("\n").filter(Boolean).length); }
     $("#dStats").innerHTML = stat(fmtUp(core.uptime_secs), "Uptime") + stat(batt, "Battery") + stat(val(g(2)), "Clock (UTC)") +
@@ -704,7 +710,14 @@ async function renderFw(view) {
       <div class="stat"><b>${esc(INFO.umc)}</b><span>Ultimate MeshCore version</span></div>
       <div class="stat"><b>${esc(val(r[2]))}</b><span>Board</span></div><div class="stat"><b>${esc(INFO.role)}</b><span>Role</span></div></div>
       <p class="val" style="margin-top:8px">Built on MeshCore ${esc(val(r[0]).split(" ")[0])} — shown here only for compatibility checks with apps.</p></div>
-    <div class="card"><h2>Update firmware</h2><p class="sub">Choose the <b>non-merged</b> <code>.bin</code> for this board and role. The device keeps its identity and settings, and falls back to the previous version if the new one fails to boot.</p>
+    <div class="card"><h2>Update from the internet</h2><p class="sub">Downloads the latest published build for this exact board and firmware type, installs it and reboots. Identity and settings are kept. Needs WiFi with internet access.</p>
+      <pre id="updStatus">…</pre>
+      <div class="row"><button class="btn" id="updCheck">Check for updates</button><button class="btn pri" id="updInstall">Install latest</button></div>
+      <div class="progress hidden" id="updBarWrap" style="margin-top:10px"><i id="updBar"></i></div>
+      <div class="field" style="margin-top:10px"><label>Automatic</label><div class="ctl"><select id="updAuto" style="max-width:260px"><option value="off">Off</option><option value="check">Check daily and show on dashboard</option><option value="install">Install updates automatically</option></select>
+        every <input type="number" id="updInt" min="1" max="720" style="max-width:80px"> hours</div><div class="act"><button class="btn sm" id="updSave">Save</button></div></div>
+      <p class="val" id="updBuild"></p></div>
+    <div class="card"><h2>Update from a file</h2><p class="sub">Choose the <b>non-merged</b> <code>.bin</code> for this board and role. The device keeps its identity and settings, and falls back to the previous version if the new one fails to boot.</p>
       <div class="row"><input type="file" id="fwFile" accept=".bin"><button class="btn pri" id="fwGo" disabled>Upload &amp; install</button></div>
       <div class="warnbox hidden" id="fwWarn"></div>
       <div class="progress" style="margin-top:10px"><i id="fwBar"></i></div><p class="msg" id="fwMsg"></p></div>
@@ -714,6 +727,36 @@ async function renderFw(view) {
       <button class="btn" data-m="start ota">Legacy OTA hotspot</button><button class="btn" data-m="setup start">Re-run setup wizard</button>
       <button class="btn" data-m="poweroff">Power off</button><button class="btn danger" data-m="factory">Factory reset…</button></div>
       <p class="sub" style="margin-top:10px">Device clock: ${esc(val(r[3]))}</p></div>`;
+  // ---- internet update ----
+  let updPoll = null;
+  const updRefresh = async () => {
+    const [st, auto, iv, build] = await api.cli(["get update.status", "get update.auto", "get update.interval", "get build"]);
+    const s = val(st);
+    const human = s.startsWith("available") ? `Update available: ${s.replace(/^available /, "")}`
+      : s.startsWith("up-to-date") ? "You're running the latest build."
+      : s.startsWith("downloading") ? `Downloading and installing… ${s.replace("downloading ", "")}`
+      : s.startsWith("installed") ? "Installed — rebooting. This page reconnects automatically."
+      : s.startsWith("error") ? `Problem: ${s.replace(/^error /, "")}`
+      : s.startsWith("checking") ? "Checking…" : `Not checked yet (${s})`;
+    $("#updStatus").textContent = human;
+    $("#updAuto").value = val(auto); $("#updInt").value = val(iv); $("#updBuild").textContent = `This build: ${val(build)}`;
+    const m = s.match(/downloading (-?\d+)%/);
+    $("#updBarWrap").classList.toggle("hidden", !m);
+    if (m) $("#updBar").style.width = Math.max(0, +m[1]) + "%";
+    const busy = /^(checking|downloading|installed)/.test(s);
+    if (busy && !updPoll) updPoll = setInterval(() => updRefresh().catch(() => {}), 2000);
+    if (!busy && updPoll) { clearInterval(updPoll); updPoll = null; }
+  };
+  $("#updCheck").onclick = async () => { toast(await one("update check")); updRefresh(); };
+  $("#updInstall").onclick = async () => {
+    if (!confirm("Download and install the latest firmware now? The device reboots when done (about a minute).")) return;
+    const r = await one("update install"); toast(r, isErr(r) ? "bad" : "ok"); updRefresh();
+  };
+  $("#updSave").onclick = async () => { const r = await api.cli([`set update.auto ${$("#updAuto").value}`, `set update.interval ${$("#updInt").value}`]); toast(r.join(" / "), r.some(isErr) ? "bad" : "ok"); };
+  updRefresh().catch(() => {});
+  const stopPoll = () => { if (updPoll) { clearInterval(updPoll); updPoll = null; } };
+  window.addEventListener("hashchange", stopPoll, {once: true});
+
   const file = $("#fwFile"), go = $("#fwGo");
   file.onchange = () => {
     const f = file.files[0]; go.disabled = !f; const w = $("#fwWarn"); w.classList.add("hidden");

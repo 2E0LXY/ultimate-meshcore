@@ -6,6 +6,7 @@
 
 #include "UmcTelnet.h"
 #include "UmcTraffic.h"
+#include "UmcUpdater.h"
 #include "UmcVersion.h"
 
 UmcTraffic umc_traffic;
@@ -46,7 +47,7 @@ void appendFeature(char* out, size_t out_size, size_t& pos, const char* name) {
 }  // namespace
 
 UmcService::UmcService()
-    : _host(nullptr), _network(nullptr), _prefs{}, _web(nullptr), _telnet(nullptr), _reboot_at(0),
+    : _host(nullptr), _network(nullptr), _prefs{}, _web(nullptr), _telnet(nullptr), _updater(nullptr), _reboot_at(0),
 #if defined(ESP_PLATFORM)
       _mb_lock(nullptr), _mb_done(nullptr),
 #endif
@@ -70,6 +71,8 @@ void UmcService::begin(UmcHost* host, NetworkService* network) {
 
   _web = new UmcWebServer(*this);
   _telnet = new UmcTelnet(*this);
+  _updater = new UmcUpdater(*this);
+  _updater->begin();
 
   Serial.printf("[UMC] %s v%s (%s, %s) setup=%s pin=%s\n", UMC_NAME, UMC_VERSION, _host->umcRole(),
                 _host->umcFirmwareVersion(), isSetupMode() ? "pending" : "done", _prefs.pin);
@@ -93,6 +96,9 @@ void UmcService::loop() {
   if (_telnet != nullptr) {
     _telnet->loop(_prefs.telnet_enabled && _network != nullptr && _network->isNetworkReachable() &&
                   !isDefaultAdminPassword());
+  }
+  if (_updater != nullptr) {
+    _updater->loop(_network != nullptr && _network->isWifiConnected());
   }
   if (_reboot_at != 0 && millis() >= _reboot_at) {
     _reboot_at = 0;
@@ -166,6 +172,7 @@ void UmcService::formatInfoJson(char* out, size_t out_size) const {
   pos = appendJsonEscaped(out, out_size, pos, _host ? _host->umcBuildDate() : "");
   pos += snprintf(&out[pos], out_size - pos, ",\"board\":");
   pos = appendJsonEscaped(out, out_size, pos, _host ? _host->umcBoardName() : "");
+  pos += snprintf(&out[pos], out_size - pos, ",\"env\":\"%s\",\"commit\":\"%.7s\"", UmcUpdater::buildEnv(), UmcUpdater::buildCommit());
   pos += snprintf(&out[pos], out_size - pos, ",\"setup\":%s,\"default_pw\":%s,\"features\":[",
                   isSetupMode() ? "true" : "false", isDefaultAdminPassword() ? "true" : "false");
   appendFeature(out, out_size, pos, "wifi");
@@ -540,6 +547,54 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
     }
     snprintf(reply, reply_size, "OK - added %d region(s), flood allowed; run 'region save' to keep", added);
     return true;
+  }
+
+  // ---- internet firmware update ----
+  if (_updater != nullptr) {
+    if (strcmp(command, "update check") == 0) {
+      snprintf(reply, reply_size, _updater->startCheck() ? "OK - checking, then: get update.status" : "Err - busy");
+      return true;
+    }
+    if (strcmp(command, "update install") == 0) {
+      if (_network == nullptr || !_network->isWifiConnected()) {
+        snprintf(reply, reply_size, "Err - needs WiFi with internet");
+      } else {
+        snprintf(reply, reply_size, _updater->startInstall() ? "OK - updating, device reboots when done" : "Err - busy");
+      }
+      return true;
+    }
+    if (strcmp(command, "get update.status") == 0) {
+      _updater->formatStatus(reply, reply_size);
+      return true;
+    }
+    if (strcmp(command, "get update.url") == 0) {
+      snprintf(reply, reply_size, "> %s", _updater->url());
+      return true;
+    }
+    if (startsWith(command, "set update.url ")) {
+      snprintf(reply, reply_size, _updater->setUrl(command + 15) ? "OK" : "Err - must be an https:// URL");
+      return true;
+    }
+    if (strcmp(command, "get update.auto") == 0) {
+      snprintf(reply, reply_size, "> %s", UmcUpdater::autoModeLabel(_updater->autoMode()));
+      return true;
+    }
+    if (startsWith(command, "set update.auto ")) {
+      snprintf(reply, reply_size, _updater->setAutoMode(command + 16) ? "OK" : "Err - use off|check|install");
+      return true;
+    }
+    if (strcmp(command, "get update.interval") == 0) {
+      snprintf(reply, reply_size, "> %u", _updater->intervalHours());
+      return true;
+    }
+    if (startsWith(command, "set update.interval ")) {
+      snprintf(reply, reply_size, _updater->setIntervalHours(static_cast<uint16_t>(atoi(command + 20))) ? "OK" : "Err - 1..720 hours");
+      return true;
+    }
+    if (strcmp(command, "get build") == 0) {
+      snprintf(reply, reply_size, "> %s %s commit:%s", UMC_VERSION, UmcUpdater::buildEnv(), UmcUpdater::buildCommit());
+      return true;
+    }
   }
 
   // ---- factory reset ----

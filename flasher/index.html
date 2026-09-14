@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Ultimate MeshCore Flasher</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.1.0/dist/web/install-button.js?module"></script>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#1b1f24;--muted:#626b75;--line:#dde1e6;--acc:#0b6bcb;--acc-ink:#fff;--warn:#9a6700;--bad:#cf222e;--ok:#1a7f37;--chip:#eef1f4}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ed;--muted:#98a2ad;--line:#2a313a;--acc:#4c9aff;--acc-ink:#07121f;--warn:#d29922;--bad:#f85149;--ok:#3fb950;--chip:#222831}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:17px;margin:0 0 10px}.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+label{display:block;font-weight:600;margin:10px 0 6px}
+.opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.opt{border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;background:var(--bg)}
+.opt input{margin-right:6px}.opt.on{border-color:var(--acc);outline:1px solid var(--acc)}
+.opt small{display:block;color:var(--muted);font-weight:400}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.pill{background:var(--chip);color:var(--muted);border-radius:99px;padding:3px 10px;font-size:13px}
+esp-web-install-button button,.btn{font:inherit;background:var(--acc);color:var(--acc-ink);border:0;border-radius:10px;padding:11px 20px;cursor:pointer;font-weight:600}
+.btn.sec{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:400}
+.warn{border:1px solid var(--warn);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:14px}
+.bad{color:var(--bad)}ol{padding-left:20px;margin:8px 0}li{margin:4px 0}code{background:var(--chip);padding:1px 5px;border-radius:5px;font-size:13px}
+a{color:var(--acc)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+</style>
+</head>
+<body>
+<main>
+  <h1>Ultimate MeshCore Flasher</h1>
+  <p class="sub">Install the latest Ultimate MeshCore build on your device over USB, straight from your browser.</p>
+
+  <div class="card" id="unsupported" hidden>
+    <h2>Browser not supported</h2>
+    <p class="bad">USB flashing needs <b>Chrome</b> or <b>Edge</b> on a desktop or laptop (Windows, macOS, Linux or ChromeOS). Phones and Firefox/Safari can't access USB serial ports.</p>
+  </div>
+
+  <div class="card">
+    <h2>1. Choose your device</h2>
+    <label>Board</label><div class="opts" id="boards"><span class="sub">Loading builds…</span></div>
+    <label>Firmware type</label><div class="opts" id="roles"></div>
+    <div class="meta" id="meta"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Connect and install</h2>
+    <ol>
+      <li>Plug the device into this computer with a <b>data</b> USB cable.</li>
+      <li>Press <b>Install</b> and pick the device's serial port (CP210x / USB JTAG / USB Serial).</li>
+      <li>When asked <b>“Erase device?”</b>:
+        <ul>
+          <li><b>No</b> — update and keep the node's identity, name, radio and all settings.</li>
+          <li><b>Yes</b> — fresh install. A new identity is created and the setup hotspot starts.</li>
+        </ul></li>
+    </ol>
+    <div class="row" style="margin-top:14px">
+      <esp-web-install-button id="install">
+        <button slot="activate">Install</button>
+        <span slot="unsupported" class="bad">Use Chrome or Edge on a computer.</span>
+        <span slot="not-allowed" class="bad">This page must be opened over https.</span>
+      </esp-web-install-button>
+      <a class="btn sec" id="dlMerged" href="#">Download full image</a>
+      <a class="btn sec" id="dlApp" href="#">Download update .bin</a>
+    </div>
+    <p class="sub" style="margin-top:12px">Device not detected? Hold the <b>PRG/BOOT</b> button, tap <b>RST</b>, release <b>PRG</b>, then try again. On Windows you may need the <a href="https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers" target="_blank" rel="noopener">CP210x driver</a>.</p>
+  </div>
+
+  <div class="card">
+    <h2>3. After installing</h2>
+    <ol>
+      <li>A new or erased device starts an open WiFi hotspot called <code>UMC-Setup-XXXX</code>. Join it and the setup page opens (or browse to <code>http://192.168.4.1</code>).</li>
+      <li>Updated devices keep their settings: open <code>http://umc-&lt;name&gt;.local/</code> or the IP shown on the display.</li>
+      <li>Later updates can be done over WiFi from the device's <b>Firmware</b> page using the update <code>.bin</code>.</li>
+    </ol>
+    <div class="warn">Back up anything important first. Flashing the wrong board's firmware can stop a device booting until you re-flash the correct one.</div>
+  </div>
+
+  <p class="sub">Source: <a id="repoLink" href="#">GitHub repository</a> · Built automatically from the latest commit on <code>main</code>.</p>
+</main>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+if (!("serial" in navigator)) $("#unsupported").hidden = false;
+
+let builds = [], board = null, role = null;
+function render() {
+  const boards = [...new Map(builds.map(b => [b.board, b])).values()];
+  if (!board || !boards.some(b => b.board === board)) board = boards[0]?.board;
+  const roles = builds.filter(b => b.board === board);
+  if (!role || !roles.some(b => b.role === role)) role = roles[0]?.role;
+  $("#boards").innerHTML = boards.map(b => `<label class="opt ${b.board === board ? "on" : ""}"><input type="radio" name="board" value="${esc(b.board)}" ${b.board === board ? "checked" : ""}>${esc(b.board_label)}<small>${esc(b.chip)}</small></label>`).join("");
+  $("#roles").innerHTML = roles.map(b => `<label class="opt ${b.role === role ? "on" : ""}"><input type="radio" name="role" value="${esc(b.role)}" ${b.role === role ? "checked" : ""}>${esc(b.role_label)}<small>${esc(b.role_help)}</small></label>`).join("");
+  const sel = builds.find(b => b.board === board && b.role === role);
+  if (!sel) return;
+  $("#install").manifest = sel.manifest;
+  $("#dlMerged").href = sel.merged; $("#dlMerged").download = sel.merged.split("/").pop();
+  $("#dlApp").href = sel.app; $("#dlApp").download = sel.app.split("/").pop();
+  $("#meta").innerHTML = `<span class="pill">Ultimate MeshCore ${esc(window.SITE.version)}</span><span class="pill">Built ${esc(new Date(window.SITE.built).toLocaleString())}</span><span class="pill">Commit ${esc(window.SITE.commit.slice(0, 7))}</span>`;
+}
+document.addEventListener("change", e => {
+  if (e.target.name === "board") { board = e.target.value; render(); }
+  if (e.target.name === "role") { role = e.target.value; render(); }
+});
+fetch("builds.json", {cache: "no-store"}).then(r => r.json()).then(site => {
+  window.SITE = site; builds = site.builds;
+  $("#repoLink").href = site.repo;
+  render();
+}).catch(err => { $("#boards").innerHTML = `<span class="bad">Couldn't load the build list: ${esc(err.message)}</span>`; });
+</script>
+</body>
+</html>

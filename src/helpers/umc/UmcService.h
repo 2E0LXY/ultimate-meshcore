@@ -13,6 +13,7 @@
 class NetworkService;
 class UmcWebServer;
 class UmcTelnet;
+class UmcUpdater;
 
 // Ultimate MeshCore network-services orchestrator. One instance per firmware.
 //
@@ -44,6 +45,7 @@ public:
   const UmcPrefs& prefs() const { return _prefs; }
   UmcHost* host() const { return _host; }
   NetworkService* network() const { return _network; }
+  UmcUpdater* updater() const { return _updater; }
 
   void scheduleReboot(uint32_t delay_ms);
   bool isRebootPending() const { return _reboot_at != 0; }
@@ -63,6 +65,7 @@ private:
   UmcPrefs _prefs;
   UmcWebServer* _web;
   UmcTelnet* _telnet;
+  UmcUpdater* _updater;
   unsigned long _reboot_at;
 
 #if defined(ESP_PLATFORM)

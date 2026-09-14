@@ -1,0 +1,92 @@
+name: Build firmware and publish web flasher
+
+# Every push to main builds all Ultimate MeshCore targets and republishes the
+# USB web flasher (GitHub Pages) and the "latest" release with those binaries,
+# so the flasher always installs the newest build.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: umc-firmware
+  cancel-in-progress: true
+
+jobs:
+  targets:
+    runs-on: ubuntu-latest
+    outputs:
+      envs: ${{ steps.list.outputs.envs }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          envs=$(grep -oP '^\[env:\Kumc_[^\]]+' variants/umc/platformio.ini | jq -R . | jq -sc .)
+          echo "envs=$envs" >> "$GITHUB_OUTPUT"
+          echo "Targets: $envs"
+
+  build:
+    needs: targets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJson(needs.targets.outputs.envs) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Build Environment
+        uses: ./.github/actions/setup-build-environment
+      - name: Build ${{ matrix.env }}
+        run: pio run -e ${{ matrix.env }} -t mergebin
+      - name: Collect binaries
+        run: |
+          out="artifacts/${{ matrix.env }}"
+          mkdir -p "$out"
+          b=".pio/build/${{ matrix.env }}"
+          cp "$b/bootloader.bin" "$b/partitions.bin" "$b/firmware.bin" "$b/firmware-merged.bin" "$out/"
+          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin "$out/"
+          ls -la "$out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ matrix.env }}
+          path: artifacts/${{ matrix.env }}
+
+  publish:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fw-*
+          path: dl
+      - name: Assemble flasher site
+        run: |
+          mkdir -p artifacts
+          for d in dl/fw-*; do mv "$d" "artifacts/${d#dl/fw-}"; done
+          python3 scripts/umc_flasher_site.py artifacts site
+      - name: Update "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          files=$(find site/firmware -name 'ultimate-meshcore-*.bin')
+          gh release create latest $files \
+            --title "Latest build ($(date -u +%Y-%m-%d) ${GITHUB_SHA::7})" \
+            --notes "Automatic build of ${GITHUB_SHA} from main. Use the web flasher, or flash *-merged.bin at 0x0 for a fresh install; the non-merged .bin updates an existing device (also via the device's web UI)." \
+            --prerelease --target "$GITHUB_SHA"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
