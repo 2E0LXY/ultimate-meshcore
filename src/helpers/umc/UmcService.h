@@ -86,6 +86,7 @@ private:
   volatile bool _ota_prepare;
   bool _ota_confirmed = false;
   bool _rollback_requested = false;
+  bool _net_seen = false;  // once the network has been up, keep servers running through WiFi blips
 };
 
 #if defined(ESP_PLATFORM)

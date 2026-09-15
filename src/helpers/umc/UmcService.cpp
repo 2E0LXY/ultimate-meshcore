@@ -24,6 +24,8 @@ void UmcHost::umcAppFrame(UmcAppServer& server, int client, const uint8_t* frame
 
 #if defined(ESP_PLATFORM)
 #include <esp_ota_ops.h>
+#include <esp_system.h>
+#include <esp_task_wdt.h>
 
 // Tell the Arduino core not to confirm a freshly updated image at boot: UMC confirms it
 // only after it has run healthily (see UmcService::loop), so a firmware that crashes or
@@ -33,6 +35,23 @@ extern "C" bool verifyRollbackLater() { return true; }
 
 namespace {
 constexpr unsigned long kOtaHealthyAfterMs = 60000;
+constexpr uint32_t kLoopWatchdogSecs = 60;  // reboot if the main loop stops running for this long
+
+const char* resetReasonLabel(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_EXT: return "reset pin";
+    case ESP_RST_SW: return "restart";
+    case ESP_RST_PANIC: return "crash";
+    case ESP_RST_INT_WDT: return "watchdog (interrupt)";
+    case ESP_RST_TASK_WDT: return "watchdog (hang)";
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep sleep wake";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_SDIO: return "sdio";
+    default: return "unknown";
+  }
+}
 
 const char* otaStateLabel(esp_ota_img_states_t s) {
   switch (s) {
@@ -181,6 +200,12 @@ void UmcService::begin(UmcHost* host, NetworkService* network) {
   _updater = new UmcUpdater(*this);
   _updater->begin();
   _app = new UmcAppServer(*this);
+#if defined(ESP_PLATFORM)
+  // begin() and loop() both run on the Arduino loop task, so this watches the whole mesh loop.
+  esp_task_wdt_init(kLoopWatchdogSecs, true);
+  esp_task_wdt_add(nullptr);
+  Serial.printf("[UMC] last reset: %s\n", resetReasonLabel(esp_reset_reason()));
+#endif
 
   Serial.printf("[UMC] %s v%s (%s, %s) setup=%s pin=%s\n", UMC_NAME, UMC_VERSION, _host->umcRole(),
                 _host->umcFirmwareVersion(), isSetupMode() ? "pending" : "done", _prefs.pin);
@@ -193,23 +218,30 @@ void UmcService::applySetupState() {
 }
 
 void UmcService::loop() {
+#if defined(ESP_PLATFORM)
+  esp_task_wdt_reset();
+#endif
   processMailbox();
   if (_ota_prepare) {
     _ota_prepare = false;
     if (_host != nullptr) _host->umcPrepareForOta();
   }
+  // Servers listen on every interface, so they survive WiFi reconnects and AP/STA changes.
+  // Tearing them down on a short WiFi drop is what can stall the loop (httpd_stop waits for
+  // its task), so once the network has been up they stay up until disabled in settings.
+  if (_network != nullptr && _network->isNetworkReachable()) _net_seen = true;
+  const bool net = _net_seen;
   if (_web != nullptr) {
-    _web->loop(_prefs.http_enabled && _network != nullptr && _network->isNetworkReachable());
+    _web->loop(_prefs.http_enabled && net);
   }
   if (_telnet != nullptr) {
-    _telnet->loop(_prefs.telnet_enabled && _network != nullptr && _network->isNetworkReachable() &&
-                  !isDefaultAdminPassword());
+    _telnet->loop(_prefs.telnet_enabled && net && !isDefaultAdminPassword());
   }
   if (_updater != nullptr) {
     _updater->loop(_network != nullptr && _network->isWifiConnected());
   }
   if (_app != nullptr) {
-    _app->loop(_prefs.app_tcp && _network != nullptr && _network->isNetworkReachable());
+    _app->loop(_prefs.app_tcp && net);
   }
   umc_routes.loop();
 #if defined(ESP_PLATFORM)
@@ -297,6 +329,9 @@ void UmcService::formatInfoJson(char* out, size_t out_size) const {
   pos += snprintf(&out[pos], out_size - pos, ",\"board\":");
   pos = appendJsonEscaped(out, out_size, pos, _host ? _host->umcBoardName() : "");
   pos += snprintf(&out[pos], out_size - pos, ",\"env\":\"%s\",\"commit\":\"%.7s\"", UmcUpdater::buildEnv(), UmcUpdater::buildCommit());
+#if defined(ESP_PLATFORM)
+  pos += snprintf(&out[pos], out_size - pos, ",\"reset\":\"%s\"", resetReasonLabel(esp_reset_reason()));
+#endif
   pos += snprintf(&out[pos], out_size - pos, ",\"setup\":%s,\"default_pw\":%s,\"features\":[",
                   isSetupMode() ? "true" : "false", isDefaultAdminPassword() ? "true" : "false");
   appendFeature(out, out_size, pos, "wifi");

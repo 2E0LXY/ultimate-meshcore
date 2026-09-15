@@ -509,7 +509,7 @@ async function renderDash(view) {
     }
     const batt = core.battery_mv ? (core.battery_mv / 1000).toFixed(2) + " V" : "—";
     let neigh = "—"; if (roleOk(RS)) { const t = val(g(11)); neigh = t === "-none-" || !t ? "0" : String(t.split("\n").filter(Boolean).length); }
-    $("#dStats").innerHTML = stat(fmtUp(core.uptime_secs), "Uptime") + stat(batt, "Battery") + stat(val(g(2)), "Clock (UTC)") +
+    $("#dStats").innerHTML = stat(fmtUp(core.uptime_secs), INFO.reset ? "Uptime · last restart: " + INFO.reset : "Uptime") + stat(batt, "Battery") + stat(val(g(2)), "Clock (UTC)") +
       stat((pk.recv ?? "—") + " / " + (pk.sent ?? "—"), "Packets rx / tx") + stat(neigh, "Neighbours") + stat(core.queue_len ?? "—", "TX queue") +
       (roleOk(RS) ? stat(val(g(10)), "Repeat") : "") + stat((() => { const m = parseJson(g(9)); return m && m.heap_free ? Math.round(m.heap_free / 1024) + " KB free" : "—"; })(), "Memory");
     const sta = net.sta || {}, ap = net.ap || {};
