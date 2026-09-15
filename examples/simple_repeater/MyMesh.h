@@ -350,6 +350,7 @@ public:
   const char* umcFirmwareVersion() const override { return FIRMWARE_VERSION; }
   const char* umcBuildDate() const override { return FIRMWARE_BUILD_DATE; }
   const char* umcBoardName() const override { return board.getManufacturerName(); }
+  uint32_t umcEpoch() override { return getRTCClock()->getCurrentTime(); }
   void umcPrepareForOta() override;
   UmcService& getUmc() { return umc; }
   void onTraceRecv(mesh::Packet* packet, uint32_t tag, uint32_t auth_code, uint8_t flags, const uint8_t* path_snrs,

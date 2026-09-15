@@ -24,6 +24,8 @@ public:
   virtual const char* umcFirmwareVersion() const = 0;
   virtual const char* umcBuildDate() const = 0;
   virtual const char* umcBoardName() const = 0;
+  // Current mesh clock (UTC epoch seconds), 0 if unknown.
+  virtual uint32_t umcEpoch() { return 0; }
 
   // Called just before an OTA image starts streaming into flash.
   virtual void umcPrepareForOta() {}

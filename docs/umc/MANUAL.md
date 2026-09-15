@@ -389,7 +389,7 @@ A bridge links two LoRa areas through another medium. The Heltec V3 build includ
 
 ## 16. Neighbours, routes, trace and live traffic
 
-- **Neighbours** page: repeaters heard directly, with how long ago and SNR. **Forget** removes one. **Discover neighbours** asks nearby repeaters to answer.
+- **Neighbours** page: repeaters heard directly, with their **name**, how long ago and SNR. Names come from adverts; a neighbour restored after a reboot shows "name not heard yet" until its next advert (names saved before the reboot are kept). **Forget** removes one. **Discover neighbours** asks nearby repeaters to answer.
 
 ### Routes & trace
 
@@ -399,7 +399,7 @@ The repeater learns a **route table** from every advert it hears. Each advert ca
 - **Trace**: sends a trace packet out along the route and back. Each repeater on the way adds the SNR it received, and the result table shows the signal quality of every hop plus the final hop back to this repeater. No answer within 30 seconds means a hop didn't hear or forward it.
 - **Add route / Edit route**: pin your own out-and-back list of repeater key prefixes (2 hex digits each, e.g. `27,da,27`) to use when tracing that node. **Unpin** goes back to the learned route.
 - **Trace custom path**: trace any list of repeaters, e.g. `a1,b2,a1`.
-- **Forget** removes a node from the table. The table holds the 48 most recently heard nodes (pinned routes are kept).
+- **Forget** removes a node from the table. The table holds the 48 most recently heard nodes (pinned routes are kept) and is saved to flash every 10 minutes, so names and routes survive reboots.
 
 | Command | Explanation |
 |---|---|

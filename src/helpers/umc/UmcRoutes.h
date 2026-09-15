@@ -32,6 +32,7 @@ public:
     int8_t snr4;
     int16_t rssi;
     uint32_t heard_ms;
+    uint32_t heard_epoch;    // RTC time heard (survives reboots via save/load)
     uint32_t adverts;
     bool has_loc;
     float lat, lon;
@@ -50,7 +51,7 @@ public:
     int8_t snr4[kMaxPathBytes + 1];   // per hop, then final (to us)
   };
 
-  void onAdvert(const mesh::Packet* pkt, const mesh::Identity& id, const uint8_t* app_data, size_t app_len) {
+  void onAdvert(const mesh::Packet* pkt, const mesh::Identity& id, const uint8_t* app_data, size_t app_len, uint32_t epoch) {
     AdvertDataParser parser(app_data, app_len);
     lock();
     Route* r = find(id.pub_key, kKeyBytes);
@@ -75,8 +76,10 @@ public:
     memcpy(r->path, pkt->path, bytes);
     r->snr4 = static_cast<int8_t>(constrain(pkt->getSNR() * 4.0f, -128.0f, 127.0f));
     r->heard_ms = millis();
+    r->heard_epoch = epoch;
     r->adverts++;
     r->used = true;
+    _dirty = true;
     unlock();
   }
 
@@ -118,8 +121,9 @@ public:
   bool setPin(Route* r, const uint8_t* path, uint8_t len) {
     if (r == nullptr || len > kMaxPathBytes) return false;
     lock();
-    memcpy(r->pin, path, len);
+    if (len) memcpy(r->pin, path, len);
     r->pin_len = len;
+    _dirty = true;
     unlock();
     return true;
   }
@@ -128,9 +132,53 @@ public:
     if (r == nullptr) return;
     lock();
     memset(r, 0, sizeof(*r));
+    _dirty = true;
     unlock();
   }
 
+  bool dirty() const { return _dirty; }
+
+  // Persist the table (names, routes, pins) so it survives reboots.
+  template <typename FS_T>
+  bool save(FS_T* fs) {
+    if (fs == nullptr) return false;
+    auto file = fs->open(kFile, "w", true);
+    if (!file) return false;
+    const uint32_t magic = kMagic;
+    const uint16_t entry_size = sizeof(Route);
+    file.write(static_cast<const uint8_t*>(static_cast<const void*>(&magic)), 4);
+    file.write(static_cast<const uint8_t*>(static_cast<const void*>(&entry_size)), 2);
+    Route r;
+    for (int i = 0; i < kMaxRoutes; i++) {
+      if (!copy(i, r)) continue;
+      file.write(static_cast<const uint8_t*>(static_cast<const void*>(&r)), sizeof(r));
+    }
+    file.close();
+    _dirty = false;
+    return true;
+  }
+
+  template <typename FS_T>
+  bool load(FS_T* fs) {
+    if (fs == nullptr || !fs->exists(kFile)) return false;
+    auto file = fs->open(kFile, "r");
+    if (!file) return false;
+    uint32_t magic = 0;
+    uint16_t entry_size = 0;
+    bool ok = file.read(static_cast<uint8_t*>(static_cast<void*>(&magic)), 4) == 4 &&
+              file.read(static_cast<uint8_t*>(static_cast<void*>(&entry_size)), 2) == 2 && magic == kMagic &&
+              entry_size == sizeof(Route);
+    int n = 0;
+    while (ok && n < kMaxRoutes && file.available() >= static_cast<int>(sizeof(Route))) {
+      Route r;
+      if (file.read(static_cast<uint8_t*>(static_cast<void*>(&r)), sizeof(r)) != sizeof(r)) break;
+      if (!r.used) continue;
+      r.heard_ms = 0;  // unknown this session: age comes from heard_epoch
+      _routes[n++] = r;
+    }
+    file.close();
+    return n > 0;
+  }
   Trace& trace() { return _trace; }
 
   void traceResult(uint32_t tag, const uint8_t* snrs, uint8_t count, int8_t final_snr4) {
@@ -234,6 +282,9 @@ private:
   void unlock() {}
 #endif
 
+  static constexpr const char* kFile = "/umc_routes";
+  static constexpr uint32_t kMagic = 0x31524D55;  // "UMR1"
+  bool _dirty = false;
   Route _routes[kMaxRoutes] = {};
   Trace _trace = {};
 };

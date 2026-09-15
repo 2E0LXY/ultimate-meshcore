@@ -73,6 +73,14 @@ size_t appendHexPath(char* out, size_t n, const uint8_t* path, uint8_t len, uint
 }
 }  // namespace
 
+// Seconds since a route was last heard: this session's millis, else the saved RTC time; -1 if unknown.
+long UmcService::routeAgeSecs(const UmcRoutes::Route& r) const {
+  if (r.heard_ms != 0) return static_cast<long>((millis() - r.heard_ms) / 1000);
+  uint32_t now = _host != nullptr ? _host->umcEpoch() : 0;
+  if (r.heard_epoch > 1735689600UL && now >= r.heard_epoch) return static_cast<long>(now - r.heard_epoch);
+  return -1;
+}
+
 void UmcService::formatTrafficJson(char* out, size_t out_size) const {
   size_t pos = snprintf(out, out_size, "{\"rx_total\":%lu,\"tx_total\":%lu,\"packets\":[",
                         static_cast<unsigned long>(umc_traffic.rxTotal()), static_cast<unsigned long>(umc_traffic.txTotal()));
@@ -100,9 +108,9 @@ void UmcService::formatRoutesJson(char* out, size_t out_size) const {
     pos += snprintf(out + pos, out_size - pos, "%s{\"key\":\"%s\",\"name\":", first ? "" : ",", key);
     pos = appendJsonEscaped(out, out_size, pos, r.name);
     pos += snprintf(out + pos, out_size - pos,
-                    ",\"type\":\"%s\",\"hops\":%u,\"hash\":%u,\"path\":\"%s\",\"pin\":\"%s\",\"snr\":%.2f,\"ago\":%lu,\"adverts\":%lu",
+                    ",\"type\":\"%s\",\"hops\":%u,\"hash\":%u,\"path\":\"%s\",\"pin\":\"%s\",\"snr\":%.2f,\"ago\":%ld,\"adverts\":%lu",
                     UmcRoutes::typeName(r.type), r.path_len / (r.hash_size ? r.hash_size : 1), r.hash_size, path, pin,
-                    r.snr4 / 4.0f, static_cast<unsigned long>((millis() - r.heard_ms) / 1000), static_cast<unsigned long>(r.adverts));
+                    r.snr4 / 4.0f, routeAgeSecs(r), static_cast<unsigned long>(r.adverts));
     if (r.has_loc) pos += snprintf(out + pos, out_size - pos, ",\"lat\":%.4f,\"lon\":%.4f", r.lat, r.lon);
     pos += snprintf(out + pos, out_size - pos, "}");
     first = false;
@@ -727,9 +735,9 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
     char path[80], pin[80];
     appendHexPath(path, sizeof(path), r.path, r.path_len, r.hash_size, ">");
     appendHexPath(pin, sizeof(pin), r.pin, r.pin_len, 1, ",");
-    snprintf(reply, reply_size, "> %s %s [%s] %s via %s snr:%.1f %lus ago%s%s", key, r.name[0] ? r.name : "?",
+    snprintf(reply, reply_size, "> %s %s [%s] %s via %s snr:%.1f %lds ago%s%s", key, r.name[0] ? r.name : "?",
              UmcRoutes::typeName(r.type), r.path_len ? "heard" : "heard direct", r.path_len ? path : "-", r.snr4 / 4.0f,
-             static_cast<unsigned long>((millis() - r.heard_ms) / 1000), r.pin_len ? " pinned:" : "", pin);
+             routeAgeSecs(r), r.pin_len ? " pinned:" : "", pin);
     return true;
   }
   if (strcmp(command, "get trace") == 0) {

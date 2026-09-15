@@ -4,6 +4,7 @@
 
 #include "UmcHost.h"
 #include "UmcPrefs.h"
+#include "UmcRoutes.h"
 
 #if defined(ESP_PLATFORM)
   #include <freertos/FreeRTOS.h>
@@ -56,6 +57,7 @@ public:
   void formatInfoJson(char* out, size_t out_size) const;
   void formatRoutesJson(char* out, size_t out_size) const;
   void formatTrafficJson(char* out, size_t out_size) const;
+  long routeAgeSecs(const UmcRoutes::Route& r) const;
   static size_t appendJsonEscaped(char* out, size_t out_size, size_t pos, const char* text);
 
 private:

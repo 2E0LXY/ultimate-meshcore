@@ -1005,7 +1005,7 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
                           const uint8_t *app_data, size_t app_data_len) {
   mesh::Mesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len); // chain to super impl
 #ifdef UMC_BUILD
-  umc_routes.onAdvert(packet, id, app_data, app_data_len);  // learn the route this advert took
+  umc_routes.onAdvert(packet, id, app_data, app_data_len, getRTCClock()->getCurrentTime());  // learn the route this advert took
 #endif
 
   // if this a zero hop advert (and not via 'Share'), add it to neighbours
@@ -1371,6 +1371,7 @@ void MyMesh::begin(FILESYSTEM *fs, ArchiveStorage* archive) {
 #ifdef UMC_BUILD
   board.setInhibitSleep(true);
   umc.begin(this, &network);
+  umc_routes.load(_fs);  // names and routes heard before the last reboot
 #endif
 #if defined(ESP_PLATFORM) && WITH_WEB_PANEL
   board.setInhibitSleep(true);
@@ -3154,6 +3155,11 @@ void MyMesh::loop() {
 #endif
 #ifdef UMC_BUILD
   umc.loop();
+  static unsigned long next_routes_save = 10UL * 60UL * 1000UL;
+  if (millis() > next_routes_save) {   // flash-friendly: at most every 10 minutes, only when changed
+    next_routes_save = millis() + 10UL * 60UL * 1000UL;
+    if (umc_routes.dirty()) umc_routes.save(_fs);
+  }
 #endif
 #endif
 #ifdef WITH_MQTT_UPLINK

@@ -536,16 +536,21 @@ async function renderDash(view) {
 async function renderNeigh(view) {
   view.innerHTML = `<div class="card"><h2>Neighbours</h2><p class="sub">Repeaters heard directly (most recent adverts). SNR in dB.</p>
     <div class="row" style="margin-bottom:10px"><button class="btn" id="nRef">Refresh</button><button class="btn" id="nDisc">Discover neighbours</button></div>
-    <table><thead><tr><th>Key prefix</th><th>Heard</th><th>SNR</th><th></th></tr></thead><tbody id="nBody"></tbody></table></div>`;
+    <div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Key prefix</th><th>Heard</th><th>SNR</th><th></th></tr></thead><tbody id="nBody"></tbody></table></div>
+    <p class="val">Names come from each repeater's adverts. A neighbour shows “name not heard yet” until its next advert arrives after a reboot.</p></div>`;
   const load = async () => {
     // `neighbors` lines are "<key prefix>:<seconds since heard>:<SNR x 4>"
     const t = val(await one("neighbors"));
+    let routes = [];
+    try { routes = (await api.routes()).routes || []; } catch {}
     const rows = t === "-none-" || !t ? [] : t.split("\n").filter(Boolean).map(l => l.split(":"));
     $("#nBody").innerHTML = rows.length ? rows.map(([k, secs, snr]) => {
       const age = Math.max(0, +secs || 0);
       const a = age < 120 ? age + " s" : age < 7200 ? Math.round(age / 60) + " min" : age < 172800 ? Math.round(age / 3600) + " h" : Math.round(age / 86400) + " days";
-      return `<tr><td><code>${esc(k)}</code></td><td>${esc(a)} ago</td><td>${(+snr / 4).toFixed(1)}</td><td><button class="btn sm" data-rm="${esc(k)}">Forget</button></td></tr>`;
-    }).join("") : `<tr><td colspan="4" class="val">No neighbours heard yet.</td></tr>`;
+      const r = routes.find(x => x.key.startsWith(k.toLowerCase()));
+      const name = r && r.name ? `<b>${esc(r.name)}</b>` : `<span class="val">name not heard yet</span>`;
+      return `<tr><td>${name}</td><td><code>${esc(k)}</code></td><td>${esc(a)} ago</td><td>${(+snr / 4).toFixed(1)}</td><td><button class="btn sm" data-rm="${esc(k)}">Forget</button></td></tr>`;
+    }).join("") : `<tr><td colspan="5" class="val">No neighbours heard yet.</td></tr>`;
   };
   view.addEventListener("click", async e => {
     const b = e.target.closest("button"); if (!b) return;
@@ -596,7 +601,7 @@ async function renderRoutes(view) {
   let routes = [];
   const nameFor = hex => { const r = routes.find(x => x.key.startsWith(hex.toLowerCase())); return r && r.name ? r.name : ""; };
   const hopLabel = hex => { const n = nameFor(hex); return `<code>${esc(hex)}</code>${n ? ` <span class="val">${esc(n)}</span>` : ""}`; };
-  const ago = s => s < 120 ? s + " s" : s < 7200 ? Math.round(s / 60) + " min" : s < 172800 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " days";
+  const ago = s => s < 0 ? "before reboot" : s < 120 ? s + " s" : s < 7200 ? Math.round(s / 60) + " min" : s < 172800 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " days";
   const render = () => {
     const q = $("#rtFind").value.trim().toLowerCase();
     const list = routes.filter(r => !q || r.name.toLowerCase().includes(q) || r.key.startsWith(q)).sort((a, b) => a.ago - b.ago);
@@ -606,7 +611,7 @@ async function renderRoutes(view) {
       const chain = hops.length ? `this repeater → ${hops.map(hopLabel).join(" → ")} → node` : `<span class="val">direct (heard without repeaters)</span>`;
       return `<tr><td><b>${esc(r.name || "?")}</b> <span class="pill">${esc(r.type)}</span><br><code class="val">${esc(r.key)}</code></td>
         <td>${chain}${r.pin ? `<br><span class="pill ok">pinned trace: ${esc(r.pin)}</span>` : ""}</td>
-        <td>${r.hops}</td><td>${ago(r.ago)} ago</td><td>${(+r.snr).toFixed(1)}</td>
+        <td>${r.hops}</td><td>${r.ago < 0 ? ago(r.ago) : ago(r.ago) + " ago"}</td><td>${(+r.snr).toFixed(1)}</td>
         <td class="row" style="justify-content:flex-end"><button class="btn sm" data-trace="${esc(r.key)}">Trace</button><button class="btn sm" data-pin="${esc(r.key)}">${r.pin ? "Edit route" : "Add route"}</button>${r.pin ? `<button class="btn sm" data-unpin="${esc(r.key)}">Unpin</button>` : ""}<button class="btn sm danger" data-forget="${esc(r.key)}">Forget</button></td></tr>`;
     }).join("") || `<tr><td colspan="6" class="val">No nodes heard yet. Adverts arrive over time; press <b>Send flood advert</b> on the dashboard to prompt replies.</td></tr>`;
   };
