@@ -747,6 +747,7 @@ async function renderNet(view) {
     ]},
     {title: "Services", fields: [
       F("http.timeout", "Web session timeout (min)", {type: "number", min: 1, max: 1440}),
+      F("app.tcp", "App connection (TCP port 5000)", Object.assign({help: "Lets the MeshCore app, meshcore-open, meshcore_py or Home Assistant connect over WiFi. Log in to the “(console)” contact with the admin password."}, onoff)),
       F("telnet", "Telnet CLI (port 23)", Object.assign({help: "Password protected. Plain text — use only on trusted networks."}, onoff)),
       F("ble", "Bluetooth", Object.assign({feature: "ble", help: "Reboot to apply."}, onoff)),
       F("ble.idle", "Bluetooth auto-off (min idle)", {type: "number", min: 0, max: 1440, feature: "ble"}),

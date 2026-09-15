@@ -14,6 +14,7 @@ class NetworkService;
 class UmcWebServer;
 class UmcTelnet;
 class UmcUpdater;
+class UmcAppServer;
 
 // Ultimate MeshCore network-services orchestrator. One instance per firmware.
 //
@@ -68,6 +69,7 @@ private:
   UmcWebServer* _web;
   UmcTelnet* _telnet;
   UmcUpdater* _updater;
+  UmcAppServer* _app;
   unsigned long _reboot_at;
 
 #if defined(ESP_PLATFORM)

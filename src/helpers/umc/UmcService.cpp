@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "UmcTelnet.h"
+#include "UmcAppServer.h"
 #include "UmcRoutes.h"
 #include "UmcTraffic.h"
 #include "UmcUpdater.h"
@@ -12,6 +13,14 @@
 
 UmcTraffic umc_traffic;
 UmcRoutes umc_routes;
+
+// Default for hosts without an app protocol: reject every command as unsupported.
+void UmcHost::umcAppFrame(UmcAppServer& server, int client, const uint8_t* frame, size_t len) {
+  (void)frame;
+  (void)len;
+  const uint8_t err[2] = {1 /* RESP_CODE_ERR */, 1 /* ERR_CODE_UNSUPPORTED_CMD */};
+  server.send(client, err, sizeof(err));
+}
 
 #if defined(ESP_PLATFORM)
 #include <esp_ota_ops.h>
@@ -137,7 +146,7 @@ void appendFeature(char* out, size_t out_size, size_t& pos, const char* name) {
 }  // namespace
 
 UmcService::UmcService()
-    : _host(nullptr), _network(nullptr), _prefs{}, _web(nullptr), _telnet(nullptr), _updater(nullptr), _reboot_at(0),
+    : _host(nullptr), _network(nullptr), _prefs{}, _web(nullptr), _telnet(nullptr), _updater(nullptr), _app(nullptr), _reboot_at(0),
 #if defined(ESP_PLATFORM)
       _mb_lock(nullptr), _mb_done(nullptr),
 #endif
@@ -163,6 +172,7 @@ void UmcService::begin(UmcHost* host, NetworkService* network) {
   _telnet = new UmcTelnet(*this);
   _updater = new UmcUpdater(*this);
   _updater->begin();
+  _app = new UmcAppServer(*this);
 
   Serial.printf("[UMC] %s v%s (%s, %s) setup=%s pin=%s\n", UMC_NAME, UMC_VERSION, _host->umcRole(),
                 _host->umcFirmwareVersion(), isSetupMode() ? "pending" : "done", _prefs.pin);
@@ -189,6 +199,9 @@ void UmcService::loop() {
   }
   if (_updater != nullptr) {
     _updater->loop(_network != nullptr && _network->isWifiConnected());
+  }
+  if (_app != nullptr) {
+    _app->loop(_prefs.app_tcp && _network != nullptr && _network->isNetworkReachable());
   }
   umc_routes.loop();
 #if defined(ESP_PLATFORM)
@@ -501,6 +514,26 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
       UmcPrefsStore::save(_prefs);
       snprintf(reply, reply_size, "OK");
     }
+    return true;
+  }
+  if (strcmp(command, "get app.tcp") == 0) {
+    snprintf(reply, reply_size, "> %s", onOff(_prefs.app_tcp));
+    return true;
+  }
+  if (startsWith(command, "set app.tcp ")) {
+    bool b;
+    if (!parseOnOff(command + 12, b)) {
+      snprintf(reply, reply_size, "Err - use on|off");
+    } else {
+      _prefs.app_tcp = b;
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK");
+    }
+    return true;
+  }
+  if (strcmp(command, "get app.status") == 0) {
+    snprintf(reply, reply_size, "> %s port:%u apps:%d", onOff(_prefs.app_tcp), _prefs.app_tcp_port,
+             _app != nullptr ? _app->connectedCount() : 0);
     return true;
   }
   if (strcmp(command, "get telnet") == 0) {

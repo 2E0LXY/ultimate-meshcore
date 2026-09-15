@@ -37,6 +37,8 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.display_page_s = 5;
   p.display_traffic_s = 60;
   p.group_hops_max = 64;
+  p.app_tcp = true;
+  p.app_tcp_port = 5000;
 }
 
 bool UmcPrefsStore::isValidPin(const char* pin) {
@@ -66,6 +68,8 @@ void UmcPrefsStore::load(UmcPrefs& p) {
     p.display_page_s = nvs.getUChar("disp_page", p.display_page_s);
     p.display_traffic_s = nvs.getUShort("disp_trf", p.display_traffic_s);
     p.group_hops_max = nvs.getUChar("grp_hops", p.group_hops_max);
+    p.app_tcp = nvs.getBool("app_tcp", p.app_tcp);
+    p.app_tcp_port = nvs.getUShort("app_port", p.app_tcp_port);
     nvs.getString("pin", p.pin, sizeof(p.pin));
     nvs.end();
   }
@@ -95,6 +99,8 @@ bool UmcPrefsStore::save(const UmcPrefs& p) {
   nvs.putUChar("disp_page", p.display_page_s);
   nvs.putUShort("disp_trf", p.display_traffic_s);
   nvs.putUChar("grp_hops", p.group_hops_max);
+  nvs.putBool("app_tcp", p.app_tcp);
+  nvs.putUShort("app_port", p.app_tcp_port);
   nvs.putString("pin", p.pin);
   nvs.end();
   return true;

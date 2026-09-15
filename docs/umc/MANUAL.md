@@ -487,7 +487,22 @@ See [§3.1](#31-web-flasher-easiest).
 | **Telnet / PuTTY** | `telnet <IP>` |
 | **Web browser** | `http://<IP>/` or `http://umc-<name>.local/` |
 | **MQTT maps / analysers** | Via the MQTT settings |
-| Direct app connection to a repeater over Bluetooth or WiFi (port 5000) | *(coming soon)* |
+| **Official MeshCore app**, **meshcore-open** over WiFi | Add a TCP / WiFi device with the repeater's IP and port **5000**. See below. |
+| **meshcore_py**, **meshcore-cli**, **Home Assistant (meshcore-ha)** | TCP to the repeater's IP, port 5000 |
+| Direct app connection over Bluetooth | *(coming soon)* |
+
+### Connecting an app over WiFi (port 5000)
+
+1. Make sure the phone/computer is on the same network as the repeater, and **App connection (TCP port 5000)** is on (**Network → Services**, or `set app.tcp on`).
+2. In the app, add a **TCP / WiFi** connection: host = the repeater's IP (shown on the display or `get wifi.status`), port = **5000**.
+3. The app connects and shows one contact: **“<repeater name> (console)”**.
+4. Open that contact and **log in** with the admin password (or the guest password for read-only status).
+5. The app's usual repeater screens now work directly over WiFi: **status**, **telemetry**, **neighbours**, **command line** and settings.
+
+Notes:
+- A repeater has no chat identity, contacts or channels, so messaging and channels aren't available through it. Use client (companion) firmware for that.
+- Up to 3 apps can be connected at once. Changing settings requires the admin login on that connection.
+- `get app.status` shows whether it's on and how many apps are connected.
 
 ---
 
@@ -626,6 +641,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `start ota` | Legacy OTA hotspot |
 | `stats-core`, `stats-radio`, `stats-packets` | Statistics (JSON) |
 | `get/set telnet on\|off` | Telnet command line |
+| `get/set app.tcp on\|off`, `get app.status` | MeshCore app connection on TCP port 5000 |
 | `tempradio <MHz>,<kHz>,<SF>,<CR>,<min>` | Temporary radio settings |
 | `time <epoch>` | Set clock |
 | `trace <a1,b2,…>`, `trace route <node>`, `get trace` | Trace a path and read the per-hop SNR |

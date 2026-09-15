@@ -20,6 +20,8 @@ struct UmcPrefs {
   uint8_t display_page_s;      // seconds per settings page
   uint16_t display_traffic_s;  // seconds on the live traffic screen
   uint8_t group_hops_max;      // flood hop limit for channel (group) messages, 64 = no extra limit
+  bool app_tcp;                // MeshCore app connection on TCP
+  uint16_t app_tcp_port;       // default 5000
 };
 
 class UmcPrefsStore {

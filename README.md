@@ -56,6 +56,7 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 - **Rescue hotspot** when no saved network is reachable (PIN protected). Always-on and never modes too.
 - Static IP, custom hostname, **mDNS** (`http://umc-<name>.local/`), network scan, captive portal.
 - **Telnet** command line (port 23, password protected, off by default).
+- **App connection on TCP port 5000**: the MeshCore app, meshcore-open, meshcore_py, meshcore-cli and Home Assistant connect over WiFi. Log in to the repeater's **(console)** contact to get status, telemetry, neighbours and the command line.
 - Time sync from NTP (UK servers by default). Mesh time stays UTC.
 - Optional classic EastMesh HTTPS panel with stats history.
 
@@ -76,7 +77,7 @@ Everything in the web interface is also a command (USB serial, telnet, web conso
 wifi.ssid2/3, wifi.pwd2/3, wifi clear, wifi scan, get wifi.scan, wifi.enabled, get wifi.networks
 net.ip, net.hostname, net.mdns, get net.status
 ap.mode, ap.password, ap.rescue, get ap.status, pin
-http, http.timeout, telnet, timezone
+http, http.timeout, telnet, timezone, app.tcp, get app.status
 display.mode, display.ip, display.page, display.traffic, display.timeout
 region preset yorkshire|northwest|uk, get traffic, group.hops.max, advert.hops.max
 routes, route <node>, route find|pin|unpin|forget, trace <path>, trace route <node>, get trace

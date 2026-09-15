@@ -354,6 +354,9 @@ public:
   UmcService& getUmc() { return umc; }
   void onTraceRecv(mesh::Packet* packet, uint32_t tag, uint32_t auth_code, uint8_t flags, const uint8_t* path_snrs,
                    const uint8_t* path_hashes, uint8_t path_len) override;
+  void umcAppFrame(UmcAppServer& server, int client, const uint8_t* frame, size_t len) override;
+  void umcConsoleKey(uint8_t* key) const;
+  bool umcIsConsoleKey(const uint8_t* key, size_t n) const;
 #endif
 
 #if defined(WITH_BRIDGE)
