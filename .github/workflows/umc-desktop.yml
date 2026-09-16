@@ -40,6 +40,20 @@ jobs:
       - name: Build
         working-directory: desktop
         run: python build.py
+      - name: Check the built program starts
+        shell: bash
+        run: |
+          exe=desktop/dist/ultimate-meshcore-desktop
+          [ -f desktop/dist/UltimateMeshCoreDesktop.exe ] && exe=desktop/dist/UltimateMeshCoreDesktop.exe
+          "$exe" --no-window --port 47900 &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:47900/desk/status; then break; fi
+            sleep 2
+          done
+          echo
+          curl -sf http://127.0.0.1:47900/connect | grep -q "Ultimate MeshCore Desktop"
+          curl -sf http://127.0.0.1:47900/desk/ports
+          curl -sf -X POST http://127.0.0.1:47900/desk/quit || true
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: bash
