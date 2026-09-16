@@ -11,7 +11,7 @@ import kotlinx.coroutines.launch
 import uk.umc.app.AppState
 import uk.umc.app.proto.toHex
 import uk.umc.app.proto.hexToBytes
-import java.security.MessageDigest
+import uk.umc.app.proto.hashtagKey
 
 /** Channels: public, hashtag, private and shared-secret group chats. */
 @Composable
@@ -24,6 +24,9 @@ fun ChannelsScreen() {
     var name by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
     var showSecret by remember { mutableStateOf<Int?>(null) }
+    val scopes by AppState.scopes.collectAsState()
+    var scoping by remember { mutableStateOf<String?>(null) }
+    var scopeText by remember { mutableStateOf("") }
 
     fun freeSlot(): Int = (0 until 40).firstOrNull { idx -> channels.none { it.idx == idx } } ?: -1
 
@@ -31,9 +34,15 @@ fun ChannelsScreen() {
         items(channels) { ch ->
             ListItem(
                 headlineContent = { Text(ch.name) },
-                supportingContent = { Text(if (showSecret == ch.idx) ch.secret.toHex() else "slot ${ch.idx}") },
+                supportingContent = {
+                    Text(
+                        (if (showSecret == ch.idx) ch.secret.toHex() else "slot ${ch.idx}") +
+                            (scopes[ch.name]?.let { " · scope $it" } ?: ""),
+                    )
+                },
                 trailingContent = {
                     Row {
+                        TextButton(onClick = { scoping = ch.name; scopeText = scopes[ch.name] ?: "" }) { Text("Scope") }
                         TextButton(onClick = { showSecret = if (showSecret == ch.idx) null else ch.idx }) { Text(if (showSecret == ch.idx) "Hide" else "Key") }
                         TextButton(onClick = {
                             scope.launch {
@@ -48,7 +57,24 @@ fun ChannelsScreen() {
             HorizontalDivider()
         }
         item {
-            SectionCard("Add a channel", "Everyone with the same key sees the same messages.") {
+            SectionCard("Regional setup", "From the MeshCore Yorkshire guide: the #Yorkshire channel with the yorkshire region scope.") {
+                Button(onClick = {
+                    scope.launch {
+                        runCatching {
+                            if (channels.none { it.name == "#Yorkshire" }) {
+                                val idx = freeSlot()
+                                if (idx < 0) throw Exception("All 40 channel slots are in use")
+                                s.setChannel(idx, "#Yorkshire", hashtagKey("#Yorkshire"))
+                            }
+                            AppState.setChannelScope("#Yorkshire", "yorkshire")
+                        }.onSuccess { AppState.say("#Yorkshire added, scoped to yorkshire") }
+                            .onFailure { AppState.say(it.message ?: "failed") }
+                    }
+                }) { Text("Set up Yorkshire") }
+            }
+        }
+        item {
+            SectionCard("Add a channel", "Everyone with the same key sees the same messages. Hashtag names are case-sensitive.") {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("hashtag", "private", "join", "public").forEach { k ->
                         FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(k) })
@@ -70,8 +96,7 @@ fun ChannelsScreen() {
                         "hashtag" -> {
                             if (n.isEmpty()) null else {
                                 if (!n.startsWith("#")) n = "#$n"
-                                n = n.lowercase()
-                                MessageDigest.getInstance("SHA-256").digest(n.toByteArray()).copyOfRange(0, 16)
+                                hashtagKey(n)
                             }
                         }
                         "private" -> if (n.isEmpty()) null else ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
@@ -88,5 +113,20 @@ fun ChannelsScreen() {
                 }) { Text("Add channel") }
             }
         }
+    }
+
+    scoping?.let { name ->
+        AlertDialog(
+            onDismissRequest = { scoping = null },
+            title = { Text("Region scope for $name") },
+            text = {
+                Column {
+                    Text("Messages on this channel only travel through repeaters that know this region, e.g. yorkshire. Case-sensitive. Blank = none.")
+                    OutlinedTextField(scopeText, { scopeText = it }, Modifier.fillMaxWidth(), singleLine = true)
+                }
+            },
+            confirmButton = { TextButton(onClick = { AppState.setChannelScope(name, scopeText); scoping = null }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { scoping = null }) { Text("Cancel") } },
+        )
     }
 }

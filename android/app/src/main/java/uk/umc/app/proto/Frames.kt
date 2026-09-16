@@ -51,6 +51,7 @@ object Cmd {
     const val SET_AUTOADD_CONFIG = 58
     const val GET_AUTOADD_CONFIG = 59
     const val SET_PATH_HASH_MODE = 61
+    const val SET_FLOOD_SCOPE_KEY = 54
     const val SET_DEFAULT_FLOOD_SCOPE = 63
     const val GET_DEFAULT_FLOOD_SCOPE = 64
 }
@@ -178,6 +179,12 @@ class FrameReader(private val b: ByteArray, var pos: Int = 0) {
 fun ByteArray.toKString(): String {
     val end = indexOfFirst { it == 0.toByte() }.let { if (it < 0) size else it }
     return String(this, 0, end, Charsets.UTF_8)
+}
+
+/** Hashtag channel keys and region keys: SHA-256 of "#name" exactly as written, first 16 bytes. */
+fun hashtagKey(name: String): ByteArray {
+    val n = if (name.startsWith("#")) name else "#$name"
+    return java.security.MessageDigest.getInstance("SHA-256").digest(n.toByteArray(Charsets.UTF_8)).copyOfRange(0, 16)
 }
 
 fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }

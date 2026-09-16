@@ -590,6 +590,13 @@ Every link sees the same contacts, channels and messages. The browser keeps its 
 - **Add contact…** imports a `meshcore://` link. **Share my contact…** exports your own.
 - With **Manual add only** on (Messaging settings), new adverts appear at the top with an **add** link.
 
+### 21.5a Routes, trace and map
+
+- **Routes & trace** lists every contact with the route direct messages take, naming each repeater (ids are the first bytes of their keys). **Set route** fixes a route, e.g. `a1,b2,c3`; **Discover** asks the mesh for the best one; **Reset** floods the next message so a new route is learnt; **Trace** shows the signal each hop heard.
+- **Trace any path** at the top traces a hop list you type, out and back (`a1,b2,a1`).
+- **Map** shows everyone who shares a location on OpenStreetMap (blue = this radio, orange = repeaters, green = room servers, purple = people). The map is drawn by your browser, so it needs internet access; without it you get a list with map links. The Map page is on repeaters too, using the nodes they have heard.
+- **Region** sets up regional scopes: **Set up Yorkshire** adds `#Yorkshire` and scopes it to `yorkshire`, and lists the room servers the radio knows.
+
 ### 21.6 Channels
 
 | Kind | Use it when |
@@ -607,7 +614,9 @@ Regional meshes ask clients to **scope** their flood traffic so it doesn't cross
 
 - Names are **case-sensitive** and must match what the repeaters use (`yorkshire`, `northwest`, …).
 - Blank (`set scope`) sends unscoped, reaching the whole mesh.
-- The [MeshCore Yorkshire guide](https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/) recommends adding the `yorkshire` scope for the #Yorkshire channel.
+- The [MeshCore Yorkshire guide](https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/) recommends adding the `yorkshire` scope to the `#Yorkshire` channel. On the client's **Region** page, **Set up Yorkshire** does exactly that: it adds `#Yorkshire` (capital Y, as the guide writes it) and scopes that channel to `yorkshire`.
+- Each channel can have its own scope (**Channels → Region scope…**), like **Set Region Scope** in the MeshCore apps. Channels without one use the device scope.
+- Hashtag channel keys come from the name exactly as typed, so `#Yorkshire` and `#yorkshire` are different channels. Use the spelling your group uses.
 
 ### 21.7 Client settings
 

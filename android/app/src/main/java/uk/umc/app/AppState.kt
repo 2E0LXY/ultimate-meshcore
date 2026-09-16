@@ -39,6 +39,7 @@ object AppState {
         appContext = context.applicationContext
         prefs = context.getSharedPreferences("umc", Context.MODE_PRIVATE)
         loadDevices()
+        loadScopes()
         val last = prefs.getString("last", null)
         savedDevices.value.firstOrNull { it.key() == last }?.let { connect(it) }
     }
@@ -94,6 +95,7 @@ object AppState {
         }
         link = l
         val s = MeshSession(l, scope)
+        s.scopeFor = { channel -> channelScope(channel) }
         session.value = s
         s.start()
         scope.launch { l.state.collect { linkState.value = it } }
@@ -110,6 +112,26 @@ object AppState {
 
     fun reconnect() {
         target.value?.let { connect(it) }
+    }
+
+    // ---------------------------------------------------------------- region scopes
+
+    val scopes = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    fun channelScope(channel: String): String? = scopes.value[channel]
+
+    fun setChannelScope(channel: String, region: String) {
+        val next = scopes.value.toMutableMap()
+        if (region.isBlank()) next.remove(channel) else next[channel] = region.trim()
+        scopes.value = next
+        val o = JSONObject()
+        next.forEach { (k, v) -> o.put(k, v) }
+        prefs.edit().putString("scopes", o.toString()).apply()
+    }
+
+    private fun loadScopes() {
+        val o = runCatching { JSONObject(prefs.getString("scopes", "{}") ?: "{}") }.getOrNull() ?: return
+        scopes.value = o.keys().asSequence().associateWith { o.getString(it) }
     }
 
     /** Web address of the connected radio, when we reached it over WiFi. */

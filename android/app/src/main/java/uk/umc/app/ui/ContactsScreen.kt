@@ -126,6 +126,8 @@ private fun ContactSheet(
     var askPassword by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf("") }
     var console by remember { mutableStateOf(false) }
+    var routing by remember { mutableStateOf(false) }
+    var routeText by remember { mutableStateOf(s.routeHops(c).joinToString(",")) }
 
     fun run(label: String, block: suspend () -> String) {
         busy = label
@@ -140,6 +142,10 @@ private fun ContactSheet(
         Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(c.name, style = MaterialTheme.typography.titleLarge)
             Text("${c.typeName} · ${pathLabel(c)}", color = MaterialTheme.colorScheme.outline)
+            if (c.hops > 0) {
+                Text("Route: " + s.routeHops(c).joinToString(" → ") { h -> s.hopName(h).ifEmpty { h } + " ($h)" },
+                    style = MaterialTheme.typography.bodySmall)
+            }
             Text(c.publicKey, style = MaterialTheme.typography.labelSmall)
             if (c.lat != 0.0 || c.lon != 0.0) Text("Location %.4f, %.4f".format(c.lat, c.lon))
 
@@ -175,6 +181,7 @@ private fun ContactSheet(
                         }
                     },
                     "Discover path" to { run("Discovering…") { s.discoverPath(c) } },
+                    "Set route" to { routing = true },
                     "Reset path" to { run("Resetting…") { s.resetPath(c); "Path reset - the next message finds a new route." } },
                     "Share" to { run("Sharing…") { s.shareContact(c); "Shared with radios in direct range." } },
                     "Export" to { run("Exporting…") { val uri = s.exportContact(c); onShare(uri); uri } },
@@ -221,6 +228,27 @@ private fun ContactSheet(
     }
 
     if (console) AdminConsole(c, s, onClose = { console = false })
+
+    if (routing) {
+        AlertDialog(
+            onDismissRequest = { routing = false },
+            title = { Text("Route to ${c.name}") },
+            text = {
+                Column {
+                    Text("Repeater ids in order from here, e.g. a1,b2,c3. Blank = flood and learn a new route.")
+                    OutlinedTextField(routeText, { routeText = it }, Modifier.fillMaxWidth(), singleLine = true)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    routing = false
+                    val hops = routeText.split(',', ' ', '>').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+                    run("Saving route…") { s.setRoute(c, hops); if (hops.isEmpty()) "Route cleared." else "Route set: ${hops.joinToString(" → ")}" }
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { routing = false }) { Text("Cancel") } },
+        )
+    }
 }
 
 @Composable

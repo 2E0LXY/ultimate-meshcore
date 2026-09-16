@@ -199,6 +199,9 @@ const SECTIONS = [
   {id: "chat", title: "Messages", ico: "💬", special: "chat", roles: CL},
   {id: "contacts", title: "Contacts", ico: "👥", special: "contacts", roles: CL},
   {id: "channels", title: "Channels", ico: "#", special: "channels", roles: CL},
+  {id: "clroutes", title: "Routes & trace", ico: "🧭", special: "clroutes", roles: CL},
+  {id: "map", title: "Map", ico: "📍", special: "map"},
+  {id: "clregion", title: "Region", ico: "🗺", special: "clregion", roles: CL},
   {id: "radio", title: "Radio", ico: "📡", groups: [
     {title: "LoRa parameters", sub: "All nodes in a mesh must share frequency, bandwidth and spreading factor.", fields: [
       F("radio", "Frequency / BW / SF / CR", {type: "radio", help: "Applies without a reboot on UMC. Coding rate may differ between nodes."}),
@@ -1076,6 +1079,8 @@ function sha256(data) {
   H.forEach((x, k) => odv.setInt32(k * 4, x));
   return out;
 }
+// Channel keys for hashtag channels, and region keys, are SHA-256 of the "#name" exactly as written.
+const hashtagKey = name => sha256(new TextEncoder().encode(name.startsWith("#") ? name : "#" + name)).slice(0, 16);
 const b64ToU8 = s => { try { return Uint8Array.from(atob(s.trim()), c => c.charCodeAt(0)); } catch { return null; } };
 const u8ToB64 = b => btoa(String.fromCharCode(...b));
 
@@ -1239,6 +1244,16 @@ const MC = {
     }
     return m;
   },
+  // Region scopes are kept per channel name, so they survive the channel moving slot.
+  channelScope(idx) {
+    const ch = this.channels.find(c => c.idx === idx);
+    return ch && this.store.scopes ? this.store.scopes[ch.name] || "" : "";
+  },
+  setChannelScope(name, scope) {
+    this.store.scopes = this.store.scopes || {};
+    if (scope) this.store.scopes[name] = scope; else delete this.store.scopes[name];
+    this.saveStore(); this.emitChange();
+  },
   contactByPrefix(p) { p = p.toLowerCase(); for (const c of this.contacts.values()) if (c.key.startsWith(p)) return c; return null; },
 
   handle(f) {
@@ -1289,8 +1304,14 @@ const MC = {
     if (conv.startsWith("ch:")) {
       const idx = +conv.slice(3);
       const m = retryOf || this.addMsg(conv, {t: Date.now(), ts, dir: "out", text, from: this.self && this.self.name, status: "sending"});
-      try { await this.request(u8(3, 0, idx, le32(ts), text), [CODE.OK]); m.status = "sent"; }
+      const scope = this.channelScope(idx);
+      try {
+        if (scope) await this.request(u8(54, 0, hashtagKey(scope)), [CODE.OK]);   // region scope for this send
+        await this.request(u8(3, 0, idx, le32(ts), text), [CODE.OK]);
+        m.status = "sent";
+      }
       catch (e) { m.status = "failed"; m.error = e.message; }
+      if (scope) await this.request(u8(54, 0), [CODE.OK]).catch(() => {});      // back to the device default
       this.saveStore(); this.emitChange(); return;
     }
     const prefix = conv.slice(2), c = this.contactByPrefix(prefix);
@@ -1349,14 +1370,51 @@ const MC = {
     const rd = () => { const l = r.u8(); const n = l & 63, sz = (l >> 6) + 1; return {hops: n, hashes: hex(r.bytes(n * sz)).match(new RegExp(`.{${sz * 2}}`, "g")) || []}; };
     return {out: rd(), back: rd()};
   },
+  // A contact's stored route as hex hop ids, e.g. ["a1", "b2"].
+  pathHops(c) {
+    if (c.hops <= 0) return [];
+    const out = [];
+    for (let i = 0; i < c.hops; i++) out.push(hex(c.path.subarray(i * c.hashSize, (i + 1) * c.hashSize)));
+    return out;
+  },
+  // Name for a hop id: the repeater whose key starts with it (or several, when ids clash).
+  hopName(id) {
+    const hits = [...this.contacts.values()].filter(x => x.key.startsWith(id.toLowerCase()) && x.type !== 1);
+    return hits.length === 1 ? hits[0].name : hits.length > 1 ? hits.map(x => x.name).join(" / ") : "";
+  },
+  parseHops(text) {
+    const hops = String(text).split(/[\s,>]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+    if (!hops.length) throw new Error("Enter hop ids, e.g. a1,b2,c3");
+    const size = hops[0].length;
+    if (!hops.every(h => /^[0-9a-f]+$/.test(h) && h.length === size) || ![2, 4, 6].includes(size)) {
+      throw new Error("Hop ids must all be 2, 4 or 6 hex characters (1, 2 or 3 byte ids)");
+    }
+    return hops;
+  },
+  // Sets the route used for direct messages to this contact (what "define route" means in the apps).
+  async setRoute(c, hops) {
+    const raw = c.raw.slice();
+    if (!hops.length) { await this.request(u8(13, unhex(c.key)), [CODE.OK]); await this.listContacts(); return; }
+    const size = hops[0].length / 2;
+    if (hops.length * size > 64) throw new Error("Route too long");
+    raw[34] = (hops.length & 63) | ((size - 1) << 6);
+    raw.fill(0, 35, 35 + 64);
+    raw.set(unhex(hops.join("")), 35);
+    await this.request(u8(9, raw.subarray(0, 147)), [CODE.OK]);
+    await this.listContacts();
+  },
   async trace(c) {
     if (c.hops < 0) throw new Error("No known path yet - send a message or discover the path first");
     if (c.hops === 0) throw new Error("Direct neighbour - nothing to trace");
-    if (c.hashSize !== 1 && c.hashSize !== 2) throw new Error("Trace supports 1 or 2 byte path hashes only");
-    const sz = c.hashSize === 2 ? 1 : 0;
-    const out = [...c.path.slice(0, c.hops * c.hashSize)];
-    const hashes = []; for (let i = 0; i < out.length; i += c.hashSize) hashes.push(out.slice(i, i + c.hashSize));
-    const route = hashes.concat(hashes.slice(0, -1).reverse()).flat();
+    const hops = this.pathHops(c);
+    return this.traceHops(hops.concat(hops.slice(0, -1).reverse()));
+  },
+  // Trace an explicit list of hops; include the way back for a round trip.
+  async traceHops(hops) {
+    const size = hops[0].length / 2;
+    if (size !== 1 && size !== 2) throw new Error("Trace supports 1 or 2 byte hop ids");
+    const sz = size === 2 ? 1 : 0;
+    const route = [...unhex(hops.join(""))];
     const tag = (Math.random() * 4294967295) >>> 0;
     const s = await this.request(u8(36, le32(tag), le32(0), sz, route), [CODE.SENT]);
     const est = new DataView(s.buffer, s.byteOffset).getUint32(6, true);
@@ -1369,8 +1427,8 @@ const MC = {
     const hs = 1 << (flags & 3), hb = r.bytes(pl), snrs = [];
     for (let i = 0; i < pl >> (flags & 3); i++) snrs.push(r.i8() / 4);
     const final = r.left ? r.i8() / 4 : null;
-    const hops = []; for (let i = 0; i < pl; i += hs) hops.push(hex(hb.subarray(i, i + hs)));
-    return {hops, snrs, final};
+    const heard = []; for (let i = 0; i < pl; i += hs) heard.push(hex(hb.subarray(i, i + hs)));
+    return {hops: heard, snrs, final};
   },
   async setFavourite(c, fav) {
     const raw = c.raw.slice(); raw[33] = fav ? (raw[33] | 1) : (raw[33] & ~1);
@@ -1545,6 +1603,7 @@ async function renderContacts(view) {
         <button class="btn pri" data-d="msg">Message</button>
         ${server ? `<button class="btn" data-d="login">Log in…</button><button class="btn" data-d="status">Status</button>` : ""}
         <button class="btn" data-d="telem">Telemetry</button><button class="btn" data-d="trace">Trace path</button><button class="btn" data-d="discover">Discover path</button>
+        <button class="btn" data-d="route">Set route…</button><button class="btn" data-d="tracecustom">Trace custom path…</button>
         <button class="btn" data-d="reset">Reset path</button><button class="btn" data-d="share">Share (zero-hop)</button><button class="btn" data-d="export">Export…</button>
         <button class="btn" data-d="fav">${c.fav ? "Unfavourite" : "Favourite"}</button><button class="btn danger" data-d="remove">Remove</button></div>
       <div id="dtOut" style="margin-top:12px"></div>
@@ -1592,14 +1651,26 @@ async function renderContacts(view) {
       }
       else if (b.dataset.d === "telem") { busy("Requesting telemetry over the mesh…"); const t = await MC.telemetry(c); out.innerHTML = t.length ? statGrid(Object.fromEntries(t.map(x => [`${x.name} (ch ${x.ch})`, x.value]))) : `<p class="val">No telemetry shared (the node may only share it with favourites / contacts).</p>`; }
       else if (b.dataset.d === "trace") {
-        busy("Tracing…"); const t = await MC.trace(c);
-        out.innerHTML = `<table><thead><tr><th>#</th><th>Hop</th><th>SNR received there</th></tr></thead><tbody>${t.hops.map((h, i) => { const r = [...MC.contacts.values()].find(x => x.key.startsWith(h)); return `<tr><td>${i + 1}</td><td>${r ? esc(r.name) : ""} <code>${h}</code></td><td>${t.snrs[i] != null ? t.snrs[i] + " dB" : "—"}</td></tr>`; }).join("")}<tr><td></td><td>back here</td><td>${t.final ?? "—"} dB</td></tr></tbody></table>`;
+        busy("Tracing…"); out.innerHTML = traceTable(await MC.trace(c));
       }
       else if (b.dataset.d === "discover") {
         busy("Discovering the path (flood request)…"); const p = await MC.discoverPath(c);
         const names = hs => hs.map(h => { const r = [...MC.contacts.values()].find(x => x.key.startsWith(h)); return r ? r.name : h; }).join(" → ") || "direct";
         out.innerHTML = `<p><b>Out:</b> ${esc(names(p.out.hashes))} (${p.out.hops} hops)<br><b>Back:</b> ${esc(names(p.back.hashes))} (${p.back.hops} hops)</p>`;
         await MC.listContacts(); MC.emitChange();
+      }
+      else if (b.dataset.d === "route") {
+        const now = MC.pathHops(c).join(",");
+        const t = prompt(`Route to ${c.name}: repeater ids in order from here, e.g. a1,b2,c3 (see Routes & trace for ids). Blank = flood and learn.`, now);
+        if (t === null) return;
+        await MC.setRoute(c, t.trim() ? MC.parseHops(t) : []);
+        toast(t.trim() ? `Route set: ${t.trim()}` : "Route cleared - the next message floods", "ok"); $("#ctDetail").innerHTML = ""; draw();
+      }
+      else if (b.dataset.d === "tracecustom") {
+        const hops0 = MC.pathHops(c);
+        const t = prompt("Hops to trace (out and back), e.g. a1,b2,a1", hops0.concat(hops0.slice(0, -1).reverse()).join(","));
+        if (!t) return;
+        busy("Tracing…"); out.innerHTML = traceTable(await MC.traceHops(MC.parseHops(t)));
       }
       else if (b.dataset.d === "reset") { await MC.request(u8(13, unhex(c.key)), [CODE.OK]); await MC.listContacts(); toast("Path reset - the next message floods and learns a new route", "ok"); draw(); }
       else if (b.dataset.d === "share") { await MC.request(u8(16, unhex(c.key)), [CODE.OK]); toast(`Shared ${c.name} with nodes in direct range`, "ok"); }
@@ -1619,6 +1690,160 @@ async function renderContacts(view) {
   draw();
 }
 
+const traceTable = t => `<table><thead><tr><th>#</th><th>Hop</th><th>SNR heard there</th></tr></thead><tbody>${t.hops.map((h, i) =>
+  `<tr><td>${i + 1}</td><td>${esc(MC.hopName(h))} <code>${h}</code></td><td>${t.snrs[i] != null ? t.snrs[i] + " dB" : "—"}</td></tr>`).join("")}
+  <tr><td></td><td>back here</td><td>${t.final ?? "—"} dB</td></tr></tbody></table>`;
+
+// ---------------------------------------------------------------- Routes & trace (client)
+async function renderClientRoutes(view) {
+  view.innerHTML = `<div class="card"><h2>Trace any path</h2><p class="sub">Hop ids are the first bytes of each repeater's key (shown below). List them out and back, e.g. <code>a1,b2,a1</code>; every repeater on the way reports the signal it heard.</p>
+      <div class="row"><input type="text" id="rtPath" placeholder="a1,b2,a1" style="max-width:320px"><button class="btn pri" id="rtTrace">Trace</button></div><div id="rtOut" style="margin-top:10px"></div></div>
+    <div class="card"><h2>Routes to your contacts</h2><p class="sub">The path direct messages take. <b>Set route</b> fixes it; <b>Discover</b> asks the mesh for the best one; <b>Reset</b> floods the next message so a new route is learnt.</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>Contact</th><th>Route</th><th></th></tr></thead><tbody id="rtBody"></tbody></table></div></div>
+    <div class="card"><h2>Repeater ids</h2><p class="sub">Every repeater and room server this radio knows, with the ids used in routes.</p><div id="rtIds"></div></div>`;
+  MC.start();
+  const draw = () => {
+    const list = [...MC.contacts.values()].sort((a, b) => a.name.localeCompare(b.name));
+    $("#rtBody").innerHTML = list.length ? list.map(c => {
+      const hops = MC.pathHops(c);
+      const route = c.hops < 0 ? `<span class="val">flood (no route yet)</span>` : c.hops === 0 ? "direct"
+        : hops.map(h => `${esc(MC.hopName(h) || "?")} <code>${h}</code>`).join(" → ");
+      return `<tr><td>${TYPE_ICO[c.type] || ""} <b>${esc(c.name)}</b></td><td>${route}</td><td class="row">
+        <button class="btn sm" data-rt="set" data-k="${c.key}">Set route</button><button class="btn sm" data-rt="discover" data-k="${c.key}">Discover</button>
+        ${c.hops > 0 ? `<button class="btn sm" data-rt="trace" data-k="${c.key}">Trace</button>` : ""}<button class="btn sm" data-rt="reset" data-k="${c.key}">Reset</button></td></tr>`;
+    }).join("") : `<tr><td colspan="3" class="val">No contacts yet.</td></tr>`;
+    const ids = list.filter(c => c.type === 2 || c.type === 3);
+    $("#rtIds").innerHTML = ids.length ? ids.map(c => `<span class="pill">${TYPE_ICO[c.type]} ${esc(c.name)} <code>${c.key.slice(0, 2)}</code> <code>${c.key.slice(0, 4)}</code></span>`).join(" ")
+      : `<p class="val">No repeaters heard yet.</p>`;
+  };
+  const offChange = MC.onChange(() => { if (!document.body.contains(view)) return offChange(); draw(); });
+  view.addEventListener("click", async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    const out = $("#rtOut");
+    try {
+      if (b.id === "rtTrace") { out.innerHTML = `<p class="val">Tracing…</p>`; out.innerHTML = traceTable(await MC.traceHops(MC.parseHops($("#rtPath").value))); return; }
+      const c = MC.contacts.get(b.dataset.k); if (!c) return;
+      if (b.dataset.rt === "set") {
+        const t = prompt(`Route to ${c.name}: repeater ids in order from here, e.g. a1,b2. Blank = flood and learn.`, MC.pathHops(c).join(","));
+        if (t === null) return;
+        await MC.setRoute(c, t.trim() ? MC.parseHops(t) : []); toast("Route saved", "ok");
+      } else if (b.dataset.rt === "reset") { await MC.setRoute(c, []); toast("Route cleared", "ok"); }
+      else if (b.dataset.rt === "trace") { out.innerHTML = `<p class="val">Tracing ${esc(c.name)}…</p>`; out.innerHTML = traceTable(await MC.trace(c)); window.scrollTo(0, 0); }
+      else if (b.dataset.rt === "discover") { toast(`Discovering the route to ${c.name}…`); await MC.discoverPath(c); await MC.listContacts(); toast("Route updated", "ok"); }
+      draw();
+    } catch (err) { toast(err.message, "bad"); if (out) out.innerHTML = `<p class="msg bad">${esc(err.message)}</p>`; }
+  });
+  if (!MC.self) await MC.refreshAll().catch(() => {});
+  draw();
+}
+
+// ---------------------------------------------------------------- Map (client and repeater)
+// Map tiles come from OpenStreetMap, so the browser needs internet access (the device does not).
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet"; css.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
+    document.head.appendChild(css);
+    const js = document.createElement("script");
+    js.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+    js.onload = resolve; js.onerror = () => reject(new Error("Couldn't load the map (this browser needs internet access)"));
+    document.head.appendChild(js);
+  });
+}
+async function renderMap(view) {
+  view.innerHTML = `<div class="card" style="padding:0;overflow:hidden"><div id="mapBox" style="height:calc(100vh - 170px);min-height:380px"></div></div>
+    <p class="val" id="mapNote">Loading map…</p>`;
+  const points = [];
+  if (isClient()) {
+    MC.start();
+    if (!MC.self) await MC.refreshAll().catch(() => {});
+    if (MC.self && (MC.self.lat || MC.self.lon)) points.push({lat: MC.self.lat, lon: MC.self.lon, name: MC.self.name + " (this radio)", kind: "me"});
+    for (const c of MC.contacts.values()) if (c.lat || c.lon) points.push({lat: c.lat, lon: c.lon, name: c.name, kind: TYPES[c.type], sub: hopsLabel(c)});
+  } else {
+    const r = await api.cli(["get lat", "get lon", "get name"]);
+    const lat = parseFloat(val(r[0])), lon = parseFloat(val(r[1]));
+    if (lat || lon) points.push({lat, lon, name: val(r[2]) + " (this repeater)", kind: "me"});
+    try { for (const x of (await api.routes()).routes || []) if (x.lat != null && (x.lat || x.lon)) points.push({lat: x.lat, lon: x.lon, name: x.name || x.key, kind: x.type, sub: `${x.hops} hop(s)`}); } catch {}
+  }
+  try { await loadLeaflet(); }
+  catch (err) {
+    $("#mapBox").style.height = "auto";
+    $("#mapBox").innerHTML = `<div style="padding:14px"><p class="msg bad">${esc(err.message)}</p><table><tbody>${points.map(p =>
+      `<tr><td>${esc(p.name)}</td><td>${esc(p.kind || "")}</td><td><a href="https://www.openstreetmap.org/?mlat=${p.lat}&mlon=${p.lon}#map=13/${p.lat}/${p.lon}" target="_blank" rel="noopener">${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</a></td></tr>`).join("")}</tbody></table></div>`;
+    $("#mapNote").textContent = "";
+    return;
+  }
+  const map = L.map("mapBox");
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "© OpenStreetMap contributors"}).addTo(map);
+  const colour = k => k === "me" ? "#0b6bcb" : /repeater/.test(k || "") ? "#d97706" : /room/.test(k || "") ? "#16a34a" : "#7c3aed";
+  const bounds = [];
+  for (const p of points) {
+    L.circleMarker([p.lat, p.lon], {radius: p.kind === "me" ? 9 : 7, color: "#fff", weight: 2, fillColor: colour(p.kind), fillOpacity: 0.95})
+      .addTo(map).bindPopup(`<b>${esc(p.name)}</b><br>${esc(p.kind || "")}${p.sub ? " · " + esc(p.sub) : ""}`);
+    bounds.push([p.lat, p.lon]);
+  }
+  if (bounds.length > 1) map.fitBounds(bounds, {padding: [30, 30]});
+  else map.setView(bounds[0] || [54.0, -2.0], bounds.length ? 12 : 6);
+  $("#mapNote").textContent = `${points.length} node(s) with a location. Blue = this device, orange = repeaters, green = room servers, purple = people.`;
+}
+
+// ---------------------------------------------------------------- Region page (client)
+const REGION_PRESETS = [
+  // name, region scope, channel for that region (as its community writes it), where it comes from
+  {label: "Yorkshire", scope: "yorkshire", channel: "#Yorkshire", note: "From the MeshCore Yorkshire guide: add the #Yorkshire channel and give it the yorkshire region scope."},
+  {label: "North West", scope: "northwest", channel: "", note: "Region scope only. Add the local channel on the Channels page if your group uses one."},
+];
+async function renderClientRegion(view) {
+  view.innerHTML = `<div class="card"><h2>Region</h2><p class="sub">Regional meshes ask clients to scope their messages so they stay in the area. Repeaters that know the region pass them on; others can drop them.</p>
+      <div class="grid" id="rgNow"></div></div>
+    <div class="card"><h2>Set up for your region</h2><div id="rgPresets"></div></div>
+    <div class="card"><h2>Region scope for everything this radio sends</h2><p class="sub">Used when a channel has no scope of its own (and for adverts and direct messages that flood). Names are case-sensitive.</p>
+      <div class="row"><input type="text" id="rgScope" placeholder="yorkshire" style="max-width:220px"><button class="btn pri" id="rgSave">Save</button><button class="btn" id="rgClear">None</button></div></div>
+    <div class="card"><h2>Room servers</h2><p class="sub">Room servers are contacts: they appear on the Contacts page when their advert is heard (or in the waiting list if manual add is on). Open one and use <b>Log in…</b>, then its posts arrive in Messages.</p>
+      <div id="rgRooms"></div></div>`;
+  MC.start();
+  const draw = async () => {
+    const scope = val(await one("get scope"));
+    $("#rgScope").value = scope === "-" ? "" : scope;
+    $("#rgNow").innerHTML = [["Device scope", scope === "-" ? "none" : scope],
+      ...MC.channels.map(c => [c.name, MC.channelScope(c.idx) || "(device scope)"])]
+      .map(([k, v]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join("");
+    $("#rgPresets").innerHTML = REGION_PRESETS.map((p, i) => {
+      const has = p.channel && MC.channels.some(c => c.name === p.channel);
+      return `<div class="field"><label>${esc(p.label)}</label><div class="ctl"><span class="val">${esc(p.note)}${p.channel ? ` Channel ${esc(p.channel)}: ${has ? "added" : "not added yet"}.` : ""}</span></div>
+        <div class="act"><button class="btn pri" data-preset="${i}">Set up ${esc(p.label)}</button></div></div>`;
+    }).join("");
+    const rooms = [...MC.contacts.values()].filter(c => c.type === 3);
+    $("#rgRooms").innerHTML = rooms.length ? rooms.map(c => `<span class="pill">🏠 ${esc(c.name)} <a href="#" data-room="${c.key}">open</a></span>`).join(" ")
+      : `<p class="val">No room servers heard yet.</p>`;
+  };
+  view.addEventListener("click", async e => {
+    const room = e.target.closest("[data-room]");
+    if (room) { e.preventDefault(); sessionStorage.setItem("umc_focus_contact", room.dataset.room); return go("contacts"); }
+    const b = e.target.closest("button"); if (!b) return;
+    try {
+      if (b.id === "rgSave") { const r = await one(`set scope ${$("#rgScope").value.trim()}`); toast(r, isErr(r) ? "bad" : "ok"); }
+      else if (b.id === "rgClear") { const r = await one("set scope"); toast(r, isErr(r) ? "bad" : "ok"); }
+      else if (b.dataset.preset) {
+        const p = REGION_PRESETS[+b.dataset.preset];
+        if (p.channel && !MC.channels.some(c => c.name === p.channel)) {
+          let idx = -1; for (let i = 0; i < 40; i++) if (!MC.channels.some(c => c.idx === i)) { idx = i; break; }
+          if (idx < 0) return toast("All channel slots are in use", "bad");
+          await MC.request(u8(32, idx, fixed(p.channel, 32), hashtagKey(p.channel)), [CODE.OK]);
+          await MC.listChannels();
+        }
+        if (p.channel) MC.setChannelScope(p.channel, p.scope);
+        else { const r = await one(`set scope ${p.scope}`); if (isErr(r)) throw new Error(r); }
+        toast(`${p.label} set up`, "ok");
+      }
+      await draw();
+    } catch (err) { toast(err.message, "bad"); }
+  });
+  if (!MC.self) await MC.refreshAll().catch(() => {});
+  await draw();
+}
+
 // ---------------------------------------------------------------- Channels page
 async function renderChannels(view) {
   view.innerHTML = `<div class="card"><h2>Channels</h2><p class="sub">Group chats shared by everyone with the same channel secret. Up to 40 on this device.</p>
@@ -1631,7 +1856,7 @@ async function renderChannels(view) {
   MC.start();
   const draw = () => {
     $("#chBody").innerHTML = MC.channels.length ? MC.channels.map(ch => `<tr><td>${ch.idx}</td><td><b>${esc(ch.name)}</b></td><td><code data-sec="${ch.idx}">••••••••</code> <a href="#" data-show="${ch.idx}">show</a></td>
-      <td><button class="btn sm" data-chat="${ch.idx}">Open chat</button> <button class="btn sm" data-share="${ch.idx}">Share…</button> <button class="btn sm danger" data-del="${ch.idx}">Remove</button></td></tr>`).join("")
+      <td>${MC.channelScope(ch.idx) ? `<span class="pill ok">scope: ${esc(MC.channelScope(ch.idx))}</span> ` : ""}<button class="btn sm" data-chat="${ch.idx}">Open chat</button> <button class="btn sm" data-scope="${ch.idx}">Region scope…</button> <button class="btn sm" data-share="${ch.idx}">Share…</button> <button class="btn sm danger" data-del="${ch.idx}">Remove</button></td></tr>`).join("")
       : `<tr><td colspan="4" class="val">${MC.self ? "No channels." : "Loading…"}</td></tr>`;
   };
   const freeSlot = () => { for (let i = 0; i < 40; i++) if (!MC.channels.some(c => c.idx === i)) return i; return -1; };
@@ -1646,12 +1871,20 @@ async function renderChannels(view) {
     const b = e.target.closest("button"); if (!b) return;
     try {
       if (b.dataset.chat) { MC.activeConv = "ch:" + b.dataset.chat; go("chat"); }
+      else if (b.dataset.scope) {
+        const ch = MC.channels.find(c => c.idx === +b.dataset.scope);
+        const v = prompt(`Region scope for ${ch.name} (e.g. yorkshire). Names are case-sensitive. Blank = none.`, MC.channelScope(ch.idx));
+        if (v === null) return;
+        MC.setChannelScope(ch.name, v.trim());
+        toast(v.trim() ? `${ch.name} messages are scoped to ${v.trim()}` : `${ch.name} is no longer scoped`, "ok");
+        draw();
+      }
       else if (b.dataset.share) { const ch = MC.channels.find(c => c.idx === +b.dataset.share); prompt(`Share "${ch.name}" - the other person adds it with "Join with a shared secret":`, `${ch.name} ${hex(ch.secret)}`); }
       else if (b.dataset.del) { const ch = MC.channels.find(c => c.idx === +b.dataset.del); if (!confirm(`Remove channel ${ch.name}?`)) return; await setChannel(ch.idx, "", new Uint8Array(16)); toast("Channel removed", "ok"); }
       else if (b.id === "chAdd") {
         const kind = $("#chKind").value; let name = $("#chName").value.trim(), secret;
         const idx = freeSlot(); if (idx < 0) return toast("All 40 channel slots are in use", "bad");
-        if (kind === "hash") { if (!name) return toast("Enter a name", "bad"); if (!name.startsWith("#")) name = "#" + name; name = name.toLowerCase(); secret = sha256(new TextEncoder().encode(name)).slice(0, 16); }
+        if (kind === "hash") { if (!name) return toast("Enter a name", "bad"); if (!name.startsWith("#")) name = "#" + name; secret = hashtagKey(name); }
         else if (kind === "public") { secret = b64ToU8("izOH6cXN6mrJ5e26oRXNcg=="); name = name || "Public"; }
         else if (kind === "private") { if (!name) return toast("Enter a name", "bad"); secret = crypto.getRandomValues(new Uint8Array(16)); }
         else { secret = parseSecret($("#chSecret").value); if (!name || !secret) return toast("Enter a name and a 32-hex-character secret", "bad"); }
@@ -1810,7 +2043,7 @@ async function go(id) {
   const old = $("#view"), view = old.cloneNode(false); old.replaceWith(view);  // drop old listeners
   view.innerHTML = `<p class="val">Loading…</p>`;
   try {
-    const fn = {dash: renderDash, chat: renderChat, contacts: renderContacts, channels: renderChannels, neigh: renderNeigh, routes: renderRoutes, traffic: renderTraffic, regions: renderRegions, net: renderNet, console: renderConsole, fw: renderFw, backup: renderBackup}[sec.special];
+    const fn = {dash: renderDash, clregion: renderClientRegion, clroutes: renderClientRoutes, map: renderMap, chat: renderChat, contacts: renderContacts, channels: renderChannels, neigh: renderNeigh, routes: renderRoutes, traffic: renderTraffic, regions: renderRegions, net: renderNet, console: renderConsole, fw: renderFw, backup: renderBackup}[sec.special];
     if (fn) await fn(view); else await renderSchemaSection(sec, view);
   } catch (err) { view.innerHTML = `<div class="card"><h2>Couldn't load</h2><p class="msg bad">${esc(err.message)}</p></div>`; }
 }

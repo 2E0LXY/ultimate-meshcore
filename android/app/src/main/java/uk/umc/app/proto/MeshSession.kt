@@ -49,6 +49,9 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
     val events = MutableSharedFlow<String>(extraBufferCapacity = 32)
     val newMessages = MutableSharedFlow<ChatMessage>(extraBufferCapacity = 32)
 
+    /** Region scope per channel name (like "Set Region Scope" in the MeshCore apps). */
+    var scopeFor: (String) -> String? = { null }
+
     private val lock = Mutex()
     private val awaitingAck = HashMap<String, Long>()   // delivery code -> message id
     private var nextId = 1L
@@ -315,11 +318,18 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         }
         if (conversation.startsWith("ch:")) {
             val idx = conversation.removePrefix("ch:").toInt()
+            val scope = channels.value.firstOrNull { it.idx == idx }?.let { scopeFor(it.name) }.orEmpty()
             try {
+                if (scope.isNotEmpty()) {
+                    request(FrameBuilder(Cmd.SET_FLOOD_SCOPE_KEY).u8(0).bytes(hashtagKey(scope)).build(), Resp.OK)
+                }
                 request(FrameBuilder(Cmd.SEND_CHANNEL_TXT_MSG).u8(TXT_TYPE_PLAIN).u8(idx).u32(ts).text(text).build(), Resp.OK)
                 update(id) { it.copy(status = "sent") }
             } catch (e: Exception) {
                 update(id) { it.copy(status = "failed", error = e.message) }
+            }
+            if (scope.isNotEmpty()) {
+                runCatching { request(FrameBuilder(Cmd.SET_FLOOD_SCOPE_KEY).u8(0).build(), Resp.OK) }   // back to the device default
             }
             return
         }
@@ -422,6 +432,32 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         } ?: throw MeshError("trace timed out (a hop may be out of range)")
         return Decode.trace(push)
     }
+
+    /** Fixes the route direct messages take to [contact]; an empty list floods and learns a new one. */
+    suspend fun setRoute(contact: Contact, hops: List<String>) {
+        if (hops.isEmpty()) {
+            resetPath(contact)
+            return
+        }
+        val size = hops[0].length / 2
+        if (size !in 1..3 || hops.any { it.length != size * 2 }) throw MeshError("hop ids must all be 2, 4 or 6 hex characters")
+        if (hops.size * size > 64) throw MeshError("route too long")
+        val raw = contact.raw.copyOf()
+        raw[34] = ((hops.size and 63) or ((size - 1) shl 6)).toByte()
+        java.util.Arrays.fill(raw, 35, 35 + 64, 0)
+        val path = hops.joinToString("").hexToBytes()
+        System.arraycopy(path, 0, raw, 35, path.size)
+        request(FrameBuilder(Cmd.ADD_UPDATE_CONTACT).bytes(raw.copyOfRange(0, 147)).build(), Resp.OK)
+        refreshContacts()
+    }
+
+    fun routeHops(contact: Contact): List<String> =
+        if (contact.hops <= 0) emptyList()
+        else (0 until contact.hops).map { contact.path.copyOfRange(it * contact.hashSize, (it + 1) * contact.hashSize).toHex() }
+
+    /** Repeater name for a hop id, from the contacts we know. */
+    fun hopName(id: String): String =
+        contacts.value.filter { it.publicKey.startsWith(id.lowercase()) && it.type != ADV_TYPE_CHAT }.joinToString(" / ") { it.name }
 
     suspend fun advert(flood: Boolean) {
         request(if (flood) FrameBuilder(Cmd.SEND_SELF_ADVERT).u8(1).build() else FrameBuilder(Cmd.SEND_SELF_ADVERT).build(), Resp.OK)

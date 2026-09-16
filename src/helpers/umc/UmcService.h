@@ -27,7 +27,7 @@ class UmcWebApp;
 class UmcService {
 public:
   static constexpr size_t kMaxCommandLen = 192;
-  static constexpr size_t kMaxReplyLen = 256;
+  static constexpr size_t kMaxReplyLen = 768;  // get net.status is ~350 bytes with a long SSID
 
   UmcService();
 
