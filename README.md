@@ -1,11 +1,33 @@
 # Ultimate MeshCore (UMC)
 
-**All-in-one MeshCore firmware with a complete WiFi web interface.**
-Fully compatible with standard MeshCore nodes and apps, with setup, management and updates you can do from any browser.
+**All-in-one mesh radio firmware with a complete WiFi web interface, a feature-packed client, a touch client for the T-Deck and an Android app.**
+Set up, manage and update every node from any browser or phone.
+
+By **Daren Loxley 2E0LXY**
 
 [**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest firmware**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) · [**📱 Android app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest)
 
-> **Status: 0.1.0 (early).** The Heltec V3 / V3.2 **repeater** and **Ultimate MeshCore Client** are available and running on hardware. Heltec V4 (OLED/TFT/R8) builds of both are published but not yet tested on V4 hardware. Room server and the T-TWR are in progress — see the [roadmap](docs/umc/ROADMAP.md).
+> **Status: 0.1.0 (early).** The Heltec V3 / V3.2 **repeater** and **Ultimate MeshCore Client** run on hardware. Heltec V4 (OLED/TFT/R8) and T-Deck builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
+
+![Repeater dashboard](docs/images/repeater-dashboard.png)
+
+---
+
+## Contents
+
+- [Supported hardware](#supported-hardware)
+- [Quick start](#quick-start)
+- [Installation and updates](#installation-and-updates)
+- [First-time setup](#first-time-setup)
+- [Repeater web interface](#repeater-web-interface)
+- [WiFi and networking](#wifi-and-networking)
+- [Display](#display)
+- [Ultimate MeshCore Client](#ultimate-meshcore-client)
+- [T-Deck / T-Deck Plus touch client](#t-deck--t-deck-plus-touch-client)
+- [Ultimate MeshCore App (Android)](#ultimate-meshcore-app-android)
+- [Command line](#command-line)
+- [Building](#building)
+- [Documentation](#documentation)
 
 ---
 
@@ -15,143 +37,307 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 |---|---|---|---|
 | Heltec WiFi LoRa 32 V3 / V3.2 | ✅ | ✅ | planned |
 | Heltec V4 OLED / TFT / R8 | ✅ build (hardware test pending) | ✅ build (hardware test pending) | planned |
-| LilyGo T-Deck / T-Deck Plus | — | ✅ build with touch UI + maps (hardware test pending) | — |
+| LilyGo T-Deck / T-Deck Plus | — | ✅ touch UI, maps and GPS (hardware test pending) | — |
 | LilyGo T-TWR + SX1262 add-on | planned | planned | — |
+
+## Quick start
+
+1. Open the [web flasher](https://2e0lxy.github.io/ultimate-meshcore/) in Chrome or Edge. Choose your board and **Repeater** or **Ultimate MeshCore Client**, then press **Install**. Choose **No** at “Erase device?” to keep an existing node's identity.
+2. Join the open `UMC-Setup-XXXX` WiFi hotspot. The setup wizard opens by itself.
+3. Reconnect to your home WiFi and open `http://umc-<name>.local/`, or the IP address shown on the display.
 
 ---
 
-## All functions
+## Installation and updates
 
-### Installation and updates
-- **USB web flasher** (Chrome/Edge). It always installs the newest build, and can **update** (keeping identity and settings) or do a **fresh install**.
-- **Internet updates on the device**: check and install the latest build for the exact board and firmware type over verified HTTPS, optionally automatic.
-- **Upload a firmware file** in the browser, with image validation (rejects merged/wrong-chip images, warns about the wrong board or type).
-- **Automatic rollback**: an update must run healthily for 60 s or the device returns to the previous firmware; `ota rollback` on demand.
+- **USB web flasher** (Chrome/Edge). It always installs the newest build. It can **update** (keeping identity and settings) or do a **fresh install**.
+- **Update through the browser**: your browser fetches the latest build for this exact board and firmware type and sends it to the device. The device itself needs no internet access.
+- **Internet updates on the device**: checks and installs over verified HTTPS, with optional daily automatic checks or installs. The Heltec V3 client restarts into a short **update mode** with Bluetooth off, then returns to normal by itself.
+- **Upload a firmware file** in the browser. Images are validated: merged or wrong-chip images are rejected, and a wrong board or firmware type gets a warning.
+- **Automatic rollback**: an update must run healthily for 60 s, or the device returns to the previous firmware. `ota rollback` rolls back on demand.
+- **Loop watchdog**: a hung device restarts itself, and the reset reason is shown on the dashboard.
 - Legacy `start ota` hotspot, esptool, and **automatic CI builds** of every target on each push.
 
-### First-time setup
+![Firmware and maintenance page](docs/images/firmware-update.png)
+
+## First-time setup
+
 - **Open setup hotspot** `UMC-Setup-XXXX` with a captive portal: join it and the setup page opens.
-- **Setup wizard**: radio preset, TX power, duty cycle (suggests 10 % in the UK/EU 869.4–869.65 MHz band), name, location from a map (rounded ~100 m), admin and guest passwords, WiFi with scan, telnet, MQTT location code, and clock set from the browser.
-- Keeps existing settings and only applies what you change. It can be re-run at any time.
+- **Setup wizard** covers:
+  - radio preset, TX power and duty cycle (suggests 10 % in the UK/EU 869.4–869.65 MHz band);
+  - name, and location picked from a map (rounded to ~100 m);
+  - admin and guest passwords;
+  - WiFi with a network scan, and telnet;
+  - MQTT location code;
+  - clock set from the browser.
+- Existing settings are kept, and only what you change is applied. Re-run the wizard at any time.
 
-### Web interface (every setting)
-- **Dashboard**: uptime, battery, clock, packets, neighbours, queue, memory, WiFi, hotspot, MQTT, radio preset, noise floor, RSSI/SNR, airtime, quick actions, update banner.
-- **Radio**: regional presets (same list as the MeshCore apps), frequency/BW/SF/CR **applied without reboot**, TX power, duty cycle, RX gain, AGC reset, CAD, interference threshold, temporary radio test.
-- **Mesh & routing**: repeat, loop detection, path hash size, flood/unscoped/advert/**channel** hop limits, extra ACKs, TX/direct/RX delays, advert intervals, send adverts, discover neighbours.
-- **Identity & access**: name, location (map picker), owner info, admin/guest passwords, public key, private key export/import, ACL permissions.
-- **Regions**: tree view with per-region **flooding switch, set home, remove** (sub-regions first), **UK presets** (`yorkshire`, `northwest`, `uk`), add, one-line definitions, unsaved-change reminder.
-- **Yorkshire mesh recommended settings** in one click (flood limits, advert intervals, duty cycle and regions from the [Yorkshire guide](https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/)); clients can set the matching **region scope** for their sends.
-- **Network**: 3 saved WiFi networks with scan, static IP / DHCP, hostname and `.local` name, hotspot mode (auto/on/off), rescue delay, hotspot password/PIN, session timeout, telnet, NTP servers, time zone.
-- **MQTT**: location code, identity, what to publish, preset brokers (MeshMapper, waev, EastMesh, LetsMesh), custom TCP/WSS broker, status.
-- **Bridge**: ESP-NOW (channel, secret, delay, source) and RS-232 settings.
-- **Power & hardware**: power saving, battery calibration, GPS, **display cycle settings**, board info.
-- **Neighbours**: list with age/SNR, forget, discover.
-- **Live traffic**: packet list with type/route/hops/RSSI/SNR, filters and per-minute counts.
-- **Routes & trace**: route table learned from adverts (hop chain with repeater names), find, **add/pin a route**, **trace** out and back with per-hop SNR, forget.
-- **Console**: full command line with history.
-- **Firmware & maintenance**: internet update, file update, clock sync, reboot, stats/log controls, legacy OTA, re-run setup, power off, factory reset.
-- **Backup & restore**: JSON backup (passwords excluded, private key optional) with a preview before restore.
-- Sign-in with session timeout and lockout, a “device not reachable” screen with auto-reconnect, and mobile-friendly light/dark themes.
+![Setup wizard](docs/images/setup-wizard.png)
 
-### WiFi and networking
-- Up to **three networks**, tried in order, with gateway watchdog and automatic reconnect.
-- **Rescue hotspot** when no saved network is reachable (PIN protected). Always-on and never modes too.
-- Static IP, custom hostname, **mDNS** (`http://umc-<name>.local/`), network scan, captive portal.
-- **Telnet** command line (port 23, password protected, off by default).
-- **App connection on TCP port 5000**: the MeshCore app, meshcore-open, meshcore_py, meshcore-cli and Home Assistant connect over WiFi. Log in to the repeater's **(console)** contact to get status, telemetry, neighbours and the command line.
+---
+
+## Repeater web interface
+
+Every setting is available from the browser. The pages work on phones and support light and dark themes.
+
+### Dashboard
+Shows uptime, battery, clock, packets, neighbours, queue, memory, WiFi, hotspot and MQTT. It also shows the radio preset, noise floor, RSSI/SNR and airtime, plus quick actions and an update banner (screenshot at the top of this page).
+
+### Radio
+- **Regional presets** and frequency/BW/SF/CR, **applied without a reboot**.
+- TX power, duty cycle and RX gain.
+- AGC reset, CAD and interference threshold.
+- Temporary radio test.
+
+![Radio settings](docs/images/repeater-radio.png)
+
+### Mesh & routing
+- Repeat, loop detection and path hash size.
+- Hop limits for flood, unscoped, advert and **channel** traffic.
+- Extra ACKs, and TX/direct/RX delays.
+- Advert intervals, send adverts, and discover neighbours.
+- **Neighbours** list with age and SNR, forget and discover.
+
+![Mesh and routing settings](docs/images/repeater-mesh.png)
+
+### Identity & access
+- Name, location (map picker) and owner info.
+- Admin and guest passwords.
+- Public key, and private key export/import.
+- ACL permissions.
+
+### Regions and the Yorkshire recommended settings
+- **Tree view** of regions. Each region has a **flooding switch**, **set home** and **remove** (sub-regions are removed first).
+- **UK presets** `yorkshire`, `northwest` and `uk`, plus add and one-line definitions, with a reminder about unsaved changes.
+- **Yorkshire mesh recommended settings** in one click: flood limits, advert intervals, duty cycle and regions from the [Yorkshire suggested repeater commands](https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/).
+
+![Regions](docs/images/repeater-regions.png)
+
+### Network
+- **3 saved WiFi networks** with scan.
+- Static IP or DHCP, hostname and `.local` name.
+- Hotspot mode (auto/on/off), rescue delay, and hotspot password/PIN.
+- Session timeout, telnet, NTP servers and time zone.
+
+![Network settings](docs/images/repeater-network.png)
+
+### MQTT, bridge, power
+- **MQTT observer**: location code, identity and what to publish. Choose a preset broker or a custom TCP/WSS broker (JWT supported), with two broker slots and a status view.
+- **ESP-NOW bridge** between nearby LoRa segments (channel, secret, delay, source), and RS-232 settings.
+- **Power & hardware**: power saving, battery calibration, GPS, display cycle settings and board info.
+
+### Routes & trace
+- **Route table** learned from adverts, showing the hop chain with repeater names.
+- Find a route, and **add or pin a route**.
+- **Trace** a path out and back, with SNR for each hop.
+- Forget a route.
+
+![Routes and trace](docs/images/repeater-routes.png)
+
+### Live traffic
+Packet list with type, route, hops, RSSI and SNR, plus filters and per-minute counts.
+
+![Live traffic](docs/images/repeater-traffic.png)
+
+### Map
+Every node that shares a location, on an OpenStreetMap map.
+
+![Map](docs/images/repeater-map.png)
+
+### Console, maintenance, backup
+- **Console**: the full command line, with history.
+- **Firmware & maintenance**: browser update, internet update, file update, clock sync, reboot, stats/log controls, legacy OTA, re-run setup, power off and factory reset.
+- **Backup & restore**: JSON backup with a preview before restoring. Passwords are excluded, and the private key is optional.
+- **Sign-in** with session timeout and lockout.
+- A “device not reachable” screen that reconnects automatically.
+- Optional HTTPS stats panel with history.
+
+---
+
+## WiFi and networking
+
+- Up to **three networks**, tried in order, with a gateway watchdog and automatic reconnect.
+- **Rescue hotspot** when no saved network is reachable (PIN protected). It can also be set to always on or never.
+- Static IP, custom hostname, **mDNS** (`http://umc-<name>.local/`), network scan and captive portal.
+- **Telnet** command line on port 23. It is password protected and off by default.
+- **App connection on TCP port 5000**: companion apps and Home Assistant connect over WiFi. On a repeater, log in to its **(console)** contact to get status, telemetry, neighbours and the command line.
 - Time sync from NTP (UK servers by default). Mesh time stays UTC.
-- Optional classic EastMesh HTTPS panel with stats history.
 
-### Display (OLED)
-- Cycle: **flashing IP address** → radio → mesh → WiFi → status → **live packet traffic**, all with adjustable timings. Modes cycle/status/off, blank-after timeout.
-- Button steps through screens; long press powers off.
-- Setup and rescue screens show the hotspot name and password state.
+## Display
 
-### Mesh features (from MeshCore / EastMesh)
-- Full MeshCore 1.17.1 repeater: flood/direct routing, regions and scopes, ACLs, remote admin over the mesh, neighbours, statistics, packet log, GPS and sensors.
-- **MQTT observer** uploads with JWT/WSS, two broker slots and status publishing.
-- **ESP-NOW bridge** between nearby LoRa segments.
+- **Screen cycle**: **flashing IP address** → radio → mesh → WiFi → status → **live packet traffic**.
+- All timings are adjustable. Modes are cycle, status or off, with a blank-after timeout.
+- The button steps through screens, and a long press powers off.
+- The start screen shows **Ultimate MeshCore**, the version, and **By Daren Loxley 2E0LXY**.
+- Setup and rescue screens show the hotspot name and whether it has a password.
 
-### Ultimate MeshCore Client (companion firmware)
-- **Every app link at once**: Bluetooth (NimBLE, PIN pairing), USB, **WiFi TCP port 5000** (up to 3 apps) and the browser. Works with the MeshCore app, meshcore-open, meshcore_py, meshcore-cli and Home Assistant.
-- **Messenger in the browser**: channels and direct messages, delivery ticks with round-trip time, hops/SNR, retry, search, unread counts, history saved in the browser, room-server login.
-- **Contacts**: type/path/advert age/map, favourites, remove, reset path, share, `meshcore://` export/import, adverts waiting to be added.
-- **Repeater tools over the mesh**: login, status, telemetry (Cayenne LPP decoded), **remote admin console**, **trace path** with per-hop SNR, **discover path**.
-- **Channels**: hashtag, private (random secret), shared-secret and Public. Share, remove, export/import.
-- **Client settings**: extra ACKs, path hash size, location sharing, client repeat, auto-add rules and hop limit, telemetry permissions, Bluetooth PIN, app connections, airtime factor, RX delay.
-- **Display WiFi page**: network, IP, `.local` name, hotspot, connected apps. The pairing PIN shows until an app connects.
-- Same web UI, WiFi, internet updates, rollback and watchdog as the repeater. On the V3, Bluetooth pauses briefly during internet updates to free memory.
+---
 
-### T-Deck / T-Deck Plus touch client
-- **Touch interface** on the 320x240 screen with the keyboard and trackball: messages, contacts, map and info tabs.
-- **Offline maps from the SD card** (`scripts/umc_make_map_tiles.py` builds them), with your position and contacts plotted; without tiles it plots contacts by range and bearing with distance rings.
-- **GPS auto-detection** for both receivers used on the T-Deck Plus (u-blox 38400 / L76K 9600).
-- Same Bluetooth, USB, WiFi apps, web interface and updates as the other client builds.
+## Ultimate MeshCore Client
 
-### Ultimate MeshCore App (Android)
-- Connects over **Bluetooth** or **WiFi (TCP 5000)** to this firmware and to any standard MeshCore companion radio.
-- **Messages** with delivery ticks and retry, **contacts** with login/status/telemetry/trace/path discovery and a **remote admin console**, **channels**, and a **map** of everyone sharing a location.
-- **Radio settings** (presets, frequency, power, name, location, confirmations, Bluetooth PIN) and a **Device** tab that drives the full UMC web interface of any repeater or client on your network, including firmware updates.
-- Source in [`android/`](android/), built by CI into an installable APK.
+A companion radio with every app link and a complete messenger built into its web page.
 
-### Command line additions
-Everything in the web interface is also a command (USB serial, telnet, web console, or remote admin over the mesh). UMC adds:
+- **Every app link at once**:
+  - Bluetooth (PIN pairing);
+  - USB;
+  - **WiFi TCP port 5000** (up to 3 apps);
+  - the browser.
+
+### Messages
+- Channels and direct messages.
+- **Delivery ticks** with round-trip time, plus hops/SNR and retry.
+- Search and unread counts.
+- History kept on the device and in the browser.
+- Room-server login.
+
+![Channel messages](docs/images/client-messages.png)
+
+![Direct message](docs/images/client-dm.png)
+
+### Contacts and repeater tools
+- **Contact details**: type, path, advert age and map position.
+- **Contact actions**: favourites, remove, reset path and share.
+- `meshcore://` export/import, and a list of adverts waiting to be added.
+- **Over the mesh**: login, status, telemetry (Cayenne LPP decoded) and a **remote admin console**.
+- **Set route…** to define the path to a contact by hand.
+- **Trace path** with SNR for each hop, **Trace custom path…**, and **discover path**.
+
+![Contacts with repeater status](docs/images/client-contacts.png)
+
+### Routes & trace
+- Every known route, shown with repeater names.
+- Define or reset a route.
+- Trace any hop list, with SNR for each hop.
+
+![Client routes and trace](docs/images/client-routes.png)
+
+### Channels and region scope
+- **Channel types**: hashtag, private (random secret), shared secret, and Public.
+- Share, remove, and export/import channels.
+- **Region scope** for each channel, so sends reach only that region's repeaters.
+- **Region page** with one-tap **Yorkshire** (`#Yorkshire` channel, `yorkshire` scope) and **North West** presets, plus a default scope for all sends.
+
+![Channels](docs/images/client-channels.png)
+
+![Region and scope](docs/images/client-region.png)
+
+### Map
+Your node and every contact that shares a location.
+
+![Client map](docs/images/client-map.png)
+
+### Client settings and app links
+- **Messaging**: extra ACKs, path hash size, location sharing and client repeat.
+- **Contacts**: auto-add rules and hop limit.
+- **Telemetry** permissions.
+- **Radio**: airtime factor and RX delay.
+- **App links**: Bluetooth PIN, app connections, and live status of each app link.
+- **Dashboard and display WiFi page**: network, IP, `.local` name, hotspot and connected apps. The pairing PIN shows until an app connects.
+- The client has the same web interface, WiFi, updates, rollback and watchdog as the repeater.
+
+![Client dashboard](docs/images/client-dashboard.png)
+
+![Messaging settings](docs/images/client-messaging-settings.png)
+
+![App connections](docs/images/client-apps.png)
+
+The messenger also works on a phone browser:
+
+<img src="docs/images/client-mobile.png" alt="Client on a phone browser" width="300">
+
+---
+
+## T-Deck / T-Deck Plus touch client
+
+- **Touch interface** on the 320x240 screen, with the keyboard and trackball. Tabs for messages, contacts, map and info.
+- **Offline maps from the SD card**, with your position and contacts plotted. `scripts/umc_make_map_tiles.py` builds the tiles.
+- Without tiles, contacts are plotted by range and bearing, with distance rings.
+- **GPS auto-detection** for both receivers used on the T-Deck Plus (u-blox at 38400 baud, L76K at 9600).
+- The same Bluetooth, USB and WiFi app links, web interface and updates as the other client builds.
+
+---
+
+## Ultimate MeshCore App (Android)
+
+- Connects over **Bluetooth** or **WiFi (TCP 5000)** to the Ultimate MeshCore Client and other compatible companion radios.
+- **Messages**: delivery ticks and retry.
+- **Contacts**:
+  - login, status, telemetry, trace and path discovery;
+  - **set route**;
+  - a **remote admin console**.
+- **Channels**, including region scope and one-tap Yorkshire setup.
+- A **map** of everyone who shares a location.
+- **Radio settings**: presets, frequency, power, name, location, confirmations and Bluetooth PIN.
+- **Device tab**: opens the full web interface of any UMC repeater or client on your network, including firmware updates.
+- Source is in [`android/`](android/). CI builds it into an installable APK ([download](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest)).
+
+| Messages | Contacts | Channels |
+|---|---|---|
+| <img src="docs/images/app-messages.png" width="240"> | <img src="docs/images/app-contacts.png" width="240"> | <img src="docs/images/app-channels.png" width="240"> |
+| **Radio** | **Map** | |
+| <img src="docs/images/app-radio.png" width="240"> | <img src="docs/images/app-map.png" width="240"> | |
+
+---
+
+## Command line
+
+Every setting in the web interface is also a command. Commands work over USB serial, telnet, the web console, or remote admin over the mesh.
 
 ```
-wifi.ssid2/3, wifi.pwd2/3, wifi clear, wifi scan, get wifi.scan, wifi.enabled, get wifi.networks
+wifi.ssid, wifi.pwd, wifi.ssid2/3, wifi.pwd2/3, wifi clear, wifi scan, get wifi.scan, wifi.enabled, get wifi.networks, wifi.status, wifi reconnect
 net.ip, net.hostname, net.mdns, get net.status
 ap.mode, ap.password, ap.rescue, get ap.status, pin
 http, http.timeout, telnet, timezone, app.tcp, get app.status
 display.mode, display.ip, display.page, display.traffic, display.timeout
 region preset yorkshire|northwest|uk, get traffic, group.hops.max, advert.hops.max
-client: ble, ble.pin, get ble.activepin, get app.links, get contacts.count, contacts.manual, autoadd.*, telemetry.*, advert.loc, af, advert.flood
 routes, route <node>, route find|pin|unpin|forget, trace <path>, trace route <node>, get trace
 update check, update install, get update.status, update.auto, update.interval, update.url, get build
 get ota.state, ota rollback
 get setup, setup start, setup done, get umc.version, factory reset confirm
+
+client: name, lat/lon, radio, tx, radio.rxgain, af, rxdelay, repeat, path.hash.mode, multi.acks,
+        advert, advert.flood, advert.loc, contacts.manual, autoadd.*, telemetry.*, scope,
+        get contacts.count, ble, ble.pin, get ble.activepin, get app.links, gps, clock, stats, memory
 ```
 
 The full list with explanations is in the [manual's command reference](docs/umc/MANUAL.md#24-command-reference-az).
 
 ---
 
-## Quick start
-
-1. Open the [web flasher](https://2e0lxy.github.io/ultimate-meshcore/), choose your board and **Repeater** or **Ultimate MeshCore Client**, and press **Install**. Choose **No** at “Erase device?” to keep an existing node's identity.
-2. Join the `UMC-Setup-XXXX` WiFi hotspot and follow the setup wizard.
-3. Reconnect to your home WiFi and open `http://umc-<name>.local/` or the IP shown on the display.
-
 ## Building
 
 ```bash
 git clone https://github.com/2E0LXY/ultimate-meshcore
 cd ultimate-meshcore
-pio run -e umc_heltec_v3_repeater            # build
+pio run -e umc_heltec_v3_repeater            # repeater
 pio run -e umc_heltec_v3_repeater -t upload  # build and flash over USB
 pio run -e umc_heltec_v3_client              # Ultimate MeshCore Client
+pio run -e umc_lilygo_tdeck_client           # T-Deck / T-Deck Plus client
 ```
 
-- Targets: [`variants/umc/platformio.ini`](variants/umc/platformio.ini)
-- Web UI source: [`web/umc/index.html`](web/umc/index.html), gzipped into the firmware at build time. Serve `web/umc/` locally and open `index.html?mock` to try the UI against a simulated device.
-- Web flasher: [`flasher/`](flasher/), published by [`.github/workflows/umc-firmware.yml`](.github/workflows/umc-firmware.yml)
+- **Targets:** [`variants/umc/platformio.ini`](variants/umc/platformio.ini)
+- **Web UI source:** [`web/umc/index.html`](web/umc/index.html), gzipped into the firmware at build time.
+  - To try it against a simulated device, serve `web/umc/` locally and open one of:
+    - `index.html?mock` (repeater)
+    - `index.html?mock=setup` (setup wizard)
+    - `index.html?mock=client` (client)
+  - [`scripts/umc_screenshots.py`](scripts/umc_screenshots.py) regenerates the screenshots in this README.
+- **Web flasher:** [`flasher/`](flasher/), published by [`.github/workflows/umc-firmware.yml`](.github/workflows/umc-firmware.yml)
+- **Android app:** `cd android && ./gradlew assembleDebug`
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [MANUAL.md](docs/umc/MANUAL.md) | Complete user guide from installation to every setting, troubleshooting, command reference and glossary |
-| [ROADMAP.md](docs/umc/ROADMAP.md) | What's next, and features found in other projects that are being added |
+| [MANUAL.md](docs/umc/MANUAL.md) | Complete user guide: installation, every setting, troubleshooting, command reference and glossary |
+| [ROADMAP.md](docs/umc/ROADMAP.md) | What's coming next |
 | [SPEC.md](docs/umc/SPEC.md) | Design specification |
-| [SOURCES.md](docs/umc/SOURCES.md) | Every project reviewed and what each contributes |
 | [android/README.md](android/README.md) | The Ultimate MeshCore App for Android |
 
-## Credits
+## Author
 
-- [MeshCore](https://github.com/meshcore-dev/MeshCore) — Scott Powell / Ripple Radios and contributors
-- [MeshCore-EastMesh](https://github.com/xJARiD/MeshCore-EastMesh) — WiFi, MQTT observer, HTTPS panel, ESP-NOW bridge ([original README](docs/EASTMESH_README.md))
-- Ideas and features from agessaman/MeshCore, OffbandMesh, meshcomod, MeshCore-Low-Power, MeshCore-BitChat, jmead's MQTT gateway, meshcore-open, LitBomb's FAQ, the UK MeshCore guide and others — see [SOURCES.md](docs/umc/SOURCES.md)
-- USB flashing by [ESP Web Tools](https://esphome.github.io/esp-web-tools/)
+**Daren Loxley 2E0LXY** · umc@2e0lxy.uk
 
 ## License
 
-MIT, as upstream MeshCore — see [license.txt](license.txt).
+MIT — see [license.txt](license.txt).

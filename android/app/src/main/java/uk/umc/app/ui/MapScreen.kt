@@ -37,7 +37,8 @@ fun MapScreen() {
                 MapView(ctx).apply {
                     setTileSource(TileSourceFactory.MAPNIK)
                     setMultiTouchControls(true)
-                    controller.setZoom(11.0)
+                    controller.setZoom(6.0)
+                    controller.setCenter(GeoPoint(54.0, -2.0))   // until a node with a location is known
                 }
             },
             update = { map ->
@@ -52,6 +53,7 @@ fun MapScreen() {
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                         })
                         map.controller.setCenter(p)
+                        map.controller.setZoom(11.0)
                         centred = true
                     }
                 }
@@ -65,6 +67,7 @@ fun MapScreen() {
                     })
                     if (!centred) {
                         map.controller.setCenter(p)
+                        map.controller.setZoom(11.0)
                         centred = true
                     }
                 }
