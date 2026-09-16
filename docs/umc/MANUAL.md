@@ -509,6 +509,7 @@ See [§3.1](#31-web-flasher-easiest).
 | **Official MeshCore app**, **meshcore-open** over WiFi | Add a TCP / WiFi device with the repeater's IP and port **5000**. See below. |
 | **meshcore_py**, **meshcore-cli**, **Home Assistant (meshcore-ha)** | TCP to the repeater's IP, port 5000 |
 | Direct app connection over Bluetooth | Use the **Ultimate MeshCore Client** firmware (section 21) |
+| **Ultimate MeshCore App (Android)** | Bluetooth or WiFi to a client; the Device tab manages any UMC repeater or client over WiFi. [Install the APK](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) |
 
 ### Connecting an app over WiFi (port 5000)
 

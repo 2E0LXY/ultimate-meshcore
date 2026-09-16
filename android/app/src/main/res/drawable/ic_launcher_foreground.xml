@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- a node with two radiating arcs: the mesh -->
+    <path android:fillColor="#FFFFFF" android:pathData="M54,58m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="4" android:fillColor="#00000000"
+        android:pathData="M40,46 A20,20 0 0 1 68,46" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="4" android:fillColor="#00000000"
+        android:pathData="M32,38 A32,32 0 0 1 76,38" />
+</vector>

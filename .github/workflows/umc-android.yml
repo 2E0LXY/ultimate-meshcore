@@ -1,0 +1,51 @@
+name: Build Ultimate MeshCore App (Android)
+
+# Builds the Android app and attaches the APK to the "app-latest" release, so anyone can
+# install the newest build straight from GitHub.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/umc-android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: umc-android
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew :app:assembleRelease --no-daemon
+      - name: Name the APK
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk "out/ultimate-meshcore-app-${GITHUB_SHA::7}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk out/ultimate-meshcore-app-latest.apk
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ultimate-meshcore-app
+          path: out/*.apk
+      - name: Publish to the app-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(printf 'Ultimate MeshCore App, built from %s on %s.\n\nInstall the APK on Android 8 or newer: allow installing from your browser or files app when prompted.\nConnect to a radio over Bluetooth or WiFi (TCP port 5000).\n' "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%d)")
+          gh release delete app-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create app-latest out/*.apk --title "Ultimate MeshCore App (latest)" --notes "$notes"

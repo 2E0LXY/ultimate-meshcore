@@ -3,7 +3,7 @@
 **All-in-one MeshCore firmware with a complete WiFi web interface.**
 Fully compatible with standard MeshCore nodes and apps, with setup, management and updates you can do from any browser.
 
-[**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest build**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest)
+[**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest firmware**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) · [**📱 Android app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest)
 
 > **Status: 0.1.0 (early).** The Heltec V3 / V3.2 **repeater** and **Ultimate MeshCore Client** are available and running on hardware. Heltec V4 (OLED/TFT/R8) builds of both are published but not yet tested on V4 hardware. Room server and the T-TWR are in progress — see the [roadmap](docs/umc/ROADMAP.md).
 
@@ -88,6 +88,12 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 - **GPS auto-detection** for both receivers used on the T-Deck Plus (u-blox 38400 / L76K 9600).
 - Same Bluetooth, USB, WiFi apps, web interface and updates as the other client builds.
 
+### Ultimate MeshCore App (Android)
+- Connects over **Bluetooth** or **WiFi (TCP 5000)** to this firmware and to any standard MeshCore companion radio.
+- **Messages** with delivery ticks and retry, **contacts** with login/status/telemetry/trace/path discovery and a **remote admin console**, **channels**, and a **map** of everyone sharing a location.
+- **Radio settings** (presets, frequency, power, name, location, confirmations, Bluetooth PIN) and a **Device** tab that drives the full UMC web interface of any repeater or client on your network, including firmware updates.
+- Source in [`android/`](android/), built by CI into an installable APK.
+
 ### Command line additions
 Everything in the web interface is also a command (USB serial, telnet, web console, or remote admin over the mesh). UMC adds:
 
@@ -137,6 +143,7 @@ pio run -e umc_heltec_v3_client              # Ultimate MeshCore Client
 | [ROADMAP.md](docs/umc/ROADMAP.md) | What's next, and features found in other projects that are being added |
 | [SPEC.md](docs/umc/SPEC.md) | Design specification |
 | [SOURCES.md](docs/umc/SOURCES.md) | Every project reviewed and what each contributes |
+| [android/README.md](android/README.md) | The Ultimate MeshCore App for Android |
 
 ## Credits
 
