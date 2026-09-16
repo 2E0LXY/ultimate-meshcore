@@ -43,6 +43,15 @@ public:
 #endif
   bool begin();
 
+  // Direct access for rich UIs (T-Deck touch screens and map tiles) and for the SD card,
+  // which shares this SPI bus.
+  Adafruit_ST7789* gfx() { return &display; }
+  #if defined(LILYGO_TDECK) || defined(HELTEC_LORA_V4_TFT) || defined(HELTEC_V4_R8_TFT)
+    SPIClass& spiBus() { return displaySPI; }
+  #else
+    SPIClass& spiBus() { return SPI; }
+  #endif
+
   bool isOn() override { return _isOn; }
   void turnOn() override;
   void turnOff() override;

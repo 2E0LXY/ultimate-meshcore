@@ -61,6 +61,7 @@ It builds on upstream MeshCore 1.17.1 and the MeshCore-EastMesh fork, and brings
 |---|---|---|
 | Heltec WiFi LoRa 32 V3 / V3.2 | ✅ | ✅ |
 | Heltec V4 (OLED, TFT, R8) | ✅ (not yet tested on hardware) | ✅ (not yet tested on hardware) |
+| LilyGo T-Deck / T-Deck Plus | — | ✅ touch client with maps (not yet tested on hardware) |
 | LilyGo T-TWR with SX1262 add-on | *(coming soon)* | *(coming soon)* |
 
 ---
@@ -617,7 +618,41 @@ Regional meshes ask clients to **scope** their flood traffic so it doesn't cross
 | **Identity & access** | Name, location, public key, web/telnet admin password. |
 | **Network, Live traffic, Console, Firmware, Backup** | As for the repeater (sections 12, 16–19). |
 
-### 21.8 Memory on the Heltec V3
+### 21.8 T-Deck and T-Deck Plus: touch screen and maps
+
+The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x240 screen, using the keyboard, trackball and touch panel. It is the same client firmware, so Bluetooth, USB, WiFi apps, the web interface and updates all work as on any other board.
+
+**Tabs along the bottom**
+
+| Tab | What you get |
+|---|---|
+| **Msgs** | The conversation log. **To:** at the top picks the channel or contact (tap **change** to cycle). Type on the keyboard and press **Enter** (or tap **Send**). Drag the list to scroll back. |
+| **People** | Contacts with type, path and how long ago they were heard. Tap one, then **Message**, **Show map**, **Share** (zero-hop) or **Reset path**. |
+| **Map** | Offline map with your position and every contact that shares a location. Drag to pan, **+**/**−** to zoom, **me** to recentre. |
+| **Info** | Node name, WiFi and web address, Bluetooth PIN, radio settings, GPS fix, map status, contacts, memory, and buttons for **Advert**, **Flood advert**, **Bluetooth on/off** and **Reboot**. |
+
+**GPS** — the T-Deck Plus has shipped with two different receivers (u-blox at 38400 baud and L76K at 9600). The firmware tries each speed at boot and uses whichever answers, so both work without a setting. Turn the receiver on with `gps on` (or Power & hardware in the web UI); **Info** shows the position once it has a fix.
+
+**Offline maps on the SD card**
+
+1. Format a micro-SD card as FAT32 and put it in the T-Deck.
+2. On a computer, build the tiles for the area you want:
+
+   ```bash
+   pip install pillow
+   python scripts/umc_make_map_tiles.py --bbox 53.5,-2.0,54.0,-1.2 --zoom 10-13 --out E:/maps
+   ```
+
+   `--bbox` is `lat1,lon1,lat2,lon2`. Each zoom level roughly quadruples the number of tiles, so start small: a county at zoom 10–13 is a few hundred tiles (tens of MB). Tiles are stored as `/maps/<zoom>/<x>/<y>.bin` (raw RGB565), which the radio can draw without decoding images.
+3. Put the card back and open the **Map** tab. **Info → Maps** shows what was found, e.g. `SD maps, zoom 10-13`.
+
+Without a card (or outside the tiles you copied) the Map tab still works: it plots every contact by **distance and bearing** from your position, with range rings, which is often all you need in the field.
+
+Tile servers have usage policies — OpenStreetMap's are fine for a small personal area but not for bulk downloads. The script waits between requests and refuses very large jobs. Map data © OpenStreetMap contributors.
+
+**Touch not lining up?** Panels differ between batches. `set touch.map 0`…`7` in the console (or over USB) rotates and mirrors the touch mapping until taps land where you expect.
+
+### 21.9 Memory on the Heltec V3
 
 The V3 has no PSRAM, so the client uses the lightweight **NimBLE** Bluetooth stack, which leaves room for WiFi and the web interface. During an **internet firmware update** check or download, Bluetooth pauses for a few seconds to free memory, then comes back on its own. A phone app connected over Bluetooth reconnects afterwards. The V3 client stores up to 350 contacts, 40 channels and 64 messages waiting for an app.
 
@@ -766,6 +801,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get/set repeat on\|off` | Repeat packets (client: only on allowed frequencies) |
 | `get role` | Firmware role |
 | `get/set scope <region>` | Region scope added to flood sends, blank = none *(C)* |
+| `get/set touch.map <0-7>` | T-Deck touch orientation *(C)* |
 | `get/set rxdelay <0-20>` | RX delay base |
 | `sensor list\|get\|set` | Sensors (if fitted) |
 | `get setup`, `setup start`, `setup done` | Setup mode |

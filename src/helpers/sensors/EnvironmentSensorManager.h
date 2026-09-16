@@ -20,6 +20,7 @@ protected:
   uint8_t      next_available_channel = TELEM_CHANNEL_SELF + 1;
 
   bool     gps_detected = false;
+  uint32_t gps_baud_detected = 0;   // set when UMC_GPS_AUTODETECT finds a receiver
   bool     gps_active = false;
   uint32_t gps_update_interval_sec = 1;
 

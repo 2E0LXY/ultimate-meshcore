@@ -39,6 +39,7 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.group_hops_max = 64;
   p.app_tcp = true;
   p.app_tcp_port = 5000;
+  p.touch_map = 0;
   strcpy(p.admin_pw, "password");
 }
 
@@ -71,6 +72,7 @@ void UmcPrefsStore::load(UmcPrefs& p) {
     p.group_hops_max = nvs.getUChar("grp_hops", p.group_hops_max);
     p.app_tcp = nvs.getBool("app_tcp", p.app_tcp);
     p.app_tcp_port = nvs.getUShort("app_port", p.app_tcp_port);
+    p.touch_map = nvs.getUChar("touch_map", p.touch_map);
     nvs.getString("pin", p.pin, sizeof(p.pin));
     if (nvs.isKey("admin_pw")) nvs.getString("admin_pw", p.admin_pw, sizeof(p.admin_pw));
     nvs.end();
@@ -103,6 +105,7 @@ bool UmcPrefsStore::save(const UmcPrefs& p) {
   nvs.putUChar("grp_hops", p.group_hops_max);
   nvs.putBool("app_tcp", p.app_tcp);
   nvs.putUShort("app_port", p.app_tcp_port);
+  nvs.putUChar("touch_map", p.touch_map);
   nvs.putString("pin", p.pin);
   nvs.putString("admin_pw", p.admin_pw);
   nvs.end();

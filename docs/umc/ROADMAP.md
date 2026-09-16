@@ -26,6 +26,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 | 1.2 | **Ultimate MeshCore Client** (companion) with USB + BLE + WiFi TCP (5000) + browser messenger at the same time, web UI, internet OTA | meshcomod, upstream companion, UMC | ✅ (WebSocket 8765 📋) |
 | 1.3 | Room server firmware with the UMC web UI | upstream | 📋 |
 | 1.4 | LilyGo T-TWR + SX1262 variant (after hardware identification) | new | 📋 |
+| 1.6 | **T-Deck / T-Deck Plus touch client**: on-screen messenger, contacts, offline SD maps, GPS auto-detect | new | ✅ build (hardware test pending) |
 | 1.5 | Dual-boot MeshCore/Meshtastic package (separate download) | mesh-loader | 💡 |
 
 ## 2. Upstream MeshCore `dev` (77 commits newer than our base)

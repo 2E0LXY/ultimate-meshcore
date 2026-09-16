@@ -1059,6 +1059,47 @@ void EnvironmentSensorManager::initBasicGPS() {
   Serial1.begin(9600);
   #endif
 
+#ifdef UMC_GPS_AUTODETECT
+  // Boards such as the T-Deck Plus ship with different GPS receivers (u-blox at 38400,
+  // L76K at 9600). Try each until one sends NMEA, then keep that speed.
+  {
+    static const uint32_t bauds[] = {
+      #ifdef GPS_BAUD_RATE
+      GPS_BAUD_RATE,
+      #endif
+      9600, 38400, 115200, 57600
+    };
+    for (size_t bi = 0; bi < sizeof(bauds) / sizeof(bauds[0]); bi++) {
+      if (bi > 0) {
+        Serial1.end();
+        Serial1.begin(bauds[bi]);
+        Serial1.setPins(PIN_GPS_TX, PIN_GPS_RX);
+      }
+      const unsigned long until = millis() + 1200;
+      bool seen = false;
+      while (millis() < until) {
+        if (Serial1.available() && Serial1.peek() == '$') { seen = true; break; }
+        if (Serial1.available()) Serial1.read();
+        delay(5);
+      }
+      if (seen) {
+        gps_baud_detected = bauds[bi];
+        MESH_DEBUG_PRINTLN("GPS detected at %u baud", (unsigned)bauds[bi]);
+        break;
+      }
+    }
+    if (gps_baud_detected == 0) {   // nothing answered: go back to the build default
+      Serial1.end();
+      #ifdef GPS_BAUD_RATE
+      Serial1.begin(GPS_BAUD_RATE);
+      #else
+      Serial1.begin(9600);
+      #endif
+      Serial1.setPins(PIN_GPS_TX, PIN_GPS_RX);
+    }
+  }
+#endif
+
   // Try to detect if GPS is physically connected to determine if we should expose the setting
   _location->begin();
   _location->reset();

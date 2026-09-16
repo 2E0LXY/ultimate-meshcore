@@ -15,6 +15,7 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 |---|---|---|---|
 | Heltec WiFi LoRa 32 V3 / V3.2 | ✅ | ✅ | planned |
 | Heltec V4 OLED / TFT / R8 | ✅ build (hardware test pending) | ✅ build (hardware test pending) | planned |
+| LilyGo T-Deck / T-Deck Plus | — | ✅ build with touch UI + maps (hardware test pending) | — |
 | LilyGo T-TWR + SX1262 add-on | planned | planned | — |
 
 ---
@@ -80,6 +81,12 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 - **Client settings**: extra ACKs, path hash size, location sharing, client repeat, auto-add rules and hop limit, telemetry permissions, Bluetooth PIN, app connections, airtime factor, RX delay.
 - **Display WiFi page**: network, IP, `.local` name, hotspot, connected apps. The pairing PIN shows until an app connects.
 - Same web UI, WiFi, internet updates, rollback and watchdog as the repeater. On the V3, Bluetooth pauses briefly during internet updates to free memory.
+
+### T-Deck / T-Deck Plus touch client
+- **Touch interface** on the 320x240 screen with the keyboard and trackball: messages, contacts, map and info tabs.
+- **Offline maps from the SD card** (`scripts/umc_make_map_tiles.py` builds them), with your position and contacts plotted; without tiles it plots contacts by range and bearing with distance rings.
+- **GPS auto-detection** for both receivers used on the T-Deck Plus (u-blox 38400 / L76K 9600).
+- Same Bluetooth, USB, WiFi apps, web interface and updates as the other client builds.
 
 ### Command line additions
 Everything in the web interface is also a command (USB serial, telnet, web console, or remote admin over the mesh). UMC adds:

@@ -24,6 +24,7 @@ BOARDS = {
     "heltec_v4_tft": ("Heltec V4 (TFT)", "ESP32-S3"),
     "heltec_v4_r8_oled": ("Heltec V4 R8 (OLED)", "ESP32-S3"),
     "heltec_v4_r8_tft": ("Heltec V4 R8 (TFT)", "ESP32-S3"),
+    "lilygo_tdeck": ("LilyGo T-Deck / T-Deck Plus", "ESP32-S3"),
     "ttwr_sx1262": ("LilyGo T-TWR + SX1262", "ESP32-S3"),
 }
 ROLES = {

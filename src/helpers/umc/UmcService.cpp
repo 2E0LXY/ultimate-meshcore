@@ -5,6 +5,7 @@
 #include <helpers/TxtDataHelpers.h>
 #include <string.h>
 
+#include "UmcChatLog.h"
 #include "UmcTelnet.h"
 #include "UmcAppServer.h"
 #include "UmcRoutes.h"
@@ -14,6 +15,7 @@
 
 UmcTraffic umc_traffic;
 UmcRoutes umc_routes;
+UmcChatLog umc_chatlog;
 
 // Default for hosts without an app protocol: reject every command as unsupported.
 void UmcHost::umcAppFrame(UmcAppServer& server, int client, const uint8_t* frame, size_t len) {
@@ -686,6 +688,21 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
   }
 
   // ---- per-type flood hop caps (Low-Power firmware compatible names) ----
+  if (strcmp(command, "get touch.map") == 0) {
+    snprintf(reply, reply_size, "> %u", _prefs.touch_map);
+    return true;
+  }
+  if (startsWith(command, "set touch.map ")) {
+    int v = atoi(command + 14);
+    if (v < 0 || v > 7) {
+      snprintf(reply, reply_size, "Err - 0 to 7 (rotation/mirror of the touch panel)");
+      return true;
+    }
+    _prefs.touch_map = static_cast<uint8_t>(v);
+    UmcPrefsStore::save(_prefs);
+    snprintf(reply, reply_size, "OK - touch mapping %d", v);
+    return true;
+  }
   if (strcmp(command, "get group.hops.max") == 0) {
     snprintf(reply, reply_size, "> %u", _prefs.group_hops_max);
     return true;
