@@ -8,6 +8,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 - ✅ Routes & trace: route table from adverts, pinned routes, per-hop SNR trace
 - ✅ Ultimate MeshCore Client: BLE (NimBLE) + USB + TCP 5000 + browser messenger (contacts, channels, remote admin, trace, telemetry), loop watchdog
+- ✅ Ultimate MeshCore Desktop (Windows / Linux): full web interface over USB, Bluetooth, WiFi app link or the network; firmware install over USB; desktop bridge in client (CMD 112) and repeater (`@umc` on USB) firmware
 
 - ✅ Web UI for every repeater setting, setup wizard, open setup hotspot, rescue hotspot, captive portal
 - ✅ 3 WiFi networks, static IP, hostname/mDNS, scan, gateway watchdog

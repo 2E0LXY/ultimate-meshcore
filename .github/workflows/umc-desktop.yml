@@ -1,0 +1,77 @@
+name: Build Ultimate MeshCore Desktop (Windows & Linux)
+
+# Builds the desktop app for Windows and Linux and attaches both to the "desktop-latest"
+# release.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - "web/umc/index.html"
+      - ".github/workflows/umc-desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: umc-desktop
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows
+          - os: ubuntu-22.04
+            artifact: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        working-directory: desktop
+        run: pip install -r requirements.txt pyinstaller pillow
+      - name: Build
+        working-directory: desktop
+        run: python build.py
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p out
+          cp desktop/dist/UltimateMeshCoreDesktop.exe out/UltimateMeshCoreDesktop-windows.exe
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p out pkg/ultimate-meshcore-desktop
+          cp desktop/dist/ultimate-meshcore-desktop desktop/icon.png desktop/linux/* pkg/ultimate-meshcore-desktop/
+          chmod +x pkg/ultimate-meshcore-desktop/ultimate-meshcore-desktop pkg/ultimate-meshcore-desktop/install.sh
+          tar -czf out/ultimate-meshcore-desktop-linux-x86_64.tar.gz -C pkg ultimate-meshcore-desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.artifact }}
+          path: out/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Publish to the desktop-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out
+          notes=$(printf 'Ultimate MeshCore Desktop, built from %s on %s.\n\nWindows: download UltimateMeshCoreDesktop-windows.exe and run it (Windows may ask you to confirm the first time).\nLinux: download the .tar.gz, extract it and run ./install.sh (or run ultimate-meshcore-desktop directly).\n\nConnect to radios over USB, Bluetooth or WiFi, and to Ultimate MeshCore devices on your network.\n' "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%d)")
+          gh release delete desktop-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create desktop-latest out/* --title "Ultimate MeshCore Desktop (latest)" --notes "$notes"

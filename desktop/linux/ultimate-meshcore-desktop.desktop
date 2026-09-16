@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Ultimate MeshCore Desktop
+Comment=Messages, contacts, maps, settings and firmware updates for Ultimate MeshCore radios
+Exec=ultimate-meshcore-desktop
+Icon=ultimate-meshcore-desktop
+Terminal=false
+Categories=Network;HamRadio;Utility;

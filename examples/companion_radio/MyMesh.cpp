@@ -73,6 +73,7 @@
 #define CMD_SET_DEFAULT_FLOOD_SCOPE   63
 #define CMD_GET_DEFAULT_FLOOD_SCOPE   64
 #define CMD_SEND_RAW_PACKET           65
+#define CMD_UMC_BRIDGE                112  // UMC desktop app: [op][text] op 0 = new request, 1 = read at offset (u16)
 
 // Stats sub-types for CMD_GET_STATS
 #define STATS_TYPE_CORE               0
@@ -108,6 +109,7 @@
 #define RESP_ALLOWED_REPEAT_FREQ      26
 #define RESP_CODE_CHANNEL_DATA_RECV   27
 #define RESP_CODE_DEFAULT_FLOOD_SCOPE 28
+#define RESP_CODE_UMC_BRIDGE          112  // [total u16][offset u16][data...]
 
 #define MAX_CHANNEL_DATA_LENGTH       (MAX_FRAME_SIZE - 9)
 
@@ -2136,6 +2138,31 @@ void MyMesh::handleCmdFrame(size_t len) {
     } else {
       writeErrFrame(ERR_CODE_TABLE_FULL);
     }
+#ifdef UMC_BUILD
+  } else if (cmd_frame[0] == CMD_UMC_BRIDGE && len >= 2) {
+    // The reply is kept here and read back one frame at a time (Bluetooth queues only a few frames).
+    if (cmd_frame[1] == 0) {
+      const size_t max = 8192;
+      if (_bridge_buf == NULL) _bridge_buf = (char*)malloc(max);
+      if (_bridge_buf == NULL) { writeErrFrame(ERR_CODE_TABLE_FULL); return; }
+      cmd_frame[len] = 0;
+      _bridge_buf[0] = 0;
+      umc.handleBridge((const char*)&cmd_frame[2], _bridge_buf, max);
+      _bridge_len = strlen(_bridge_buf);
+    }
+    uint16_t offset = 0;
+    if (cmd_frame[1] == 1 && len >= 4) memcpy(&offset, &cmd_frame[2], 2);
+    if (_bridge_buf == NULL || offset > _bridge_len) { writeErrFrame(ERR_CODE_ILLEGAL_ARG); return; }
+    size_t chunk = _bridge_len - offset;
+    if (chunk > MAX_FRAME_SIZE - 5) chunk = MAX_FRAME_SIZE - 5;
+    int i = 0;
+    out_frame[i++] = RESP_CODE_UMC_BRIDGE;
+    memcpy(&out_frame[i], &_bridge_len, 2); i += 2;
+    memcpy(&out_frame[i], &offset, 2); i += 2;
+    memcpy(&out_frame[i], &_bridge_buf[offset], chunk); i += chunk;
+    _serial->writeFrame(out_frame, i);
+    if (offset + chunk >= _bridge_len) { free(_bridge_buf); _bridge_buf = NULL; _bridge_len = 0; }
+#endif
   } else {
     writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
     MESH_DEBUG_PRINTLN("ERROR: unknown command: %02X", cmd_frame[0]);

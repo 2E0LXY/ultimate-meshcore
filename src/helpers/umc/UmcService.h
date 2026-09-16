@@ -41,6 +41,11 @@ public:
   // array of reply strings into out. Returns false on timeout / overload.
   bool runBatch(const char* commands, char* out, size_t out_size, uint32_t timeout_ms = 15000);
 
+  // Loop task only: run commands now (JSON array of replies).
+  void runCommandsNow(const char* commands, char* out, size_t out_size);
+  // USB / Bluetooth bridge for the desktop app (loop task only). See UmcService.cpp.
+  bool handleBridge(const char* request, char* out, size_t out_size);
+
   bool checkAdminPassword(const char* password) const;
   bool isDefaultAdminPassword() const;
   bool isSetupMode() const { return !_prefs.setup_done; }

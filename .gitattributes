@@ -1,2 +1,4 @@
 docs/** -whitespace
 android/gradlew text eol=lf
+desktop/linux/install.sh text eol=lf
+desktop/linux/*.desktop text eol=lf

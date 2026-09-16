@@ -278,6 +278,8 @@ private:
 #ifdef UMC_BUILD
   NetworkService network;
   UmcService umc;
+  char* _bridge_buf = NULL;   // desktop app bridge reply, read back in chunks
+  uint16_t _bridge_len = 0;
   UmcAppLink app_link;
   BaseSerialInterface* _umc_all_serial = NULL;  // the MultiSerialInterface (apps)
   BaseSerialInterface* _umc_ble = NULL;

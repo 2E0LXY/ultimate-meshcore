@@ -1,11 +1,11 @@
 # Ultimate MeshCore (UMC)
 
-**All-in-one mesh radio firmware with a complete WiFi web interface, a feature-packed client, a touch client for the T-Deck and an Android app.**
-Set up, manage and update every node from any browser or phone.
+**All-in-one mesh radio firmware with a complete WiFi web interface, a feature-packed client, a touch client for the T-Deck, an Android app and a Windows / Linux desktop app.**
+Set up, manage and update every node from any browser, phone or computer.
 
 By **Daren Loxley 2E0LXY**
 
-[**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest firmware**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) · [**📱 Android app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest)
+[**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest firmware**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) · [**📱 Android app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) · [**🖥 Windows / Linux app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest)
 
 > **Status: 0.1.0 (early).** The Heltec V3 / V3.2 **repeater** and **Ultimate MeshCore Client** run on hardware. Heltec V4 (OLED/TFT/R8) and T-Deck builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
 
@@ -25,6 +25,7 @@ By **Daren Loxley 2E0LXY**
 - [Ultimate MeshCore Client](#ultimate-meshcore-client)
 - [T-Deck / T-Deck Plus touch client](#t-deck--t-deck-plus-touch-client)
 - [Ultimate MeshCore App (Android)](#ultimate-meshcore-app-android)
+- [Ultimate MeshCore Desktop (Windows / Linux)](#ultimate-meshcore-desktop-windows--linux)
 - [Command line](#command-line)
 - [Building](#building)
 - [Documentation](#documentation)
@@ -279,6 +280,27 @@ The messenger also works on a phone browser:
 
 ---
 
+## Ultimate MeshCore Desktop (Windows / Linux)
+
+The complete interface on your computer, for any radio you can reach, including ones without WiFi.
+
+- **USB**:
+  - repeaters, room servers and client radios, with every page of the web interface;
+  - **firmware updates over USB**, keeping identity and settings.
+- **Bluetooth** and **WiFi app link (TCP 5000)**: client radios, with messages, contacts, channels, routes and trace, map, region scope and settings.
+- **On your network**:
+  - any Ultimate MeshCore repeater or client, with its own web interface;
+  - **Search this network** finds them.
+- **Other MeshCore companion radios**: messages, contacts, channels, map and the common settings.
+- **Everyday use**: recent connections, automatic reconnect after a restart, and its own window.
+- **Downloads**: a single `.exe` for Windows, and a `.tar.gz` with an installer for Linux ([download](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest)). Source is in [`desktop/`](desktop/).
+
+| Connection page | Messages |
+|---|---|
+| <img src="docs/images/desktop-connect.png" width="420"> | <img src="docs/images/desktop-messages.png" width="420"> |
+
+---
+
 ## Command line
 
 Every setting in the web interface is also a command. Commands work over USB serial, telnet, the web console, or remote admin over the mesh.
@@ -324,6 +346,7 @@ pio run -e umc_lilygo_tdeck_client           # T-Deck / T-Deck Plus client
   - [`scripts/umc_screenshots.py`](scripts/umc_screenshots.py) regenerates the screenshots in this README.
 - **Web flasher:** [`flasher/`](flasher/), published by [`.github/workflows/umc-firmware.yml`](.github/workflows/umc-firmware.yml)
 - **Android app:** `cd android && ./gradlew assembleDebug`
+- **Desktop app:** `cd desktop && pip install -r requirements.txt && python -m umc_desktop` (build with `python build.py`)
 
 ## Documentation
 
@@ -333,6 +356,7 @@ pio run -e umc_lilygo_tdeck_client           # T-Deck / T-Deck Plus client
 | [ROADMAP.md](docs/umc/ROADMAP.md) | What's coming next |
 | [SPEC.md](docs/umc/SPEC.md) | Design specification |
 | [android/README.md](android/README.md) | The Ultimate MeshCore App for Android |
+| [desktop/README.md](desktop/README.md) | Ultimate MeshCore Desktop for Windows and Linux |
 
 ## Author
 

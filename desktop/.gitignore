@@ -1,0 +1,7 @@
+build/
+dist/
+umc_desktop/web/
+*.spec
+__pycache__/
+icon.ico
+icon.png

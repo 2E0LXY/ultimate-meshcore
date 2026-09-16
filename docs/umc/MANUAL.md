@@ -27,10 +27,10 @@
 19. [Backup, restore and factory reset](#19-backup-restore-and-factory-reset)
 20. [Using apps and other tools](#20-using-apps-and-other-tools)
 21. [Ultimate MeshCore Client](#21-ultimate-meshcore-client)
-21. [Security](#22-security)
-22. [Troubleshooting](#23-troubleshooting)
-23. [Command reference A–Z](#24-command-reference-az)
-24. [Glossary A–Z](#25-glossary-az)
+22. [Security](#22-security)
+23. [Troubleshooting](#23-troubleshooting)
+24. [Command reference A–Z](#24-command-reference-az)
+25. [Glossary A–Z](#25-glossary-az)
 
 ---
 
@@ -516,6 +516,7 @@ See [§3.1](#31-web-flasher-easiest).
 | **meshcore_py**, **meshcore-cli**, **Home Assistant (meshcore-ha)** | TCP to the repeater's IP, port 5000 |
 | Direct app connection over Bluetooth | Use the **Ultimate MeshCore Client** firmware (section 21) |
 | **Ultimate MeshCore App (Android)** | Bluetooth or WiFi to a client; the Device tab manages any UMC repeater or client over WiFi. [Install the APK](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) |
+| **Ultimate MeshCore Desktop (Windows, Linux)** | USB, Bluetooth, WiFi app link, or the network. See [20.1](#201-ultimate-meshcore-desktop-windows-and-linux). |
 
 ### Connecting an app over WiFi (port 5000)
 
@@ -529,6 +530,37 @@ Notes:
 - A repeater has no chat identity, contacts or channels, so messaging and channels aren't available through it. Use client (companion) firmware for that.
 - Up to 3 apps can be connected at once. Changing settings requires the admin login on that connection.
 - `get app.status` shows whether it's on and how many apps are connected.
+
+### 20.1 Ultimate MeshCore Desktop (Windows and Linux)
+
+A program for your computer that gives you the complete web interface for any radio you can reach, including ones with no WiFi.
+
+**Install**
+- **Windows:** download `UltimateMeshCoreDesktop-windows.exe` from the [desktop-latest release](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest) and run it. Windows SmartScreen may ask you to confirm the first time (**More info → Run anyway**).
+- **Linux (x86-64):** download `ultimate-meshcore-desktop-linux-x86_64.tar.gz`, extract it and run `./install.sh`. It adds the app to your applications menu. For USB radios your account needs to be in the `dialout` group: `sudo usermod -aG dialout $USER`, then log out and back in.
+
+The app opens in its own window. It uses Microsoft Edge, Google Chrome, Chromium or Brave in app mode if one is installed, otherwise your default browser. Closing the window closes the app.
+
+**Connecting**
+
+| Connection | Works with | What you get |
+|---|---|---|
+| **USB** | Repeaters, room servers and client radios | The full web interface. Firmware updates install over USB. |
+| **On your network** | UMC repeaters and clients on WiFi | The device's own web interface (sign in with its admin password). **Search this network** finds them. |
+| **Bluetooth** | Client radios | Messages, contacts, channels, routes, map and settings. Your computer asks for the pairing PIN the first time. |
+| **WiFi app link** | Client radios with the TCP app connection on (port 5000) | As Bluetooth |
+
+Recent connections are listed at the top of the connection page. **Connections** (top right of the interface) disconnects and returns to that page. If the radio restarts, the app reconnects by itself.
+
+**What works where**
+- **Ultimate MeshCore Client and repeater firmware** answer the desktop app's bridge requests. You get every page the device's own web interface has, over any connection: settings, WiFi, routes, live traffic, console and backup.
+- **Other MeshCore companion radios** get messages, contacts, channels, routes and trace, the map, region scope, radio, messaging and identity settings, and the dashboard. Settings they don't have show *not supported*.
+- **Other repeater firmware on USB** gets the console and basic settings.
+
+**Firmware updates over USB**
+On **Firmware & maintenance**, **Update through this browser** and **Upload a firmware file** both work over USB. The app writes the new firmware with the same layout as the web flasher, keeping identity and settings. The radio restarts on the new firmware and the app reconnects. Over Bluetooth, connect by USB (or use the device's web page on WiFi) to update.
+
+**Options** (command line): `--port <n>` (local port, default 47815), `--browser` (use your default browser), `--no-window` (server only; open `http://127.0.0.1:47815/` yourself).
 
 ---
 

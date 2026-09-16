@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ultimate MeshCore Desktop</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#1b1f24;--muted:#626b75;--line:#dde1e6;--acc:#0b6bcb;--acc-ink:#fff;--ok:#1a7f37;--bad:#cf222e;--chip:#eef1f4;--r:10px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1216;--card:#171b21;--ink:#e6e9ed;--muted:#98a2ad;--line:#2a313a;--acc:#4c9aff;--acc-ink:#07121f;--ok:#3fb950;--bad:#f85149;--chip:#222831}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,input{font:inherit;color:inherit}
+header{display:flex;align-items:center;gap:12px;padding:18px 24px;border-bottom:1px solid var(--line);background:var(--card)}
+header h1{font-size:18px;margin:0}header small{color:var(--muted);display:block;font-size:12px;font-weight:400}
+header .sp{flex:1}
+main{max-width:980px;margin:0 auto;padding:20px 16px 40px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.card h2{font-size:15px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 12px;font-size:13px}
+.wide{grid-column:1/-1}
+.btn{border:1px solid var(--line);background:var(--chip);border-radius:8px;padding:7px 12px;cursor:pointer}
+.btn:hover{border-color:var(--acc)}.btn.pri{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+.btn:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:7px 10px;flex:1;min-width:140px}
+ul{list-style:none;margin:0 0 10px;padding:0}
+li{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+li:first-child{border-top:0}
+li .t{flex:1;min-width:0}li .t b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}li .t span{color:var(--muted);font-size:12px}
+.empty{color:var(--muted);font-size:13px;padding:6px 0}
+#msg{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:90vw;padding:10px 16px;border-radius:8px;background:var(--card);border:1px solid var(--line);box-shadow:0 4px 18px rgba(0,0,0,.18);display:none}
+#msg.bad{color:var(--bad);border-color:var(--bad)}#msg.ok{color:var(--ok)}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;background:var(--chip);color:var(--muted);font-size:12px}
+@media (max-width:520px){header{padding:14px 16px}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Ultimate MeshCore Desktop<small id="ver">By Daren Loxley 2E0LXY</small></h1></div>
+  <div class="sp"></div>
+  <button class="btn" id="openBtn" hidden>Back to device</button>
+  <button class="btn" id="quitBtn">Quit</button>
+</header>
+<main>
+  <section class="card wide" id="recentCard" hidden>
+    <h2>Recent</h2>
+    <ul id="recent"></ul>
+  </section>
+
+  <section class="card">
+    <h2>USB</h2>
+    <p class="sub">Repeaters, room servers and client radios plugged into this computer. Firmware updates install over USB too.</p>
+    <ul id="ports"><li class="empty">Looking…</li></ul>
+    <button class="btn" id="portsBtn">Refresh</button>
+  </section>
+
+  <section class="card">
+    <h2>On your network</h2>
+    <p class="sub">An Ultimate MeshCore repeater or client on WiFi: its complete web interface, including updates and backups.</p>
+    <ul id="lan"><li class="empty">Press Search, or type its address.</li></ul>
+    <div class="row"><input id="lanHost" placeholder="192.168.1.50 or umc-name.local" style="min-width:0"><button class="btn pri" id="lanGo">Connect</button></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="lanBtn">Search this network</button></div>
+  </section>
+
+  <section class="card">
+    <h2>Bluetooth</h2>
+    <p class="sub">Client radios. Your computer asks for the PIN shown on the radio's display the first time.</p>
+    <ul id="ble"><li class="empty">Press Scan.</li></ul>
+    <button class="btn" id="bleBtn">Scan</button>
+  </section>
+
+  <section class="card">
+    <h2>WiFi app link (TCP)</h2>
+    <p class="sub">Client radios with the WiFi app connection on (port 5000), including other MeshCore companion radios.</p>
+    <div class="row"><input id="tcpHost" placeholder="192.168.1.60" style="min-width:0"><input id="tcpPort" value="5000" aria-label="Port" style="width:76px;min-width:0;flex:none"><button class="btn pri" id="tcpGo">Connect</button></div>
+  </section>
+</main>
+<div id="msg"></div>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+let msgTimer = null;
+function say(text, kind = "") {
+  const m = $("#msg"); m.textContent = text; m.className = kind; m.style.display = "block";
+  clearTimeout(msgTimer); if (kind !== "wait") msgTimer = setTimeout(() => { m.style.display = "none"; }, kind === "bad" ? 9000 : 4000);
+}
+async function get(url) { const r = await fetch(url, {cache: "no-store"}); const d = await r.json(); if (!r.ok) throw new Error(d.error || r.statusText); return d; }
+async function connect(target, label) {
+  document.querySelectorAll("button").forEach(b => b.disabled = true);
+  say(`Connecting to ${label}…`, "wait");
+  try {
+    const r = await fetch("/desk/connect", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(target)});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    say(`Connected: ${d.label}`, "ok");
+    sessionStorage.clear();
+    location.href = "/";
+  } catch (err) {
+    say(`Couldn't connect to ${label}: ${err.message}`, "bad");
+  } finally {
+    document.querySelectorAll("button").forEach(b => b.disabled = false);
+  }
+}
+const item = (title, sub, btn) => `<li><div class="t"><b>${esc(title)}</b><span>${esc(sub)}</span></div>${btn}</li>`;
+
+async function loadPorts() {
+  const ul = $("#ports");
+  try {
+    const list = await get("/desk/ports");
+    ul.innerHTML = list.length ? list.map((p, i) => item(p.port, p.description, `<button class="btn pri" data-port="${i}">Connect</button>`)).join("")
+      : `<li class="empty">No USB radios found. Plug one in and press Refresh.</li>`;
+    ul.onclick = e => { const b = e.target.closest("[data-port]"); if (b) { const p = list[+b.dataset.port]; connect({type: "usb", port: p.port}, p.port); } };
+  } catch (err) { ul.innerHTML = `<li class="empty">${esc(err.message)}</li>`; }
+}
+async function loadRecent() {
+  const list = await get("/desk/recent").catch(() => []);
+  $("#recentCard").hidden = !list.length;
+  $("#recent").innerHTML = list.map((r, i) => item(r.label, {usb: "USB", web: "Network", tcp: "WiFi app link", ble: "Bluetooth"}[r.target.type] || "", `<button class="btn pri" data-r="${i}">Connect</button>`)).join("");
+  $("#recent").onclick = e => { const b = e.target.closest("[data-r]"); if (b) { const r = list[+b.dataset.r]; connect(r.target, r.label); } };
+}
+$("#portsBtn").onclick = loadPorts;
+$("#lanGo").onclick = () => { const h = $("#lanHost").value.trim(); if (h) connect({type: "web", host: h}, h); };
+$("#lanHost").onkeydown = e => { if (e.key === "Enter") $("#lanGo").click(); };
+$("#lanBtn").onclick = async () => {
+  const ul = $("#lan"); ul.innerHTML = `<li class="empty">Searching (about 10 seconds)…</li>`;
+  const list = await get("/desk/discover").catch(err => { ul.innerHTML = `<li class="empty">${esc(err.message)}</li>`; return null; });
+  if (!list) return;
+  ul.innerHTML = list.length ? list.map((d, i) => item(d.name || d.host, `${d.host} · ${d.board || ""} · ${d.role || ""} · v${d.version || "?"}`, `<button class="btn pri" data-l="${i}">Connect</button>`)).join("")
+    : `<li class="empty">None found. Type the address shown on the device's display.</li>`;
+  ul.onclick = e => { const b = e.target.closest("[data-l]"); if (b) { const d = list[+b.dataset.l]; connect({type: "web", host: d.host}, d.name || d.host); } };
+};
+$("#bleBtn").onclick = async () => {
+  const ul = $("#ble"); ul.innerHTML = `<li class="empty">Scanning…</li>`;
+  try {
+    const list = await get("/desk/ble?seconds=6");
+    ul.innerHTML = list.length ? list.map((d, i) => item(d.name, `${d.address} · ${d.rssi ?? "?"} dBm`, `<button class="btn pri" data-b="${i}">Connect</button>`)).join("")
+      : `<li class="empty">No radios found. Make sure Bluetooth is on (on the radio and this computer).</li>`;
+    ul.onclick = e => { const b = e.target.closest("[data-b]"); if (b) { const d = list[+b.dataset.b]; connect({type: "ble", address: d.address, name: d.name}, d.name); } };
+  } catch (err) { ul.innerHTML = `<li class="empty">${esc(err.message)}</li>`; }
+};
+$("#tcpGo").onclick = () => { const h = $("#tcpHost").value.trim(); if (h) connect({type: "tcp", host: h, port: +$("#tcpPort").value || 5000}, h); };
+$("#openBtn").onclick = () => { location.href = "/"; };
+$("#quitBtn").onclick = async () => { await fetch("/desk/quit", {method: "POST"}).catch(() => {}); document.body.innerHTML = "<main><div class='card wide'><h2>Closed</h2><p class='sub'>You can close this window.</p></div></main>"; window.close(); };
+
+(async () => {
+  const st = await get("/desk/status").catch(() => ({}));
+  $("#ver").textContent = `Version ${st.version || "?"} · By Daren Loxley 2E0LXY`;
+  if (st.connected) { $("#openBtn").hidden = false; $("#openBtn").textContent = `Back to ${st.label}`; }
+  loadRecent(); loadPorts();
+})();
+</script>
+</body>
+</html>

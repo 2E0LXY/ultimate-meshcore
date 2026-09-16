@@ -440,7 +440,14 @@ void UmcService::processMailbox() {
     _mb_busy = false;
     return;
   }
+  runCommandsNow(cmds, out, out_size);
+  _mb_busy = false;
+  xSemaphoreGive(_mb_done);
+#endif
+}
 
+void UmcService::runCommandsNow(const char* cmds, char* out, size_t out_size) {
+  if (_host == nullptr || out_size < 32) return;
   size_t pos = snprintf(out, out_size, "[");
   char line[kMaxCommandLen];
   char reply[kMaxReplyLen];
@@ -476,9 +483,38 @@ void UmcService::processMailbox() {
   } else {
     snprintf(out, out_size, "[\"Err - reply too large\"]");
   }
-  _mb_busy = false;
-  xSemaphoreGive(_mb_done);
+}
+
+// Desktop / app bridge: the same data as the web API, for a computer connected over USB or
+// Bluetooth. Runs on the loop task. Requests: "info", "routes", "traffic", "scan",
+// "scan refresh", "cli <commands>" (newline-separated). Writes JSON into out.
+bool UmcService::handleBridge(const char* req, char* out, size_t out_size) {
+  if (req == nullptr || out == nullptr || out_size < 32) return false;
+  if (strcmp(req, "info") == 0) {
+    formatInfoJson(out, out_size);
+    size_t len = strlen(out);
+    if (len > 1 && len + 32 < out_size) snprintf(&out[len - 1], out_size - len + 1, ",\"auth_required\":false,\"bridge\":true}");
+    return true;
+  }
+  if (strcmp(req, "routes") == 0) { formatRoutesJson(out, out_size); return true; }
+  if (strcmp(req, "traffic") == 0) { formatTrafficJson(out, out_size); return true; }
+  if (strncmp(req, "scan", 4) == 0) {
+#if defined(ESP_PLATFORM)
+    if (_network != nullptr) {
+      if (strstr(req, "refresh") != nullptr || WiFi.scanComplete() == WIFI_SCAN_FAILED) _network->startScan();
+      _network->formatScanJson(out, out_size);
+      return true;
+    }
 #endif
+    snprintf(out, out_size, "[]");
+    return true;
+  }
+  if (strncmp(req, "cli ", 4) == 0) {
+    runCommandsNow(req + 4, out, out_size);
+    return true;
+  }
+  snprintf(out, out_size, "{\"error\":\"unknown request\"}");
+  return false;
 }
 
 bool UmcService::factoryReset() {

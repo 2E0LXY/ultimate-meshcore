@@ -1,0 +1,4 @@
+aiohttp>=3.9
+pyserial>=3.5
+bleak>=0.22
+esptool>=5.0

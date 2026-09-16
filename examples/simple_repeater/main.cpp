@@ -169,6 +169,23 @@ void loop() {
   if (len > 0 && command[len - 1] == '\r') {  // received complete line
     Serial.print('\n');
     command[len - 1] = 0;  // replace newline with C string null terminator
+#ifdef UMC_BUILD
+    if (memcmp(command, "@umc ", 5) == 0) {  // desktop app bridge: one JSON line back
+      const size_t max = 8192;
+      char* out = static_cast<char*>(malloc(max));
+      if (out != NULL) {
+        out[0] = 0;
+        the_mesh.getUmc().handleBridge(command + 5, out, max);
+        Serial.print("@umc ");
+        Serial.println(out);
+        free(out);
+      } else {
+        Serial.println("@umc {\"error\":\"out of memory\"}");
+      }
+      command[0] = 0;
+      return;
+    }
+#endif
     char reply[160];
     reply[0] = 0;
 #ifdef ETHERNET_ENABLED

@@ -290,7 +290,7 @@ const SECTIONS = [
     ]},
   ], actions: [["Set location from map (rounded)…", "geo"], ["Private key…", "prvkey", RS], ["Set permissions (ACL)…", "setperm", RS]]},
   {id: "regions", title: "Regions", ico: "🗺", special: "regions", roles: RS},
-  {id: "net", title: "Network", ico: "📶", special: "net"},
+  {id: "net", title: "Network", ico: "📶", special: "net", feature: "wifi"},
   {id: "mqtt", title: "MQTT", ico: "☁", feature: "mqtt", groups: [
     {title: "Status", fields: [F("mqtt.status", "Status", {type: "readonly"}), F("mqtt.client_version", "Client version", {type: "readonly"})]},
     {title: "Identity", sub: "IATA/location code is used in topics: meshcore/<IATA>/<device>/… — brokers stay idle while it is UNSET.", fields: [
@@ -547,7 +547,7 @@ const fmtUp = s => { s = +s || 0; const d = Math.floor(s / 86400), h = Math.floo
 let dashTimer = null;
 async function renderDash(view) {
   view.innerHTML = `<div class="card"><h2 id="dName">…</h2><p class="sub" id="dSub"></p><div class="grid" id="dStats"></div></div>
-    <div class="card"><h2>Network</h2><div class="grid" id="dNet"></div></div>
+    ${has("wifi") ? `<div class="card"><h2>Network</h2><div class="grid" id="dNet"></div></div>` : ""}
     <div class="card"><h2>Radio</h2><div class="grid" id="dRadio"></div></div>
     <div class="card"><h2>Quick actions</h2><div class="row">
       ${roleOk(CL) ? `<button class="btn pri" data-go="chat">Open messages</button><button class="btn" data-q="advert.flood">Flood advert</button><button class="btn" data-q="advert">Zero-hop advert</button>`
@@ -577,7 +577,7 @@ async function renderDash(view) {
         stat(cc.queued ?? "—", "Waiting for an app") : stat(neigh, "Neighbours")) + stat(core.queue_len ?? "—", "TX queue") +
       (roleOk(RS) ? stat(val(g(10)), "Repeat") : "") + stat((() => { const m = parseJson(g(9)); return m && m.heap_free ? Math.round(m.heap_free / 1024) + " KB free" : "—"; })(), "Memory");
     const sta = net.sta || {}, ap = net.ap || {};
-    $("#dNet").innerHTML = stat(sta.connected ? sta.ssid : "not connected", "WiFi") + stat(sta.ip || "—", "LAN IP") + stat(sta.connected ? sta.rssi + " dBm" : "—", "WiFi signal") +
+    if ($("#dNet")) $("#dNet").innerHTML = stat(sta.connected ? sta.ssid : "not connected", "WiFi") + stat(sta.ip || "—", "LAN IP") + stat(sta.connected ? sta.rssi + " dBm" : "—", "WiFi signal") +
       stat(ap.active ? ap.ssid : "off", "Access point") + stat(net.hostname ? net.hostname + ".local" : "—", "mDNS name") +
       (has("mqtt") ? stat(val(g(roleOk(RS) ? 12 : 10)).slice(0, 40), "MQTT") : "");
     const [fr, bw, sf, cr] = val(g(6)).split(",").map(Number); const p = presetFor(fr, bw, sf, cr) || presetLoose(fr, bw, sf);
