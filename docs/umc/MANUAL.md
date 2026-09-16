@@ -392,6 +392,23 @@ A bridge links two LoRa areas through another medium. The Heltec V3 build includ
 
 - **Neighbours** page: repeaters heard directly, with their **name**, how long ago and SNR. Names come from adverts; a neighbour restored after a reboot shows "name not heard yet" until its next advert (names saved before the reboot are kept). **Forget** removes one. **Discover neighbours** asks nearby repeaters to answer.
 
+### Recommended repeater settings (Yorkshire guide)
+
+**Mesh & routing → Actions → Yorkshire mesh recommended settings…** applies the settings from the [MeshCore Yorkshire guide](https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/) in one go, after showing you exactly what it will run:
+
+| Setting | Value | Why |
+|---|---|---|
+| `flood.max` | 20 | Limit how far floods travel |
+| `flood.max.advert` | 0 | Stop flooded adverts crossing the mesh |
+| `flood.max.unscoped` | 32 | Limit for traffic with no region scope |
+| `path.hash.mode` | 2 | 3-byte repeater IDs on a busy mesh |
+| `loop.detect` | minimal | Drop packets that loop |
+| `flood.advert.interval` | 0 | No flood adverts |
+| `advert.interval` | 60 | Zero-hop advert every hour |
+| `dutycycle` | 10 | UK/EU 869.4–869.65 MHz legal limit |
+
+It then adds the regions `yorkshire` and `eng-yh`, sets `yorkshire` as the default and saves. Check with your local mesh group before applying these elsewhere: other regions use different values.
+
 ### Routes & trace
 
 The repeater learns a **route table** from every advert it hears. Each advert carries the chain of repeaters it passed through, so the table shows, for every node heard, the route from this repeater back to that node.
@@ -582,12 +599,20 @@ Every link sees the same contacts, channels and messages. The browser keeps its 
 
 **Export all…** copies the channel list, including the secrets, so keep it private. **Import list…** adds channels from an export, skipping duplicates.
 
+### 21.6a Region scope (Yorkshire and other regional meshes)
+
+Regional meshes ask clients to **scope** their flood traffic so it doesn't cross the whole country. Set **Region scope for sends** (Messaging settings, or `set scope yorkshire`) to your region name and flood messages, channel posts and adverts carry that scope; repeaters that know the region pass them on and others can drop them.
+
+- Names are **case-sensitive** and must match what the repeaters use (`yorkshire`, `northwest`, …).
+- Blank (`set scope`) sends unscoped, reaching the whole mesh.
+- The [MeshCore Yorkshire guide](https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/) recommends adding the `yorkshire` scope for the #Yorkshire channel.
+
 ### 21.7 Client settings
 
 | Page | Settings |
 |---|---|
 | **Radio** | Preset / frequency / bandwidth / SF / CR (applied immediately), TX power, RX boosted gain, airtime factor, RX delay. |
-| **Messaging settings** | Extra ACKs, path hash size, location in adverts, client repeat (433.000 / 869.495 / 918.000 MHz only), manual add, auto-add per type, overwrite oldest, auto-add hop limit, telemetry permissions (nobody / favourites / everyone), storage use. |
+| **Messaging settings** | Extra ACKs, path hash size, **region scope for sends**, location in adverts, client repeat (433.000 / 869.495 / 918.000 MHz only), manual add, auto-add per type, overwrite oldest, auto-add hop limit, telemetry permissions (nobody / favourites / everyone), storage use. |
 | **Bluetooth & apps** | Bluetooth on/off, fixed PIN or random PIN each boot, PIN in use, WiFi app connection (TCP), connected apps. |
 | **Identity & access** | Name, location, public key, web/telnet admin password. |
 | **Network, Live traffic, Console, Firmware, Backup** | As for the repeater (sections 12, 16–19). |
@@ -740,6 +765,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `region save` | Save region changes |
 | `get/set repeat on\|off` | Repeat packets (client: only on allowed frequencies) |
 | `get role` | Firmware role |
+| `get/set scope <region>` | Region scope added to flood sends, blank = none *(C)* |
 | `get/set rxdelay <0-20>` | RX delay base |
 | `sensor list\|get\|set` | Sensors (if fitted) |
 | `get setup`, `setup start`, `setup done` | Setup mode |

@@ -221,6 +221,7 @@ const SECTIONS = [
     {title: "Sending", fields: [
       F("multi.acks", "Extra ACK transmissions", {type: "select", options: [["0", "Off"], ["1", "On"]], help: "Sends delivery confirmations twice: more reliable on busy meshes."}),
       F("path.hash.mode", "Path hash size", {type: "select", options: [["0", "1 byte (default)"], ["1", "2 bytes"], ["2", "3 bytes"]], help: "Larger hashes tell repeaters apart on big meshes. Everyone on the path must run firmware that supports it."}),
+      F("scope", "Region scope for sends", {help: "Region name (case-sensitive) added to flood sends so they stay in your area - e.g. yorkshire. Blank = whole mesh. Your repeaters must know the region.", placeholder: "yorkshire"}),
       F("advert.loc", "Location in adverts", {type: "select", options: [["none", "Don't share"], ["share", "Share (rounded coordinates below)"]]}),
       F("repeat", "Client repeat", Object.assign({help: "Lets this client relay packets for others. Only allowed on 433.000, 869.495 and 918.000 MHz."}, onoff)),
     ]},
@@ -270,7 +271,7 @@ const SECTIONS = [
       F("advert.interval", "Zero-hop advert (minutes)", {type: "number", min: 0, max: 240, step: 2, help: "0 = off, otherwise 60–240."}),
       F("flood.advert.interval", "Flood advert (hours)", {type: "number", min: 0, max: 168, help: "0 = off, otherwise 3–168."}),
     ]},
-  ], actions: [["Send flood advert", "advert"], ["Send zero-hop advert", "advert.zerohop"], ["Discover neighbours", "discover.neighbors"]]},
+  ], actions: [["Send flood advert", "advert"], ["Send zero-hop advert", "advert.zerohop"], ["Discover neighbours", "discover.neighbors"], ["Yorkshire mesh recommended settings…", "yorkshire", RS]]},
   {id: "id", title: "Identity & access", ico: "🪪", groups: [
     {title: "Node", fields: [
       F("name", "Node name", {help: "Up to 23 bytes with location, 31 without."}),
@@ -367,7 +368,7 @@ function controlHtml(f, id) {
       <select id="${id}_b" style="max-width:110px">${BWS.map(b => `<option>${b}</option>`).join("")}</select> kHz
       SF<select id="${id}_s" style="max-width:70px">${[5,6,7,8,9,10,11,12].map(s => `<option>${s}</option>`).join("")}</select>
       CR 4/<select id="${id}_c" style="max-width:60px">${[5,6,7,8].map(s => `<option>${s}</option>`).join("")}</select></div></div>`;
-    default: return `<input type="text" ${a}>`;
+    default: return `<input type="text" ${a} ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ""}>`;
   }
 }
 
@@ -514,6 +515,20 @@ async function runAction(act, reload) {
     const pk = prompt("Companion public key (hex):"); if (!pk) return;
     const perm = prompt("Permission: 0 guest, 1 read-only, 2 read-write, 3 admin, blank = remove", "3"); if (perm === null) return;
     const r = await one(`setperm ${pk} ${perm}`.trim()); return toast(r, isErr(r) ? "bad" : "ok");
+  }
+  if (act === "yorkshire") {
+    // From the MeshCore Yorkshire guide: https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/
+    const cmds = ["set flood.max 20", "set flood.max.advert 0", "set flood.max.unscoped 32", "set path.hash.mode 2",
+      "set loop.detect minimal", "set flood.advert.interval 0", "set advert.interval 60", "set dutycycle 10"];
+    const regions = ["region put yorkshire", "region put eng-yh", "region default yorkshire", "region save"];
+    const withRegions = confirm(`Apply the Yorkshire mesh recommendations?\n\n${cmds.join("\n")}\n\nOK also adds the regions:\n${regions.join("\n")}\n\nCancel to stop, or Cancel then use the Regions page for regions only.`);
+    if (!withRegions) return;
+    const all = cmds.concat(regions);
+    const r = await api.cli(all);
+    const bad = all.map((c, i) => [c, r[i]]).filter(([, x]) => isErr(x));
+    toast(bad.length ? `Applied, ${bad.length} rejected: ${bad.map(([c]) => c.split(" ")[1]).join(", ")}` : "Yorkshire recommendations applied", bad.length ? "bad" : "ok");
+    reload && reload();
+    return;
   }
   if (act === "tempradio") {
     const s = prompt("Temporary radio: freq,bw,sf,cr,minutes", "869.618,62.5,8,8,10"); if (!s) return;

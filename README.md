@@ -39,6 +39,7 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 - **Mesh & routing**: repeat, loop detection, path hash size, flood/unscoped/advert/**channel** hop limits, extra ACKs, TX/direct/RX delays, advert intervals, send adverts, discover neighbours.
 - **Identity & access**: name, location (map picker), owner info, admin/guest passwords, public key, private key export/import, ACL permissions.
 - **Regions**: tree view with per-region **flooding switch, set home, remove** (sub-regions first), **UK presets** (`yorkshire`, `northwest`, `uk`), add, one-line definitions, unsaved-change reminder.
+- **Yorkshire mesh recommended settings** in one click (flood limits, advert intervals, duty cycle and regions from the [Yorkshire guide](https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/)); clients can set the matching **region scope** for their sends.
 - **Network**: 3 saved WiFi networks with scan, static IP / DHCP, hostname and `.local` name, hotspot mode (auto/on/off), rescue delay, hotspot password/PIN, session timeout, telnet, NTP servers, time zone.
 - **MQTT**: location code, identity, what to publish, preset brokers (MeshMapper, waev, EastMesh, LetsMesh), custom TCP/WSS broker, status.
 - **Bridge**: ESP-NOW (channel, secret, delay, source) and RS-232 settings.

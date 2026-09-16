@@ -2918,6 +2918,33 @@ bool MyMesh::umcCli(const char* command, char* reply, size_t n) {
       return true;
     }
   }
+  // Region scope for flood sends (Yorkshire guidance: scope channel traffic to your region)
+  if (strcmp(command, "get scope") == 0) {
+    snprintf(reply, n, "> %s", _prefs.default_scope_name[0] ? _prefs.default_scope_name : "-");
+    return true;
+  }
+  if (umcStartsWith(command, "set scope")) {
+    const char* v = command + 9;
+    while (*v == ' ') v++;
+    if (*v == 0 || strcmp(v, "-") == 0 || strcmp(v, "none") == 0) {
+      memset(_prefs.default_scope_name, 0, sizeof(_prefs.default_scope_name));
+      memset(_prefs.default_scope_key, 0, sizeof(_prefs.default_scope_key));
+      savePrefs();
+      snprintf(reply, n, "OK - no region scope (sends reach the whole mesh)");
+      return true;
+    }
+    if (strlen(v) >= sizeof(_prefs.default_scope_name)) { snprintf(reply, n, "Err - name too long"); return true; }
+    char hashed[40];
+    snprintf(hashed, sizeof(hashed), "#%s", v);   // public region keys are SHA256 of "#name"
+    TransportKeyStore temp;
+    TransportKey key;
+    temp.getAutoKeyFor(0, hashed, key);
+    StrHelper::strncpy(_prefs.default_scope_name, v, sizeof(_prefs.default_scope_name));
+    memcpy(_prefs.default_scope_key, key.key, sizeof(_prefs.default_scope_key));
+    savePrefs();
+    snprintf(reply, n, "OK - flood sends scoped to %s (names are case-sensitive)", _prefs.default_scope_name);
+    return true;
+  }
   if (strcmp(command, "get contacts.count") == 0) {
     int channels = 0;
     for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
