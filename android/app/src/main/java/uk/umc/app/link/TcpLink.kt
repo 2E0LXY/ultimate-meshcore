@@ -16,7 +16,9 @@ import java.net.Socket
  * client or repeater. Frames are '<' len16 payload out, '>' len16 payload in.
  */
 class TcpLink(private val host: String, private val port: Int, private val scope: CoroutineScope) : Link {
-    override val frames = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
+    // replay: the radio can answer before the session has finished subscribing, and a
+    // dropped first frame would leave the connection half-started
+    override val frames = MutableSharedFlow<ByteArray>(replay = 32, extraBufferCapacity = 64)
     override val state = MutableStateFlow<LinkState>(LinkState.Idle)
 
     private var socket: Socket? = null

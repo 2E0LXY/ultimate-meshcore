@@ -82,6 +82,13 @@ void UITask::begin(DisplayDriver* disp, SensorManager* sensors, NodePrefs* node_
   _sensors = sensors;
   _prefs = node_prefs;
   if (_display) _display->turnOn();
+  // start screen
+  fill(0, 0, SCR_W, SCR_H, C_BG);
+  text(40, 60, "Ultimate MeshCore", C_ACC, 2);
+  text(88, 96, "Client v" UMC_VERSION, C_TXT, 2);
+  text(104, 128, "MeshCore " FIRMWARE_VERSION, C_DIM);
+  text(76, 168, "By Daren Loxley  2E0LXY", C_TXT);
+  delay(2500);
   _input.begin(SCR_W, SCR_H, the_mesh.getUmc().prefs().touch_map);
   _tiles.begin();
 #ifdef PIN_TFT_LEDA_CTL

@@ -241,6 +241,20 @@ void UITask::renderUmcScreen() {
 void UITask::renderCurrScreen() {
   char tmp[80];
   if (millis() < _started_at + BOOT_SCREEN_MILLIS) { // boot screen
+#ifdef UMC_BUILD
+    _display->setTextSize(1);
+    _display->setColor(UIColor::corp_blue);
+    _display->drawTextCentered(_display->width() / 2, 2, "Ultimate MeshCore");
+    _display->setColor(UIColor::primary_txt);
+    _display->drawTextCentered(_display->width() / 2, 15, "Repeater v" UMC_VERSION);
+    _display->setColor(UIColor::secondary_txt);
+    snprintf(tmp, sizeof(tmp), "MeshCore %s", _version_info);
+    _display->drawTextCentered(_display->width() / 2, 27, tmp);
+    _display->setColor(UIColor::primary_txt);
+    _display->drawTextCentered(_display->width() / 2, 42, "By Daren Loxley");
+    _display->drawTextCentered(_display->width() / 2, 53, "2E0LXY");
+  } else if (false) {
+#endif
     // meshcore logo
     _display->setColor(UIColor::corp_blue);
     int logoWidth = 128;

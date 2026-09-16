@@ -52,6 +52,21 @@ public:
   }
 
   int render(DisplayDriver& display) override {
+#ifdef UMC_BUILD
+    char line[40];
+    display.setTextSize(1);
+    display.setColor(UIColor::corp_blue);
+    display.drawTextCentered(display.width() / 2, 2, "Ultimate MeshCore");
+    display.setColor(UIColor::primary_txt);
+    display.drawTextCentered(display.width() / 2, 15, "Client v" UMC_VERSION);
+    display.setColor(UIColor::secondary_txt);
+    snprintf(line, sizeof(line), "MeshCore %s", _version_info);
+    display.drawTextCentered(display.width() / 2, 27, line);
+    display.setColor(UIColor::primary_txt);
+    display.drawTextCentered(display.width() / 2, 42, "By Daren Loxley");
+    display.drawTextCentered(display.width() / 2, 53, "2E0LXY");
+    return 1000;
+#endif
     // meshcore logo
     display.setColor(UIColor::corp_blue);
     int logoWidth = 128;

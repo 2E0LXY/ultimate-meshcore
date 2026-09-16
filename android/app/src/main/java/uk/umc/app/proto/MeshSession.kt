@@ -28,10 +28,10 @@ data class ChatMessage(
     val hops: Int? = null,
     val snr: Double? = null,
     val cli: Boolean = false,
-    var status: String = "",         // sending / sent / delivered / failed
-    var ackCode: String? = null,
-    var roundTripMs: Long? = null,
-    var error: String? = null,
+    val status: String = "",         // sending / sent / delivered / failed
+    val ackCode: String? = null,
+    val roundTripMs: Long? = null,
+    val error: String? = null,
 )
 
 /**
@@ -50,7 +50,7 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
     val newMessages = MutableSharedFlow<ChatMessage>(extraBufferCapacity = 32)
 
     private val lock = Mutex()
-    private val awaitingAck = HashMap<String, ChatMessage>()
+    private val awaitingAck = HashMap<String, Long>()   // delivery code -> message id
     private var nextId = 1L
 
     /** Someone waiting for a particular frame to arrive. */
@@ -58,25 +58,53 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
 
     private val waiters = CopyOnWriteArrayList<Waiter>()
 
+    /**
+     * Frames that arrived with nobody waiting for them. A radio answers a contact list as a
+     * burst, so the next frames are often already here before we ask for them.
+     */
+    private val spare = java.util.ArrayDeque<ByteArray>()
+
     private fun deliver(f: ByteArray) {
         for (w in waiters) {
             if (w.match(f)) {
                 waiters.remove(w)
-                if (w.cont.isActive) w.cont.resumeWith(Result.success(f))
-                return
+                if (w.cont.isActive) {
+                    w.cont.resumeWith(Result.success(f))
+                    return
+                }
+            }
+        }
+        if ((f[0].toInt() and 0xFF) < 0x80) {   // keep replies, not pushes (already handled)
+            synchronized(spare) {
+                spare.addLast(f)
+                while (spare.size > 64) spare.removeFirst()
             }
         }
     }
 
     /** Suspends until a frame matching [match] arrives, or the timeout passes. */
-    private suspend fun awaitFrame(timeoutMs: Long, match: (ByteArray) -> Boolean): ByteArray? =
-        withTimeoutOrNull(timeoutMs) {
+    private suspend fun awaitFrame(timeoutMs: Long, match: (ByteArray) -> Boolean): ByteArray? {
+        synchronized(spare) {
+            val it = spare.iterator()
+            while (it.hasNext()) {
+                val f = it.next()
+                if (match(f)) {
+                    it.remove()
+                    return f
+                }
+            }
+        }
+        return withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine { cont ->
                 val w = Waiter(match, cont)
                 waiters.add(w)
                 cont.invokeOnCancellation { waiters.remove(w) }
             }
         }
+    }
+
+    /** Anything left from an earlier exchange is stale once a new command goes out. */
+    private fun clearSpare() = synchronized(spare) { spare.clear() }
 
     fun start() {
         scope.launch {
@@ -89,7 +117,10 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         scope.launch {
             link.state.collect { st ->
                 if (st is LinkState.Connected) {
-                    runCatching { handshake() }.onFailure { events.emit("Connect failed: ${it.message}") }
+                    runCatching { handshake() }.onFailure {
+                        android.util.Log.w("UMC", "handshake failed", it)
+                        events.emit("Connect failed: ${it.message}")
+                    }
                 }
             }
         }
@@ -101,6 +132,7 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
      */
     private suspend fun request(frame: ByteArray, vararg expect: Int, timeoutMs: Long = 12000): ByteArray =
         lock.withLock {
+            clearSpare()
             val pending = scope.async {
                 awaitFrame(timeoutMs) { f ->
                     val code = f[0].toInt() and 0xFF
@@ -127,9 +159,12 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         }
 
     suspend fun handshake() {
+        android.util.Log.i("UMC", "handshake: device query")
         device.value = Decode.deviceInfo(request(FrameBuilder(Cmd.DEVICE_QUERY).u8(3).build(), Resp.DEVICE_INFO))
+        android.util.Log.i("UMC", "handshake: app start")
         val s = request(FrameBuilder(Cmd.APP_START).u8(1).bytes(ByteArray(6)).text("UMC App").build(), Resp.SELF_INFO)
         self.value = Decode.selfInfo(s)
+        android.util.Log.i("UMC", "handshake: self=${self.value?.name}")
         syncTime()
         refreshContacts()
         refreshChannels()
@@ -152,6 +187,7 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
     suspend fun refreshContacts() {
         lock.withLock {
             val list = ArrayList<Contact>()
+            clearSpare()
             val started = scope.async { awaitFrame(12000) { (it[0].toInt() and 0xFF) == Resp.CONTACTS_START } }
             if (!link.send(FrameBuilder(Cmd.GET_CONTACTS).build())) {
                 started.cancel()
@@ -200,8 +236,8 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
             Push.SEND_CONFIRMED -> {
                 val ack = f.copyOfRange(1, 5).toHex()
                 val trip = FrameReader(f, 5).u32()
-                awaitingAck.remove(ack)?.let { m ->
-                    update(m) { it.status = "delivered"; it.roundTripMs = trip }
+                awaitingAck.remove(ack)?.let { id ->
+                    update(id) { it.copy(status = "delivered", roundTripMs = trip) }
                 }
             }
             Push.NEW_ADVERT -> {
@@ -260,29 +296,34 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         scope.launch { newMessages.emit(m) }
     }
 
-    private fun update(m: ChatMessage, block: (ChatMessage) -> Unit) {
-        block(m)
-        messages.value = messages.value.toList()
+    /** Messages are immutable, so a change means a new object: that is what tells the UI to redraw. */
+    private fun update(id: Long, transform: (ChatMessage) -> ChatMessage) {
+        messages.value = messages.value.map { if (it.id == id) transform(it) else it }
     }
+
+    private fun current(id: Long): ChatMessage? = messages.value.firstOrNull { it.id == id }
 
     // ---------------------------------------------------------------- actions
 
     suspend fun sendText(conversation: String, text: String, retry: ChatMessage? = null) {
         val ts = retry?.timestamp ?: (System.currentTimeMillis() / 1000)
+        val id = retry?.id ?: nextId++
+        if (retry == null) {
+            add(ChatMessage(id, conversation, true, text, if (conversation.startsWith("ch:")) self.value?.name ?: "" else "", ts, status = "sending"))
+        } else {
+            update(id) { it.copy(status = "sending", error = null) }
+        }
         if (conversation.startsWith("ch:")) {
             val idx = conversation.removePrefix("ch:").toInt()
-            val m = retry ?: ChatMessage(nextId++, conversation, true, text, self.value?.name ?: "", ts, status = "sending").also { add(it) }
             try {
                 request(FrameBuilder(Cmd.SEND_CHANNEL_TXT_MSG).u8(TXT_TYPE_PLAIN).u8(idx).u32(ts).text(text).build(), Resp.OK)
-                update(m) { it.status = "sent" }
+                update(id) { it.copy(status = "sent") }
             } catch (e: Exception) {
-                update(m) { it.status = "failed"; it.error = e.message }
+                update(id) { it.copy(status = "failed", error = e.message) }
             }
             return
         }
         val prefix = conversation.removePrefix("c:")
-        val m = retry ?: ChatMessage(nextId++, conversation, true, text, "", ts, status = "sending").also { add(it) }
-        update(m) { it.status = "sending" }
         try {
             val f = request(
                 FrameBuilder(Cmd.SEND_TXT_MSG).u8(TXT_TYPE_PLAIN).u8(0).u32(ts).bytes(prefix.hexToBytes()).text(text).build(),
@@ -292,16 +333,16 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
             r.u8()
             val ack = r.bytes(4).toHex()
             val est = r.u32()
-            update(m) { it.status = "sent"; it.ackCode = ack }
-            awaitingAck[ack] = m
+            update(id) { it.copy(status = "sent", ackCode = ack) }
+            awaitingAck[ack] = id
             scope.launch {
                 kotlinx.coroutines.delay(maxOf(est * 2, 8000L))
-                if (awaitingAck.remove(ack) != null && m.status == "sent") {
-                    update(m) { it.status = "failed"; it.error = "no delivery confirmation" }
+                if (awaitingAck.remove(ack) != null && current(id)?.status == "sent") {
+                    update(id) { it.copy(status = "failed", error = "no delivery confirmation") }
                 }
             }
         } catch (e: Exception) {
-            update(m) { it.status = "failed"; it.error = e.message }
+            update(id) { it.copy(status = "failed", error = e.message) }
         }
     }
 
