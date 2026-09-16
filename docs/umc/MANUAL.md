@@ -453,6 +453,12 @@ Other ways to reach the same command line:
 
 ## 18. Firmware updates
 
+### 18.0 Through the browser (every board)
+
+**Firmware & maintenance → Update through this browser → Check**, then **Download & install**. Your browser fetches the latest build for this exact board and firmware type from GitHub and sends it to the device, which installs it and reboots, keeping its identity and settings. The device itself needs no internet access, only your browser does.
+
+This is the recommended way on the **Heltec V3 client**: with Bluetooth running it has too little continuous memory left for the device to make the secure download itself (the device check then reports `can't reach update server (ESP_ERR_HTTP_CONNECT …)` even though WiFi is fine).
+
 ### 18.1 From the internet (on the device)
 
 **Firmware & maintenance → Update from the internet**

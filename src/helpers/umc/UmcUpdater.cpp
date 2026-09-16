@@ -25,7 +25,11 @@
 #endif
 
 namespace {
+#ifdef UMC_UPDATE_DEBUG
+constexpr uint32_t kFirstAutoCheckMs = 30UL * 1000UL;         // debug builds: check soon after boot
+#else
 constexpr uint32_t kFirstAutoCheckMs = 5UL * 60UL * 1000UL;  // a few minutes after boot
+#endif
 constexpr size_t kBuildsJsonMax = 8192;   // ~25 published builds
 
 // Find "key": "value" at the top level of a small JSON text (no nesting needed here).
@@ -121,6 +125,7 @@ void UmcUpdater::setError(const char* msg) {
 
 void UmcUpdater::tlsBegin() {
   if (!_tls_held && _umc.host() != nullptr) {
+    _umc.setQuietServers(true);
     _umc.host()->umcTlsBegin();
     _tls_held = true;
   }
@@ -129,7 +134,10 @@ void UmcUpdater::tlsBegin() {
 void UmcUpdater::loop(bool network_up) {
   if (_tls_release && !_task_running) {
     _tls_release = false;
-    if (_tls_held && _state != State::Done && _umc.host() != nullptr) _umc.host()->umcTlsEnd();  // Done = rebooting
+    if (_tls_held && _state != State::Done && _umc.host() != nullptr) {  // Done = rebooting
+      _umc.host()->umcTlsEnd();
+      _umc.setQuietServers(false);
+    }
     _tls_held = false;
   }
   if (_state == State::Done && !_umc.isRebootPending()) {
@@ -229,7 +237,9 @@ bool UmcUpdater::doCheck() {
     return false;
   }
   bool ok = false;
-  if (esp_http_client_open(client, 0) == ESP_OK) {
+  UMC_LOGF("[UMC] update check: heap free %u, largest block %u\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  const esp_err_t open_err = esp_http_client_open(client, 0);
+  if (open_err == ESP_OK) {
     esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
     int total = 0;
@@ -247,7 +257,13 @@ bool UmcUpdater::doCheck() {
       ok = true;
     }
   } else {
-    setError("can't reach update server (check WiFi / internet)");
+    // Say why: a DNS or connect failure is a network problem; a TLS failure with little free
+    // memory is the device running short while making the secure connection.
+    char msg[96];
+    const unsigned free_kb = ESP.getFreeHeap() / 1024, block_kb = ESP.getMaxAllocHeap() / 1024;
+    snprintf(msg, sizeof(msg), "can't reach update server (%s, %u KB free, largest %u KB)", esp_err_to_name(open_err), free_kb, block_kb);
+    UMC_LOGF("[UMC] update check failed: %s\n", msg);
+    setError(msg);
   }
   esp_http_client_close(client);
   esp_http_client_cleanup(client);

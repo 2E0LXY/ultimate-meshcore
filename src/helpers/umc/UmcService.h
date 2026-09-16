@@ -59,6 +59,8 @@ public:
   void scheduleReboot(uint32_t delay_ms);
   bool isRebootPending() const { return _reboot_at != 0; }
   void notifyOtaStarting();
+  // Pause telnet and the TCP app server so a secure download has the RAM it needs.
+  void setQuietServers(bool quiet);
 
   // Public, unauthenticated device summary for the login / setup screens.
   void formatInfoJson(char* out, size_t out_size) const;
@@ -94,7 +96,8 @@ private:
   volatile bool _ota_prepare;
   bool _ota_confirmed = false;
   bool _rollback_requested = false;
-  bool _net_seen = false;  // once the network has been up, keep servers running through WiFi blips
+  bool _net_seen = false;
+  bool _quiet_servers = false;  // once the network has been up, keep servers running through WiFi blips
 };
 
 #if defined(ESP_PLATFORM)

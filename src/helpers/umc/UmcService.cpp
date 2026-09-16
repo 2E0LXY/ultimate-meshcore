@@ -238,13 +238,13 @@ void UmcService::loop() {
     _web->loop(_prefs.http_enabled && net);
   }
   if (_telnet != nullptr) {
-    _telnet->loop(_prefs.telnet_enabled && net && !isDefaultAdminPassword());
+    _telnet->loop(_prefs.telnet_enabled && net && !isDefaultAdminPassword() && !_quiet_servers);
   }
   if (_updater != nullptr) {
     _updater->loop(_network != nullptr && _network->isWifiConnected());
   }
   if (_app != nullptr) {
-    _app->loop(_prefs.app_tcp && net);
+    _app->loop(_prefs.app_tcp && net && !_quiet_servers);
   }
   umc_routes.loop();
 #if defined(ESP_PLATFORM)
@@ -267,6 +267,14 @@ void UmcService::loop() {
     }
     esp_restart();
 #endif
+  }
+}
+
+void UmcService::setQuietServers(bool quiet) {
+  _quiet_servers = quiet;
+  if (quiet) {   // stop now: the download task starts straight away
+    if (_telnet != nullptr) _telnet->loop(false);
+    if (_app != nullptr) _app->loop(false);
   }
 }
 

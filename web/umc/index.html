@@ -888,7 +888,11 @@ async function renderFw(view) {
       <div class="stat"><b>${esc(INFO.umc)}</b><span>Ultimate MeshCore version</span></div>
       <div class="stat"><b>${esc(val(r[2]))}</b><span>Board</span></div><div class="stat"><b>${esc(INFO.role)}</b><span>Role</span></div></div>
       <p class="val" style="margin-top:8px">Built on MeshCore ${esc(val(r[0]).split(" ")[0])} — shown here only for compatibility checks with apps.</p></div>
-    <div class="card"><h2>Update from the internet</h2><p class="sub">Downloads the latest published build for this exact board and firmware type, installs it and reboots. Identity and settings are kept. Needs WiFi with internet access.</p>
+    <div class="card"><h2>Update through this browser</h2><p class="sub">Your browser downloads the latest published build for this exact board and firmware type and sends it to the device. Works on every board (the device itself needs no internet). Identity and settings are kept.</p>
+      <pre id="webUpdStatus">Press Check to look for a newer build.</pre>
+      <div class="row"><button class="btn" id="webUpdCheck">Check</button><button class="btn pri" id="webUpdInstall" disabled>Download &amp; install</button></div>
+      <div class="progress hidden" id="webUpdBarWrap" style="margin-top:10px"><i id="webUpdBar"></i></div></div>
+    <div class="card"><h2>Update from the internet (by the device)</h2><p class="sub">The device downloads and installs the latest build itself, and can do it automatically. Needs WiFi with internet access. On boards without PSRAM running Bluetooth (Heltec V3 client) the device may not have enough memory for the secure download — use <b>Update through this browser</b> above instead.</p>
       <pre id="updStatus">…</pre>
       <div class="row"><button class="btn" id="updCheck">Check for updates</button><button class="btn pri" id="updInstall">Install latest</button></div>
       <div class="progress hidden" id="updBarWrap" style="margin-top:10px"><i id="updBar"></i></div>
@@ -905,6 +909,66 @@ async function renderFw(view) {
       <button class="btn" data-m="start ota">Legacy OTA hotspot</button><button class="btn" data-m="setup start">Re-run setup wizard</button>
       <button class="btn" data-m="poweroff">Power off</button><button class="btn danger" data-m="factory">Factory reset…</button></div>
       <p class="sub" style="margin-top:10px">Device clock: ${esc(val(r[3]))}</p></div>`;
+  // ---- update through the browser: fetch from GitHub Pages (CORS allowed), upload to /api/ota ----
+  let webBuild = null;
+  const webStatus = t => { $("#webUpdStatus").textContent = t; };
+  const updateBase = async () => {
+    let u = val(await one("get update.url"));
+    if (!/^https:\/\//.test(u)) u = "https://2e0lxy.github.io/ultimate-meshcore/";
+    return u.endsWith("/") ? u : u + "/";
+  };
+  $("#webUpdCheck").onclick = async () => {
+    $("#webUpdInstall").disabled = true;
+    webStatus("Checking…");
+    try {
+      const base = await updateBase();
+      const res = await fetch(base + "builds.json", {cache: "no-store"});
+      if (!res.ok) throw new Error(`update server returned HTTP ${res.status}`);
+      const d = await res.json();
+      const b = (d.builds || []).find(x => x.env === INFO.env);
+      if (!b) return webStatus(`No published build for this board and firmware type (${INFO.env}).`);
+      const newer = !String(d.commit || "").startsWith(INFO.commit || "~");
+      webBuild = {url: base + b.app, version: d.version, commit: String(d.commit).slice(0, 7), built: d.built};
+      webStatus(newer ? `Update available: ${d.version} (build ${webBuild.commit}, ${new Date(d.built).toLocaleString()}). This device: ${INFO.umc} (build ${INFO.commit}).`
+        : `You're running the latest build (${webBuild.commit}).`);
+      $("#webUpdInstall").disabled = false;
+      $("#webUpdInstall").textContent = newer ? "Download & install" : "Reinstall latest";
+    } catch (err) {
+      webStatus(`Couldn't check: ${err.message}. This browser needs internet access (use mobile data or your home WiFi).`);
+    }
+  };
+  $("#webUpdInstall").onclick = async () => {
+    if (!webBuild || !confirm(`Install build ${webBuild.commit}? The device reboots when done (about a minute).`)) return;
+    $("#webUpdInstall").disabled = true;
+    const bar = $("#webUpdBar"); $("#webUpdBarWrap").classList.remove("hidden");
+    try {
+      webStatus("Downloading from GitHub…");
+      const res = await fetch(webBuild.url, {cache: "no-store"});
+      if (!res.ok) throw new Error(`download failed (HTTP ${res.status})`);
+      const total = +res.headers.get("content-length") || 0;
+      const reader = res.body.getReader(); const parts = []; let got = 0;
+      for (;;) {
+        const {done, value} = await reader.read(); if (done) break;
+        parts.push(value); got += value.length;
+        if (total) { bar.style.width = (got / total * 50).toFixed(1) + "%"; webStatus(`Downloading ${Math.round(got / 1024)} / ${Math.round(total / 1024)} KB`); }
+      }
+      const blob = new Blob(parts, {type: "application/octet-stream"});
+      webStatus("Sending to the device…");
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest(); xhr.open("POST", "/api/ota"); if (TOKEN) xhr.setRequestHeader("X-Auth-Token", TOKEN);
+        xhr.upload.onprogress = e => { if (e.lengthComputable) { bar.style.width = (50 + e.loaded / e.total * 50).toFixed(1) + "%"; webStatus(`Installing ${Math.round(e.loaded / 1024)} / ${Math.round(e.total / 1024)} KB`); } };
+        xhr.onload = () => { let d = {}; try { d = JSON.parse(xhr.responseText); } catch {} xhr.status === 200 ? resolve() : reject(new Error(d.error || "install failed")); };
+        xhr.onerror = () => reject(new Error("connection lost while sending to the device"));
+        xhr.send(blob);
+      });
+      webStatus("Installed. The device is rebooting — this page reconnects in about 20 s.");
+      setTimeout(() => location.reload(), 20000);
+    } catch (err) {
+      webStatus(`Update failed: ${err.message}`);
+      $("#webUpdInstall").disabled = false;
+    }
+  };
+
   // ---- internet update ----
   let updPoll = null;
   const updRefresh = async () => {
