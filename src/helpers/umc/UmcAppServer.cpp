@@ -1,4 +1,5 @@
 #include "UmcAppServer.h"
+#include "UmcLog.h"
 
 #include <string.h>
 
@@ -14,7 +15,7 @@ constexpr unsigned long kIdleDropMs = 15UL * 60UL * 1000UL;   // apps poll often
 constexpr uint8_t kPushMsgWaiting = 0x83;
 }  // namespace
 
-UmcAppServer::UmcAppServer(UmcService& umc) : _umc(umc), _server(nullptr), _port(5000), _clients{} {}
+UmcAppServer::UmcAppServer(UmcService& umc) : _umc(umc), _server(nullptr), _port(5000), _clients{}, _idle_drop_ms(kIdleDropMs) {}
 
 void UmcAppServer::start() {
 #if defined(ESP_PLATFORM)
@@ -23,7 +24,7 @@ void UmcAppServer::start() {
   _server = new WiFiServer(_port);
   _server->begin();
   _server->setNoDelay(true);
-  Serial.printf("[UMC] app connection (MeshCore companion protocol) on TCP %u\n", _port);
+  UMC_LOGF("[UMC] app connection (MeshCore companion protocol) on TCP %u\n", _port);
 #endif
 }
 
@@ -141,14 +142,14 @@ void UmcAppServer::loop(bool enabled) {
     _clients[slot].sock = new WiFiClient(incoming);
     _clients[slot].sock->setNoDelay(true);
     _clients[slot].last_rx_ms = millis();
-    Serial.printf("[UMC] app connected from %s (slot %d)\n", incoming.remoteIP().toString().c_str(), slot);
+    UMC_LOGF("[UMC] app connected from %s (slot %d)\n", incoming.remoteIP().toString().c_str(), slot);
   }
 
   for (int i = 0; i < kMaxClients; i++) {
     Client& c = _clients[i];
     if (c.sock == nullptr) continue;
-    if (!c.sock->connected() || millis() - c.last_rx_ms > kIdleDropMs) {
-      Serial.printf("[UMC] app disconnected (slot %d)\n", i);
+    if (!c.sock->connected() || (_idle_drop_ms != 0 && millis() - c.last_rx_ms > _idle_drop_ms)) {
+      UMC_LOGF("[UMC] app disconnected (slot %d)\n", i);
       drop(i);
       continue;
     }

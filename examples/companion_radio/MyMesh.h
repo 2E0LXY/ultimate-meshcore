@@ -74,6 +74,14 @@
 #include <helpers/BaseChatMesh.h>
 #include <helpers/TransportKeyStore.h>
 
+#ifdef UMC_BUILD
+#include <helpers/NetworkService.h>
+#include <helpers/umc/UmcAppLink.h>
+#include <helpers/umc/UmcService.h>
+#include <helpers/umc/UmcTraffic.h>
+#include <helpers/umc/UmcWebApp.h>
+#endif
+
 /* -------------------------------------------------------------------------------------- */
 
 #define REQ_TYPE_GET_STATUS             0x01 // same as _GET_STATS
@@ -88,7 +96,11 @@ struct AdvertPath {
   uint8_t path[MAX_PATH_SIZE];
 };
 
-class MyMesh : public BaseChatMesh, public DataStoreHost {
+class MyMesh : public BaseChatMesh, public DataStoreHost
+#ifdef UMC_BUILD
+             , public UmcHost
+#endif
+{
 public:
   MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore& store, AbstractUITask* ui=NULL);
 
@@ -118,6 +130,29 @@ public:
 
   int  getRecentlyHeard(AdvertPath dest[], int max_num);
 
+#ifdef UMC_BUILD
+  // ---- Ultimate MeshCore companion: WiFi, web UI + browser messenger, TCP apps, OTA ----
+  // Call after startInterface(); ble may be NULL on builds without Bluetooth.
+  void umcBegin(FILESYSTEM* fs, BaseSerialInterface* ble);
+  UmcService& getUmc() { return umc; }
+  NetworkService& getNetwork() { return network; }
+  UmcAppLink& getAppLink() { return app_link; }
+
+  // UmcHost
+  void umcCommand(const char* command, char* reply, size_t reply_size) override;
+  const char* umcAdminPassword() const override { return umc.prefs().admin_pw; }
+  const char* umcNodeName() const override { return _prefs.node_name; }
+  const char* umcRole() const override { return "companion"; }
+  const char* umcFirmwareVersion() const override { return FIRMWARE_VERSION; }
+  const char* umcBuildDate() const override { return FIRMWARE_BUILD_DATE; }
+  const char* umcBoardName() const override { return board.getManufacturerName(); }
+  uint32_t umcEpoch() override { return getRTCClock()->getCurrentTime(); }
+  void umcBeforeReboot() override;
+  void umcTlsBegin() override;
+  void umcTlsEnd() override;
+  void umcAppFrame(UmcAppServer& server, int client, const uint8_t* frame, size_t len) override;
+#endif
+
 protected:
   float getAirtimeBudgetFactor() const override;
   int getInterferenceThreshold() const override;
@@ -134,6 +169,10 @@ protected:
   void sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t delay_millis=0) override;
 
   void logRxRaw(float snr, float rssi, const uint8_t raw[], int len) override;
+#ifdef UMC_BUILD
+  void logRx(mesh::Packet* packet, int len, float score) override;
+  void logTx(mesh::Packet* packet, int len) override;
+#endif
   bool isAutoAddEnabled() const override;
   bool shouldAutoAddContactType(uint8_t type) const override;
   bool shouldOverwriteWhenFull() const override;
@@ -216,6 +255,11 @@ private:
     return _store->putBlobByKey(key, key_len, src_buf, len);
   }
 
+#ifdef UMC_BUILD
+  void umcLoop();
+  void umcCheckWebApp();
+  bool umcCli(const char* command, char* reply, size_t reply_size);
+#endif
   void checkCLIRescueCmd();
   void handleRescueCommand(char* command, Stream& out);
   void checkSerialInterface();
@@ -230,6 +274,14 @@ private:
 
   DataStore* _store;
   NodePrefs _prefs;
+#ifdef UMC_BUILD
+  NetworkService network;
+  UmcService umc;
+  UmcAppLink app_link;
+  BaseSerialInterface* _umc_all_serial = NULL;  // the MultiSerialInterface (apps)
+  BaseSerialInterface* _umc_ble = NULL;
+  bool _umc_ble_on = true;
+#endif
   uint32_t pending_login;
   uint32_t pending_status;
   uint32_t pending_telemetry, pending_discovery;   // pending _TELEMETRY_REQ

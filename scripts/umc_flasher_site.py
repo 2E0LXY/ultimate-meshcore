@@ -28,6 +28,7 @@ BOARDS = {
 }
 ROLES = {
     "repeater": ("Repeater", "Relays mesh traffic; WiFi web UI"),
+    "client": ("Ultimate MeshCore Client", "Handheld/companion: MeshCore apps over Bluetooth, USB and WiFi, plus a messenger in the browser"),
     "companion": ("Client (companion)", "Use with the MeshCore apps"),
     "room_server": ("Room server", "Shared message board"),
 }

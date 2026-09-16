@@ -1,4 +1,5 @@
 #include "UmcTelnet.h"
+#include "UmcLog.h"
 
 #if defined(ESP_PLATFORM)
   #include <WiFi.h>
@@ -22,7 +23,7 @@ void UmcTelnet::start() {
   _server = new WiFiServer(_umc.prefs().telnet_port);
   _server->begin();
   _server->setNoDelay(true);
-  Serial.printf("[UMC] telnet CLI on port %u\n", _umc.prefs().telnet_port);
+  UMC_LOGF("[UMC] telnet CLI on port %u\n", _umc.prefs().telnet_port);
 #endif
 }
 

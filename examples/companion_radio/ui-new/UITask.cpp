@@ -89,6 +89,9 @@ class HomeScreen : public UIScreen {
     FIRST,
     RECENT,
     RADIO,
+#ifdef UMC_BUILD
+    WIFI,
+#endif
     BLUETOOTH,
     ADVERT,
 #if ENV_INCLUDE_GPS == 1
@@ -225,7 +228,18 @@ public:
       sprintf(tmp, "MSG: %d", _task->getMsgCount());
       display.drawTextCentered(display.width() / 2, 22, tmp);
 
-      #ifdef WIFI_SSID
+      #ifdef UMC_BUILD
+        if (the_mesh.getNetwork().isWifiConnected()) {
+          snprintf(tmp, sizeof(tmp), "IP: %s", the_mesh.getNetwork().getStaIp().c_str());
+        } else if (the_mesh.getNetwork().isApActive()) {
+          snprintf(tmp, sizeof(tmp), "WiFi: %s", the_mesh.getNetwork().getApSsid());
+        } else {
+          tmp[0] = 0;
+        }
+        display.setColor(UIColor::secondary_txt);
+        display.setTextSize(1);
+        display.drawTextCentered(display.width() / 2, 54, tmp);
+      #elif defined(WIFI_SSID)
         IPAddress ip = WiFi.localIP();
         snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
         display.setTextSize(1);
@@ -286,6 +300,32 @@ public:
       display.setCursor(0, 53);
       sprintf(tmp, "Noise floor: %d", radio_driver.getNoiseFloor());
       display.print(tmp);
+#ifdef UMC_BUILD
+    } else if (_page == HomePage::WIFI) {
+      NetworkService& net = the_mesh.getNetwork();
+      display.setColor(UIColor::primary_txt);
+      display.setTextSize(1);
+      if (net.isWifiConnected()) {
+        display.drawTextEllipsized(0, 20, display.width(), net.getWifiSSID());
+        snprintf(tmp, sizeof(tmp), "IP %s", net.getStaIp().c_str());
+        display.drawTextEllipsized(0, 31, display.width(), tmp);
+        snprintf(tmp, sizeof(tmp), "%s.local", net.getHostname());
+        display.drawTextEllipsized(0, 42, display.width(), tmp);
+      } else {
+        display.drawTextEllipsized(0, 20, display.width(), net.getWifiSSID()[0] ? "WiFi: connecting..." : "WiFi: not set up");
+      }
+      if (net.isApActive()) {
+        display.setColor(UIColor::warning_txt);
+        snprintf(tmp, sizeof(tmp), "AP %s", net.getApSsid());
+        display.drawTextEllipsized(0, net.isWifiConnected() ? 53 : 31, display.width(), tmp);
+        if (!net.isWifiConnected()) display.drawTextEllipsized(0, 42, display.width(), "web: 192.168.4.1");
+      } else if (net.isWifiConnected()) {
+        UmcAppServer* tcp = the_mesh.getUmc().appServer();
+        snprintf(tmp, sizeof(tmp), "apps on TCP: %d", tcp ? tcp->connectedCount() : 0);
+        display.setColor(UIColor::secondary_txt);
+        display.drawTextEllipsized(0, 53, display.width(), tmp);
+      }
+#endif
     } else if (_page == HomePage::BLUETOOTH) {
       display.setColor(UIColor::corp_blue);
       display.drawXbm((display.width() - 32) / 2, 18,

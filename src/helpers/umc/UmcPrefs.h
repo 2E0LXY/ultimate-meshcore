@@ -22,6 +22,7 @@ struct UmcPrefs {
   uint8_t group_hops_max;      // flood hop limit for channel (group) messages, 64 = no extra limit
   bool app_tcp;                // MeshCore app connection on TCP
   uint16_t app_tcp_port;       // default 5000
+  char admin_pw[33];           // web/telnet password on roles without a mesh admin password (companion)
 };
 
 class UmcPrefsStore {

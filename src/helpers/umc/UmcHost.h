@@ -27,6 +27,11 @@ public:
   // Current mesh clock (UTC epoch seconds), 0 if unknown.
   virtual uint32_t umcEpoch() { return 0; }
 
+  // Internet update check/download (HTTPS) is about to start / has finished. Hosts on boards
+  // without PSRAM can release memory here (the companion pauses Bluetooth). Loop task.
+  virtual void umcTlsBegin() {}
+  virtual void umcTlsEnd() {}
+
   // Called just before an OTA image starts streaming into flash.
   virtual void umcPrepareForOta() {}
   // Called when the device is about to reboot on UMC's behalf (after OTA, factory reset...).

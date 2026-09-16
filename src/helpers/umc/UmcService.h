@@ -16,6 +16,7 @@ class UmcWebServer;
 class UmcTelnet;
 class UmcUpdater;
 class UmcAppServer;
+class UmcWebApp;
 
 // Ultimate MeshCore network-services orchestrator. One instance per firmware.
 //
@@ -48,6 +49,12 @@ public:
   UmcHost* host() const { return _host; }
   NetworkService* network() const { return _network; }
   UmcUpdater* updater() const { return _updater; }
+  UmcAppServer* appServer() const { return _app; }
+  // Companion firmware: browser link to the MeshCore app protocol (/api/app).
+  void setWebApp(UmcWebApp* app) { _webapp = app; }
+  UmcWebApp* webApp() const { return _webapp; }
+  // Roles without a mesh admin password keep the web/telnet password in UMC prefs.
+  bool setLocalAdminPassword(const char* password);
 
   void scheduleReboot(uint32_t delay_ms);
   bool isRebootPending() const { return _reboot_at != 0; }
@@ -72,6 +79,7 @@ private:
   UmcTelnet* _telnet;
   UmcUpdater* _updater;
   UmcAppServer* _app;
+  UmcWebApp* _webapp = nullptr;
   unsigned long _reboot_at;
 
 #if defined(ESP_PLATFORM)

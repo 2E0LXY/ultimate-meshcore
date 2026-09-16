@@ -5,7 +5,7 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 
 [**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest build**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest)
 
-> **Status: 0.1.0 (early).** The Heltec V3 / V3.2 **repeater** is available and running on hardware. Heltec V4 (OLED/TFT/R8) repeater builds are published but not yet tested on V4 hardware. Client (companion) and room-server builds, Bluetooth and the T-TWR are in progress — see the [roadmap](docs/umc/ROADMAP.md).
+> **Status: 0.1.0 (early).** The Heltec V3 / V3.2 **repeater** and **Ultimate MeshCore Client** are available and running on hardware. Heltec V4 (OLED/TFT/R8) builds of both are published but not yet tested on V4 hardware. Room server and the T-TWR are in progress — see the [roadmap](docs/umc/ROADMAP.md).
 
 ---
 
@@ -13,8 +13,8 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 
 | Board | Repeater | Client | Room server |
 |---|---|---|---|
-| Heltec WiFi LoRa 32 V3 / V3.2 | ✅ | planned | planned |
-| Heltec V4 OLED / TFT / R8 | ✅ build (hardware test pending) | planned | planned |
+| Heltec WiFi LoRa 32 V3 / V3.2 | ✅ | ✅ | planned |
+| Heltec V4 OLED / TFT / R8 | ✅ build (hardware test pending) | ✅ build (hardware test pending) | planned |
 | LilyGo T-TWR + SX1262 add-on | planned | planned | — |
 
 ---
@@ -70,6 +70,16 @@ Fully compatible with standard MeshCore nodes and apps, with setup, management a
 - **MQTT observer** uploads with JWT/WSS, two broker slots and status publishing.
 - **ESP-NOW bridge** between nearby LoRa segments.
 
+### Ultimate MeshCore Client (companion firmware)
+- **Every app link at once**: Bluetooth (NimBLE, PIN pairing), USB, **WiFi TCP port 5000** (up to 3 apps) and the browser. Works with the MeshCore app, meshcore-open, meshcore_py, meshcore-cli and Home Assistant.
+- **Messenger in the browser**: channels and direct messages, delivery ticks with round-trip time, hops/SNR, retry, search, unread counts, history saved in the browser, room-server login.
+- **Contacts**: type/path/advert age/map, favourites, remove, reset path, share, `meshcore://` export/import, adverts waiting to be added.
+- **Repeater tools over the mesh**: login, status, telemetry (Cayenne LPP decoded), **remote admin console**, **trace path** with per-hop SNR, **discover path**.
+- **Channels**: hashtag, private (random secret), shared-secret and Public. Share, remove, export/import.
+- **Client settings**: extra ACKs, path hash size, location sharing, client repeat, auto-add rules and hop limit, telemetry permissions, Bluetooth PIN, app connections, airtime factor, RX delay.
+- **Display WiFi page**: network, IP, `.local` name, hotspot, connected apps. The pairing PIN shows until an app connects.
+- Same web UI, WiFi, internet updates, rollback and watchdog as the repeater. On the V3, Bluetooth pauses briefly during internet updates to free memory.
+
 ### Command line additions
 Everything in the web interface is also a command (USB serial, telnet, web console, or remote admin over the mesh). UMC adds:
 
@@ -80,19 +90,20 @@ ap.mode, ap.password, ap.rescue, get ap.status, pin
 http, http.timeout, telnet, timezone, app.tcp, get app.status
 display.mode, display.ip, display.page, display.traffic, display.timeout
 region preset yorkshire|northwest|uk, get traffic, group.hops.max, advert.hops.max
+client: ble, ble.pin, get ble.activepin, get app.links, get contacts.count, contacts.manual, autoadd.*, telemetry.*, advert.loc, af, advert.flood
 routes, route <node>, route find|pin|unpin|forget, trace <path>, trace route <node>, get trace
 update check, update install, get update.status, update.auto, update.interval, update.url, get build
 get ota.state, ota rollback
 get setup, setup start, setup done, get umc.version, factory reset confirm
 ```
 
-The full list with explanations is in the [manual's command reference](docs/umc/MANUAL.md#23-command-reference-az).
+The full list with explanations is in the [manual's command reference](docs/umc/MANUAL.md#24-command-reference-az).
 
 ---
 
 ## Quick start
 
-1. Open the [web flasher](https://2e0lxy.github.io/ultimate-meshcore/), choose your board, and press **Install**. Choose **No** at “Erase device?” to keep an existing node's identity.
+1. Open the [web flasher](https://2e0lxy.github.io/ultimate-meshcore/), choose your board and **Repeater** or **Ultimate MeshCore Client**, and press **Install**. Choose **No** at “Erase device?” to keep an existing node's identity.
 2. Join the `UMC-Setup-XXXX` WiFi hotspot and follow the setup wizard.
 3. Reconnect to your home WiFi and open `http://umc-<name>.local/` or the IP shown on the display.
 
@@ -103,6 +114,7 @@ git clone https://github.com/2E0LXY/ultimate-meshcore
 cd ultimate-meshcore
 pio run -e umc_heltec_v3_repeater            # build
 pio run -e umc_heltec_v3_repeater -t upload  # build and flash over USB
+pio run -e umc_heltec_v3_client              # Ultimate MeshCore Client
 ```
 
 - Targets: [`variants/umc/platformio.ini`](variants/umc/platformio.ini)

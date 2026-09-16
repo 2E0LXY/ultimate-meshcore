@@ -1,7 +1,9 @@
 #include "UmcWebServer.h"
+#include "UmcLog.h"
 
 #include "UmcService.h"
 #include "UmcVersion.h"
+#include "UmcWebApp.h"
 
 #if defined(ESP_PLATFORM)
   #include <Update.h>
@@ -17,8 +19,8 @@
 #if defined(ESP_PLATFORM)
 namespace {
 
-constexpr size_t kCliBodyMax = 4096;
-constexpr size_t kCliReplyMax = 16384;
+constexpr size_t kCliBodyMax = 2048;   // the web UI sends at most 16 commands per request
+constexpr size_t kCliReplyMax = 6144;
 constexpr size_t kInfoMax = 1536;
 constexpr size_t kOtaChunk = 4096;
 constexpr unsigned long kLoginLockoutMs = 60UL * 1000UL;
@@ -77,7 +79,7 @@ bool UmcWebServer::start() {
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.server_port = _umc.prefs().http_port;
   cfg.ctrl_port = 32770;  // distinct from any other httpd instance
-  cfg.max_uri_handlers = 24;
+  cfg.max_uri_handlers = 28;
   cfg.max_open_sockets = 5;
   cfg.lru_purge_enable = true;
   cfg.stack_size = 6144;
@@ -89,7 +91,7 @@ bool UmcWebServer::start() {
 
   if (httpd_start(&_server, &cfg) != ESP_OK) {
     _server = nullptr;
-    Serial.println("[UMC] http start failed");
+    UMC_LOGLN("[UMC] http start failed");
     return false;
   }
 
@@ -101,6 +103,8 @@ bool UmcWebServer::start() {
       {.uri = "/api/scan", .method = HTTP_GET, .handler = handleScan, .user_ctx = this},
       {.uri = "/api/routes", .method = HTTP_GET, .handler = handleRoutes, .user_ctx = this},
       {.uri = "/api/traffic", .method = HTTP_GET, .handler = handleTraffic, .user_ctx = this},
+      {.uri = "/api/app", .method = HTTP_GET, .handler = handleAppPoll, .user_ctx = this},
+      {.uri = "/api/app", .method = HTTP_POST, .handler = handleAppPost, .user_ctx = this},
       {.uri = "/api/ota", .method = HTTP_POST, .handler = handleOta, .user_ctx = this},
       {.uri = "/generate_204", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
       {.uri = "/gen_204", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
@@ -114,7 +118,7 @@ bool UmcWebServer::start() {
     httpd_register_uri_handler(_server, &r);
   }
   httpd_register_err_handler(_server, HTTPD_404_NOT_FOUND, handleNotFound);
-  Serial.printf("[UMC] web UI on port %u\n", cfg.server_port);
+  UMC_LOGF("[UMC] web UI on port %u\n", cfg.server_port);
   return true;
 }
 
@@ -309,10 +313,14 @@ esp_err_t UmcWebServer::handleRoutes(httpd_req_t* req) {
   auto* s = self(req);
   setCommonHeaders(req);
   if (!s->isAuthorized(req)) return sendJson(req, "{\"error\":\"Unauthorized\"}", "401 Unauthorized");
-  constexpr size_t kMax = 16384;
-  char* buf = static_cast<char*>(malloc(kMax));
+  size_t max = 16384;
+  char* buf = static_cast<char*>(malloc(max));
+  if (buf == nullptr) {  // fragmented heap (Bluetooth + WiFi on boards without PSRAM): send what fits
+    max = 4096;
+    buf = static_cast<char*>(malloc(max));
+  }
   if (buf == nullptr) return httpd_resp_send_500(req);
-  s->_umc.formatRoutesJson(buf, kMax);
+  s->_umc.formatRoutesJson(buf, max);
   esp_err_t rc = sendJson(req, buf);
   free(buf);
   return rc;
@@ -328,6 +336,47 @@ esp_err_t UmcWebServer::handleTraffic(httpd_req_t* req) {
   esp_err_t rc = sendJson(req, buf);
   free(buf);
   return rc;
+}
+
+// Companion browser link: GET /api/app?since=N returns queued protocol frames (hex).
+esp_err_t UmcWebServer::handleAppPoll(httpd_req_t* req) {
+  auto* s = self(req);
+  setCommonHeaders(req);
+  if (!s->isAuthorized(req)) return sendJson(req, "{\"error\":\"Unauthorized\"}", "401 Unauthorized");
+  UmcWebApp* app = s->_umc.webApp();
+  if (app == nullptr) return sendJson(req, "{\"error\":\"Not available on this firmware\"}", "404 Not Found");
+  char q[40], v[16];
+  uint32_t since = 0;
+  if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK && httpd_query_key_value(q, "since", v, sizeof(v)) == ESP_OK) {
+    since = strtoul(v, nullptr, 10);
+  }
+  constexpr size_t kMax = 5120;  // UmcWebApp::kMaxPerPoll frames of up to 176 bytes as hex
+  char* buf = static_cast<char*>(malloc(kMax));
+  if (buf == nullptr) return httpd_resp_send_500(req);
+  app->formatSince(since, buf, kMax);
+  esp_err_t rc = sendJson(req, buf);
+  free(buf);
+  return rc;
+}
+
+// POST /api/app with one protocol frame per line (hex).
+esp_err_t UmcWebServer::handleAppPost(httpd_req_t* req) {
+  auto* s = self(req);
+  setCommonHeaders(req);
+  if (!s->isAuthorized(req)) return sendJson(req, "{\"error\":\"Unauthorized\"}", "401 Unauthorized");
+  UmcWebApp* app = s->_umc.webApp();
+  if (app == nullptr) return sendJson(req, "{\"error\":\"Not available on this firmware\"}", "404 Not Found");
+  char body[1536];
+  if (!readBody(req, body, sizeof(body))) return sendJson(req, "{\"error\":\"Bad request\"}", "400 Bad Request");
+  int accepted = 0;
+  char* save = nullptr;
+  for (char* line = strtok_r(body, "\n", &save); line != nullptr; line = strtok_r(nullptr, "\n", &save)) {
+    if (!app->postHex(line)) break;
+    accepted++;
+  }
+  char json[48];
+  snprintf(json, sizeof(json), "{\"accepted\":%d}", accepted);
+  return sendJson(req, json, accepted > 0 ? nullptr : "503 Service Unavailable");
 }
 
 esp_err_t UmcWebServer::handleOta(httpd_req_t* req) {
@@ -379,7 +428,7 @@ esp_err_t UmcWebServer::handleOta(httpd_req_t* req) {
         break;
       }
       started = true;
-      Serial.printf("[UMC] OTA upload %d bytes\n", req->content_len);
+      UMC_LOGF("[UMC] OTA upload %d bytes\n", req->content_len);
     }
     if (Update.write(chunk, got) != static_cast<size_t>(got)) {
       error = "Flash write failed";
@@ -395,13 +444,13 @@ esp_err_t UmcWebServer::handleOta(httpd_req_t* req) {
   if (error != nullptr) {
     if (started) Update.abort();
     s->_ota_active = false;
-    Serial.printf("[UMC] OTA failed: %s\n", error);
+    UMC_LOGF("[UMC] OTA failed: %s\n", error);
     char json[160];
     snprintf(json, sizeof(json), "{\"error\":\"%s\"}", error);
     return sendJson(req, json, "400 Bad Request");
   }
 
-  Serial.println("[UMC] OTA OK, rebooting");
+  UMC_LOGLN("[UMC] OTA OK, rebooting");
   esp_err_t rc = sendJson(req, "{\"ok\":true,\"reboot\":true}");
   s->_umc.scheduleReboot(2000);
   return rc;

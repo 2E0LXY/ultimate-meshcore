@@ -1,4 +1,5 @@
 #include "NetworkService.h"
+#include <helpers/umc/UmcLog.h>
 
 #include <helpers/TxtDataHelpers.h>
 #include <string.h>
@@ -142,7 +143,7 @@ void NetworkService::begin(FILESYSTEM* fs,
   NetworkPrefsStore::load(_fs, _prefs, legacy_wifi_powersave, legacy_wifi_ssid, legacy_wifi_pwd);
   NetworkPrefsStore::applyUmcDefaults(_prefs);
 #if defined(ESP_PLATFORM)
-  Serial.printf("[BOOT] wifi prefs powersave=%s channel=%u ssid=%s networks=%u ap=%s\n",
+  UMC_LOGF("[BOOT] wifi prefs powersave=%s channel=%u ssid=%s networks=%u ap=%s\n",
                 getPowerSaveLabel(_prefs.wifi_powersave),
                 _prefs.wifi_channel,
                 _prefs.wifi_ssid[0] ? _prefs.wifi_ssid : "-",
@@ -617,7 +618,7 @@ bool NetworkService::setWifiPowerSave(const char* mode) {
   bool ok = savePrefs();
 #if defined(ESP_PLATFORM)
   if (_wifi_started) {
-    WiFi.setSleep(toEspPowerSave(_prefs.wifi_powersave));
+    WiFi.setSleep(toEspPowerSave(effectivePowerSave()));
   }
 #endif
   return ok;
@@ -837,7 +838,7 @@ void NetworkService::startAccessPoint() {
   WiFi.softAPConfig(ap_ip, ap_ip, IPAddress(255, 255, 255, 0));
   bool ok = WiFi.softAP(_ap_ssid, strlen(pwd) >= 8 ? pwd : nullptr, 0, 0, 4);
   if (!ok) {
-    Serial.println("[NET] AP start failed");
+    UMC_LOGLN("[NET] AP start failed");
     return;
   }
   _ap_active = true;
@@ -847,7 +848,7 @@ void NetworkService::startAccessPoint() {
   }
   _dns->setErrorReplyCode(DNSReplyCode::NoError);
   _dns->start(kDnsPort, "*", ap_ip);
-  Serial.printf("[NET] AP up ssid=%s ip=%s secured=%s\n", _ap_ssid, ap_ip.toString().c_str(), strlen(pwd) >= 8 ? "yes" : "no");
+  UMC_LOGF("[NET] AP up ssid=%s ip=%s secured=%s\n", _ap_ssid, ap_ip.toString().c_str(), strlen(pwd) >= 8 ? "yes" : "no");
 }
 
 void NetworkService::stopAccessPoint() {
@@ -862,7 +863,7 @@ void NetworkService::stopAccessPoint() {
     if (WiFi.getMode() == WIFI_AP_STA) {
       WiFi.mode(WIFI_STA);
     }
-    Serial.println("[NET] AP down");
+    UMC_LOGLN("[NET] AP down");
   }
 }
 
@@ -908,7 +909,7 @@ void NetworkService::updateMdns() {
       MDNS.addService("http", "tcp", 80);
       MDNS.addServiceTxt("http", "tcp", "fw", "umc");
       _mdns_active = true;
-      Serial.printf("[NET] mDNS http://%s.local/\n", getHostname());
+      UMC_LOGF("[NET] mDNS http://%s.local/\n", getHostname());
     }
   } else if (!want && _mdns_active) {
     MDNS.end();
@@ -942,7 +943,7 @@ void NetworkService::ensureWifi(bool network_required) {
     _last_wifi_status = static_cast<int>(status);
     if (status == WL_CONNECTED) {
       const int connected_channel = WiFi.channel();
-      Serial.printf("[BOOT] wifi connected t=%lu ssid=%s ip=%s rssi=%d channel=%d\n",
+      UMC_LOGF("[BOOT] wifi connected t=%lu ssid=%s ip=%s rssi=%d channel=%d\n",
                     static_cast<unsigned long>(millis()),
                     WiFi.SSID().c_str(),
                     WiFi.localIP().toString().c_str(),
@@ -950,7 +951,7 @@ void NetworkService::ensureWifi(bool network_required) {
                     connected_channel);
       if (_slot == 0 && connected_channel > 0 && connected_channel <= 14 && _prefs.wifi_channel != connected_channel) {
         _prefs.wifi_channel = static_cast<uint8_t>(connected_channel);
-        Serial.printf("[BOOT] wifi learned channel=%u save=%s\n",
+        UMC_LOGF("[BOOT] wifi learned channel=%u save=%s\n",
                       _prefs.wifi_channel,
                       savePrefs() ? "ok" : "failed");
       }
@@ -967,7 +968,7 @@ void NetworkService::ensureWifi(bool network_required) {
   if (_wifi_started && _last_wifi_attempt != 0) {
     if (_slot == 0 && isValidWifiChannel(_prefs.wifi_channel) &&
         now_ms - _last_wifi_attempt >= kWifiChannelHintTimeoutMillis) {
-      Serial.printf("[BOOT] wifi channel hint timeout t=%lu channel=%u\n",
+      UMC_LOGF("[BOOT] wifi channel hint timeout t=%lu channel=%u\n",
                     static_cast<unsigned long>(millis()),
                     _prefs.wifi_channel);
       _prefs.wifi_channel = 0;
@@ -977,7 +978,7 @@ void NetworkService::ensureWifi(bool network_required) {
     } else if (now_ms - _last_wifi_attempt < kWifiConnectTimeoutMillis) {
       return;
     } else {
-      Serial.printf("[BOOT] wifi timeout t=%lu ssid=%s code=%d, trying next\n",
+      UMC_LOGF("[BOOT] wifi timeout t=%lu ssid=%s code=%d, trying next\n",
                     static_cast<unsigned long>(millis()), slotSsid(_slot),
                     static_cast<int>(status));
       WiFi.disconnect(false, false);
@@ -998,9 +999,9 @@ void NetworkService::ensureWifi(bool network_required) {
 
   if (!_wifi_started || WiFi.getMode() == WIFI_OFF) {
     WiFi.mode(_ap_active ? WIFI_AP_STA : WIFI_STA);
-    WiFi.setSleep(toEspPowerSave(_prefs.wifi_powersave));
+    WiFi.setSleep(toEspPowerSave(effectivePowerSave()));
     _wifi_started = true;
-    Serial.printf("[BOOT] wifi start t=%lu\n", static_cast<unsigned long>(millis()));
+    UMC_LOGF("[BOOT] wifi start t=%lu\n", static_cast<unsigned long>(millis()));
   } else if (_ap_active && WiFi.getMode() == WIFI_AP) {
     WiFi.mode(WIFI_AP_STA);
   }
@@ -1011,10 +1012,10 @@ void NetworkService::ensureWifi(bool network_required) {
   const char* pwd = slotPwd(_slot);
   if (_slot == 0 && isValidWifiChannel(_prefs.wifi_channel)) {
     WiFi.begin(ssid, pwd[0] ? pwd : nullptr, _prefs.wifi_channel);
-    Serial.printf("[BOOT] wifi begin t=%lu ssid=%s channel=%u\n", static_cast<unsigned long>(millis()), ssid, _prefs.wifi_channel);
+    UMC_LOGF("[BOOT] wifi begin t=%lu ssid=%s channel=%u\n", static_cast<unsigned long>(millis()), ssid, _prefs.wifi_channel);
   } else {
     WiFi.begin(ssid, pwd[0] ? pwd : nullptr);
-    Serial.printf("[BOOT] wifi begin t=%lu ssid=%s channel=scan\n", static_cast<unsigned long>(millis()), ssid);
+    UMC_LOGF("[BOOT] wifi begin t=%lu ssid=%s channel=scan\n", static_cast<unsigned long>(millis()), ssid);
   }
 }
 
@@ -1098,7 +1099,7 @@ void NetworkService::updateConnectivityWatchdog() {
     if (_wd_backoff_shift < kWatchdogMaxBackoffShift) {
       _wd_backoff_shift++;
     }
-    Serial.printf("[WDOG] gateway unreachable for %lus, forcing wifi reconnect (count=%u)\n",
+    UMC_LOGF("[WDOG] gateway unreachable for %lus, forcing wifi reconnect (count=%u)\n",
                   (now_ms - _wd_last_gateway_ok) / 1000, _wd_reconnect_count);
     forceReconnect();
   }

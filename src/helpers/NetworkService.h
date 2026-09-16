@@ -71,6 +71,9 @@ public:
   const char* getTimezone() const { return _prefs.timezone; }
 
   void setNodeName(const char* name) { _node_name = name; }
+  // Lowest WiFi power-save mode allowed (Bluetooth coexistence needs at least modem sleep "min").
+  void setMinPowerSave(uint8_t mode) { _min_powersave = mode; }
+  uint8_t effectivePowerSave() const { return _prefs.wifi_powersave > _min_powersave ? _prefs.wifi_powersave : _min_powersave; }
   void setDefaultApPassword(const char* pin_password) { _default_ap_password = pin_password; }
   void setSetupMode(bool setup);           // forces the AP on until setup completes
   bool isSetupMode() const { return _setup_mode; }
@@ -118,6 +121,7 @@ private:
   const char* _default_ap_password;
   bool _setup_mode;
   bool _ap_active;
+  uint8_t _min_powersave = 0;
   char _ap_ssid[33];
   char _hostname_buf[33];
   uint8_t _slot;                   // 0-based index of the SSID currently being tried

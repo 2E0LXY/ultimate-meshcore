@@ -2,6 +2,12 @@
 
 #include <Arduino.h> // needed for PlatformIO
 #include <Mesh.h>
+#ifdef UMC_BUILD
+#include <helpers/StatsFormatHelper.h>
+#ifdef UMC_NIMBLE
+#include <helpers/esp32/SerialNimBLEInterface.h>
+#endif
+#endif
 #if defined(ESP32)
   #include <WiFi.h>
 #endif
@@ -286,6 +292,9 @@ bool MyMesh::Frame::isChannelMsg() const {
 }
 
 void MyMesh::addToOfflineQueue(const uint8_t frame[], int len) {
+#ifdef UMC_BUILD
+  umc_webapp.mirror(frame, len);  // the browser messenger keeps its own copy
+#endif
   if (offline_queue_len >= OFFLINE_QUEUE_SIZE) {
     MESH_DEBUG_PRINTLN("WARN: offline_queue is full!");
     int pos = 0;
@@ -2512,8 +2521,14 @@ void MyMesh::loop() {
   if (_cli_rescue) {
     checkCLIRescueCmd();
   } else {
+#ifdef UMC_BUILD
+    umcCheckWebApp();
+#endif
     checkSerialInterface();
   }
+#ifdef UMC_BUILD
+  umcLoop();
+#endif
 
   // is there are pending dirty contacts write needed?
   if (dirty_contacts_expiry && millisHasNowPassed(dirty_contacts_expiry)) {
@@ -2522,7 +2537,12 @@ void MyMesh::loop() {
   }
 
 #ifdef DISPLAY_CLASS
+#ifdef UMC_BUILD
+  // USB always reports "connected"; the display should show the pairing PIN until a real app attaches
+  if (_ui) _ui->setHasConnection((_umc_ble != NULL && _umc_ble->isConnected()) || app_link.isConnected());
+#else
   if (_ui) _ui->setHasConnection(_serial->isConnected());
+#endif
 #endif
 }
 
@@ -2545,3 +2565,454 @@ bool MyMesh::advert() {
 bool MyMesh::hasPendingWork() const {
   return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0;
 }
+
+#ifdef UMC_BUILD
+// =====================================================================================
+//  Ultimate MeshCore companion services
+//  Apps: Bluetooth + USB + TCP 5000 (up to 3) + browser (web UI messenger), all at once.
+// =====================================================================================
+
+namespace {
+
+bool umcStartsWith(const char* s, const char* prefix) { return strncmp(s, prefix, strlen(prefix)) == 0; }
+
+bool umcParseOnOff(const char* v, bool& out) {
+  while (*v == ' ') v++;
+  if (strcmp(v, "on") == 0 || strcmp(v, "1") == 0 || strcmp(v, "true") == 0) { out = true; return true; }
+  if (strcmp(v, "off") == 0 || strcmp(v, "0") == 0 || strcmp(v, "false") == 0) { out = false; return true; }
+  return false;
+}
+
+const char* umcOnOff(bool b) { return b ? "on" : "off"; }
+
+const char* umcTelemLabel(uint8_t mode) {
+  switch (mode) {
+    case TELEM_MODE_ALLOW_FLAGS: return "contacts";
+    case TELEM_MODE_ALLOW_ALL: return "all";
+    default: return "deny";
+  }
+}
+
+bool umcParseTelem(const char* v, uint8_t& out) {
+  if (strcmp(v, "deny") == 0 || strcmp(v, "0") == 0) { out = TELEM_MODE_DENY; return true; }
+  if (strcmp(v, "contacts") == 0 || strcmp(v, "1") == 0) { out = TELEM_MODE_ALLOW_FLAGS; return true; }
+  if (strcmp(v, "all") == 0 || strcmp(v, "2") == 0) { out = TELEM_MODE_ALLOW_ALL; return true; }
+  return false;
+}
+
+struct UmcAutoAddKey {
+  const char* name;
+  uint8_t bit;
+};
+const UmcAutoAddKey kUmcAutoAdd[] = {
+  {"chat", AUTO_ADD_CHAT}, {"repeater", AUTO_ADD_REPEATER}, {"room", AUTO_ADD_ROOM_SERVER},
+  {"sensor", AUTO_ADD_SENSOR}, {"overwrite", AUTO_ADD_OVERWRITE_OLDEST},
+};
+
+}  // namespace
+
+void MyMesh::umcBegin(FILESYSTEM* fs, BaseSerialInterface* ble) {
+  _umc_all_serial = _serial;
+  _umc_ble = ble;
+  board.setInhibitSleep(true);                  // radio + WiFi stay up
+  if (ble != NULL) network.setMinPowerSave(1);  // WiFi/Bluetooth coexistence needs modem sleep
+  // EastMesh companion builds kept one WiFi network in the node prefs: carry it over once.
+  network.begin(fs, _prefs.wifi_powersave, _prefs.wifi_ssid, _prefs.wifi_pwd);
+  umc_webapp.begin();
+  umc.setWebApp(&umc_webapp);
+  umc.begin(this, &network);
+  app_link.attach(umc.appServer());
+}
+
+void MyMesh::umcLoop() {
+  network.loop(true);
+  umc.loop();
+  if (_umc_ble != NULL && umc.prefs().ble_enabled != _umc_ble_on) {
+    _umc_ble_on = umc.prefs().ble_enabled;
+    if (_umc_ble_on) {
+      _umc_ble->enable();
+    } else {
+      _umc_ble->disable();
+    }
+  }
+}
+
+// Frames from the browser are answered to the browser only; pushes still reach everyone.
+void MyMesh::umcCheckWebApp() {
+  if (_umc_all_serial == NULL) return;
+  if (_serial == &umc_webapp) {
+    if (_iter_started) return;  // still streaming a contact list to the browser
+    umc_webapp.setDirect(false);
+    _serial = _umc_all_serial;
+  }
+  if (_iter_started) return;    // an app's contact list is streaming; the browser waits its turn
+  size_t len = umc_webapp.takeFrame(cmd_frame);
+  if (len == 0) return;
+  // The browser never drains the apps' offline message queue (it reads mirrored copies),
+  // and never changes the protocol version the phone app negotiated.
+  if (cmd_frame[0] == CMD_SYNC_NEXT_MESSAGE || cmd_frame[0] == CMD_DEVICE_QUERY) {
+    uint8_t reply[2] = {RESP_CODE_ERR, ERR_CODE_UNSUPPORTED_CMD};
+    umc_webapp.setDirect(true);
+    umc_webapp.writeFrame(reply, 2);
+    umc_webapp.setDirect(false);
+    return;
+  }
+  _serial = &umc_webapp;
+  umc_webapp.setDirect(true);
+  handleCmdFrame(len);
+  if (!_iter_started) {
+    umc_webapp.setDirect(false);
+    _serial = _umc_all_serial;
+  }
+}
+
+void MyMesh::umcAppFrame(UmcAppServer& server, int client, const uint8_t* frame, size_t len) {
+  (void)server;
+  (void)client;
+  app_link.push(frame, len);
+}
+
+void MyMesh::umcBeforeReboot() {
+  if (dirty_contacts_expiry) saveContacts();
+}
+
+// HTTPS needs more RAM than a board without PSRAM has free while Bluetooth runs:
+// pause Bluetooth for the few seconds of an update check or download.
+void MyMesh::umcTlsBegin() {
+#if defined(UMC_NIMBLE) && !defined(BOARD_HAS_PSRAM)
+  if (_umc_ble != NULL) static_cast<SerialNimBLEInterface*>(_umc_ble)->suspend();
+#endif
+}
+
+void MyMesh::umcTlsEnd() {
+#if defined(UMC_NIMBLE) && !defined(BOARD_HAS_PSRAM)
+  if (_umc_ble != NULL) static_cast<SerialNimBLEInterface*>(_umc_ble)->resume();
+#endif
+}
+
+void MyMesh::logRx(mesh::Packet* packet, int len, float score) {
+  (void)score;
+  umc_traffic.add(packet, len, false, radio_driver.getLastRSSI(), radio_driver.getLastSNR());
+}
+
+void MyMesh::logTx(mesh::Packet* packet, int len) {
+  umc_traffic.add(packet, len, true, 0, 0);
+}
+
+void MyMesh::umcCommand(const char* command, char* reply, size_t reply_size) {
+  reply[0] = 0;
+  while (*command == ' ') command++;
+  if (umc.handleCommand(command, reply, reply_size)) return;
+  if (umcCli(command, reply, reply_size)) return;
+  snprintf(reply, reply_size, "Unknown command");
+}
+
+bool MyMesh::umcCli(const char* command, char* reply, size_t n) {
+  // ---------------------------------------------------------------- identity
+  if (strcmp(command, "get name") == 0) { snprintf(reply, n, "> %s", _prefs.node_name); return true; }
+  if (umcStartsWith(command, "set name ")) {
+    const char* v = command + 9;
+    if (*v == 0 || strlen(v) >= sizeof(_prefs.node_name)) { snprintf(reply, n, "Err - name must be 1-31 characters"); return true; }
+    StrHelper::strncpy(_prefs.node_name, v, sizeof(_prefs.node_name));
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  if (strcmp(command, "get lat") == 0) { snprintf(reply, n, "> %.6f", sensors.node_lat); return true; }
+  if (strcmp(command, "get lon") == 0) { snprintf(reply, n, "> %.6f", sensors.node_lon); return true; }
+  if (umcStartsWith(command, "set lat ") || umcStartsWith(command, "set lon ")) {
+    bool is_lat = command[5] == 'a';
+    double v = atof(command + 8);
+    if ((is_lat && (v < -90 || v > 90)) || (!is_lat && (v < -180 || v > 180))) { snprintf(reply, n, "Err - out of range"); return true; }
+    if (is_lat) sensors.node_lat = v; else sensors.node_lon = v;
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  if (strcmp(command, "get public.key") == 0) {
+    char hex[PUB_KEY_SIZE * 2 + 1];
+    mesh::Utils::toHex(hex, self_id.pub_key, PUB_KEY_SIZE);
+    snprintf(reply, n, "> %s", hex);
+    return true;
+  }
+  if (strcmp(command, "get role") == 0) { snprintf(reply, n, "> companion"); return true; }
+  if (strcmp(command, "board") == 0) { snprintf(reply, n, "> %s", board.getManufacturerName()); return true; }
+  if (umcStartsWith(command, "password ")) {
+    snprintf(reply, n, umc.setLocalAdminPassword(command + 9) ? "OK - password changed" : "Err - 8 to 32 characters");
+    return true;
+  }
+  if (strcmp(command, "ver") == 0) { snprintf(reply, n, "> %s (build %s)", FIRMWARE_VERSION, FIRMWARE_BUILD_DATE); return true; }
+
+  // ---------------------------------------------------------------- radio
+  if (strcmp(command, "get radio") == 0) {
+    char freq[16], bw[16];
+    strcpy(freq, StrHelper::ftoa(_prefs.freq));
+    strcpy(bw, StrHelper::ftoa3(_prefs.bw));
+    snprintf(reply, n, "> %s,%s,%u,%u", freq, bw, (unsigned)_prefs.sf, (unsigned)_prefs.cr);
+    return true;
+  }
+  if (umcStartsWith(command, "set radio ")) {
+    float freq = 0, bw = 0;
+    int sf = 0, cr = 0;
+    if (sscanf(command + 10, "%f,%f,%d,%d", &freq, &bw, &sf, &cr) != 4 || freq < 150 || freq > 2500 || bw < 7 || bw > 500 ||
+        sf < 5 || sf > 12 || cr < 5 || cr > 8) {
+      snprintf(reply, n, "Err - use freq,bw,sf,cr e.g. 869.618,62.5,8,8");
+      return true;
+    }
+    if (_prefs.isRepeatEn() && !isValidClientRepeatFreq((uint32_t)(freq * 1000))) {
+      snprintf(reply, n, "Err - turn repeat off first (not allowed on that frequency)");
+      return true;
+    }
+    _prefs.freq = freq;
+    _prefs.bw = bw;
+    _prefs.sf = sf;
+    _prefs.cr = cr;
+    savePrefs();
+    radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+    snprintf(reply, n, "OK - radio applied");
+    return true;
+  }
+  if (strcmp(command, "get tx") == 0) { snprintf(reply, n, "> %d", _prefs.tx_power_dbm); return true; }
+  if (umcStartsWith(command, "set tx ")) {
+    int p = atoi(command + 7);
+    if (p < -9 || p > MAX_LORA_TX_POWER) { snprintf(reply, n, "Err - -9 to %d dBm", MAX_LORA_TX_POWER); return true; }
+    _prefs.tx_power_dbm = p;
+    savePrefs();
+    radio_driver.setTxPower(_prefs.tx_power_dbm);
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  if (strcmp(command, "get radio.rxgain") == 0) { snprintf(reply, n, "> %s", umcOnOff(_prefs.rx_boosted_gain)); return true; }
+  if (umcStartsWith(command, "set radio.rxgain ")) {
+    bool b;
+    if (!umcParseOnOff(command + 17, b)) { snprintf(reply, n, "Err - on|off"); return true; }
+    _prefs.rx_boosted_gain = b;
+    savePrefs();
+    radio_driver.setRxBoostedGainMode(b);
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  if (strcmp(command, "get af") == 0) { snprintf(reply, n, "> %s", StrHelper::ftoa(_prefs.airtime_factor)); return true; }
+  if (umcStartsWith(command, "set af ")) {
+    float v = atof(command + 7);
+    if (v < 0 || v > 9) { snprintf(reply, n, "Err - 0 to 9"); return true; }
+    _prefs.airtime_factor = v;
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  if (strcmp(command, "get rxdelay") == 0) { snprintf(reply, n, "> %s", StrHelper::ftoa(_prefs.rx_delay_base)); return true; }
+  if (umcStartsWith(command, "set rxdelay ")) {
+    float v = atof(command + 12);
+    if (v < 0 || v > 20) { snprintf(reply, n, "Err - 0 to 20"); return true; }
+    _prefs.rx_delay_base = v;
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+
+  // ---------------------------------------------------------------- mesh behaviour
+  if (strcmp(command, "get repeat") == 0) { snprintf(reply, n, "> %s", umcOnOff(_prefs.isRepeatEn())); return true; }
+  if (umcStartsWith(command, "set repeat ")) {
+    bool b;
+    if (!umcParseOnOff(command + 11, b)) { snprintf(reply, n, "Err - on|off"); return true; }
+    if (b && !isValidClientRepeatFreq((uint32_t)(_prefs.freq * 1000))) {
+      snprintf(reply, n, "Err - client repeat is only allowed on 433.000, 869.495 or 918.000 MHz");
+      return true;
+    }
+    _prefs.setRepeatEn(b);
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  if (strcmp(command, "get path.hash.mode") == 0) { snprintf(reply, n, "> %u", _prefs.path_hash_mode); return true; }
+  if (umcStartsWith(command, "set path.hash.mode ")) {
+    int v = atoi(command + 19);
+    if (v < 0 || v > 2) { snprintf(reply, n, "Err - 0, 1 or 2"); return true; }
+    _prefs.path_hash_mode = v;
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  if (strcmp(command, "get multi.acks") == 0) { snprintf(reply, n, "> %u", _prefs.multi_acks); return true; }
+  if (umcStartsWith(command, "set multi.acks ")) {
+    int v = atoi(command + 15);
+    if (v < 0 || v > 1) { snprintf(reply, n, "Err - 0 or 1"); return true; }
+    _prefs.multi_acks = v;
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  if (strcmp(command, "get advert.loc") == 0) { snprintf(reply, n, "> %s", _prefs.advert_loc_policy ? "share" : "none"); return true; }
+  if (umcStartsWith(command, "set advert.loc ")) {
+    const char* v = command + 15;
+    if (strcmp(v, "share") != 0 && strcmp(v, "none") != 0) { snprintf(reply, n, "Err - none|share"); return true; }
+    _prefs.advert_loc_policy = strcmp(v, "share") == 0 ? ADVERT_LOC_SHARE : ADVERT_LOC_NONE;
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  if (strcmp(command, "advert") == 0 || strcmp(command, "advert.flood") == 0) {
+    mesh::Packet* pkt = _prefs.advert_loc_policy == ADVERT_LOC_NONE
+                            ? createSelfAdvert(_prefs.node_name)
+                            : createSelfAdvert(_prefs.node_name, sensors.node_lat, sensors.node_lon);
+    if (pkt == NULL) { snprintf(reply, n, "Err - busy, try again"); return true; }
+    if (command[6] == '.') {
+      TransportKey default_scope;
+      memcpy(&default_scope.key, _prefs.default_scope_key, sizeof(default_scope.key));
+      sendFloodScoped(default_scope, pkt, 0);
+      snprintf(reply, n, "OK - flood advert sent");
+    } else {
+      sendZeroHop(pkt);
+      snprintf(reply, n, "OK - zero-hop advert sent");
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------- contacts policy
+  if (strcmp(command, "get contacts.manual") == 0) { snprintf(reply, n, "> %s", umcOnOff(_prefs.manual_add_contacts & 1)); return true; }
+  if (umcStartsWith(command, "set contacts.manual ")) {
+    bool b;
+    if (!umcParseOnOff(command + 20, b)) { snprintf(reply, n, "Err - on|off"); return true; }
+    _prefs.manual_add_contacts = b ? 1 : 0;
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  for (const auto& k : kUmcAutoAdd) {
+    char key[40];
+    snprintf(key, sizeof(key), "get autoadd.%s", k.name);
+    if (strcmp(command, key) == 0) { snprintf(reply, n, "> %s", umcOnOff(_prefs.autoadd_config & k.bit)); return true; }
+    snprintf(key, sizeof(key), "set autoadd.%s ", k.name);
+    if (umcStartsWith(command, key)) {
+      bool b;
+      if (!umcParseOnOff(command + strlen(key), b)) { snprintf(reply, n, "Err - on|off"); return true; }
+      _prefs.autoadd_config = b ? (_prefs.autoadd_config | k.bit) : (_prefs.autoadd_config & ~k.bit);
+      savePrefs();
+      snprintf(reply, n, "OK");
+      return true;
+    }
+  }
+  if (strcmp(command, "get autoadd.maxhops") == 0) { snprintf(reply, n, "> %u", _prefs.autoadd_max_hops); return true; }
+  if (umcStartsWith(command, "set autoadd.maxhops ")) {
+    int v = atoi(command + 20);
+    if (v < 0 || v > 64) { snprintf(reply, n, "Err - 0 to 64"); return true; }
+    _prefs.autoadd_max_hops = v;
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  const char* telem_keys[3] = {"base", "loc", "env"};
+  uint8_t* telem_vals[3] = {&_prefs.telemetry_mode_base, &_prefs.telemetry_mode_loc, &_prefs.telemetry_mode_env};
+  for (int t = 0; t < 3; t++) {
+    char key[32];
+    snprintf(key, sizeof(key), "get telemetry.%s", telem_keys[t]);
+    if (strcmp(command, key) == 0) { snprintf(reply, n, "> %s", umcTelemLabel(*telem_vals[t])); return true; }
+    snprintf(key, sizeof(key), "set telemetry.%s ", telem_keys[t]);
+    if (umcStartsWith(command, key)) {
+      uint8_t v;
+      if (!umcParseTelem(command + strlen(key), v)) { snprintf(reply, n, "Err - deny|contacts|all"); return true; }
+      *telem_vals[t] = v;
+      savePrefs();
+      snprintf(reply, n, "OK");
+      return true;
+    }
+  }
+  if (strcmp(command, "get contacts.count") == 0) {
+    int channels = 0;
+    for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+      ChannelDetails ch;
+      if (getChannel(i, ch) && ch.name[0]) channels++;
+    }
+    snprintf(reply, n, "> {\"contacts\":%d,\"max_contacts\":%d,\"channels\":%d,\"max_channels\":%d,\"queued\":%d}",
+             getNumContacts(), MAX_CONTACTS, channels, MAX_GROUP_CHANNELS, offline_queue_len);
+    return true;
+  }
+
+  // ---------------------------------------------------------------- app links
+  if (strcmp(command, "get ble.pin") == 0) { snprintf(reply, n, "> %lu", (unsigned long)_prefs.ble_pin); return true; }
+  if (strcmp(command, "get ble.activepin") == 0) { snprintf(reply, n, "> %06lu", (unsigned long)_active_ble_pin); return true; }
+  if (umcStartsWith(command, "set ble.pin ")) {
+    unsigned long pin = strtoul(command + 12, NULL, 10);
+    if (pin != 0 && (pin < 100000 || pin > 999999)) { snprintf(reply, n, "Err - 6 digits, or 0 for a random PIN each boot"); return true; }
+    _prefs.ble_pin = pin;
+    savePrefs();
+    snprintf(reply, n, "OK - applies after reboot");
+    return true;
+  }
+  if (strcmp(command, "get app.links") == 0) {
+    UmcAppServer* tcp = umc.appServer();
+    snprintf(reply, n,
+             "> {\"ble\":{\"present\":%s,\"on\":%s,\"connected\":%s},\"tcp\":{\"on\":%s,\"port\":%u,\"clients\":%d},"
+             "\"web\":%s,\"queued\":%d}",
+             _umc_ble ? "true" : "false", _umc_ble && _umc_ble->isEnabled() ? "true" : "false",
+             _umc_ble && _umc_ble->isConnected() ? "true" : "false", umc.prefs().app_tcp ? "true" : "false",
+             umc.prefs().app_tcp_port, tcp ? tcp->connectedCount() : 0, umc_webapp.polledRecently() ? "true" : "false",
+             offline_queue_len);
+    return true;
+  }
+
+  // ---------------------------------------------------------------- GPS
+#if ENV_INCLUDE_GPS == 1
+  if (strcmp(command, "gps") == 0) { snprintf(reply, n, "> %s", umcOnOff(_prefs.gps_enabled)); return true; }
+  if (strcmp(command, "gps on") == 0 || strcmp(command, "gps off") == 0) {
+    _prefs.gps_enabled = command[5] == 'n';
+    applyGpsPrefs();
+    savePrefs();
+    snprintf(reply, n, "OK");
+    return true;
+  }
+  if (strcmp(command, "gps advert") == 0) { snprintf(reply, n, "> %s", _prefs.advert_loc_policy ? "share" : "none"); return true; }
+  if (umcStartsWith(command, "gps advert ")) {
+    char buf[40];
+    snprintf(buf, sizeof(buf), "set advert.loc %s", command + 11);
+    return umcCli(buf, reply, n);
+  }
+#endif
+
+  // ---------------------------------------------------------------- WiFi extras
+  if (strcmp(command, "get wifi.ssid") == 0) { snprintf(reply, n, "> %s", network.getWifiSSID()[0] ? network.getWifiSSID() : "-"); return true; }
+  if (strcmp(command, "get wifi.status") == 0) { network.formatWifiStatusReply(reply, n); return true; }
+  if (strcmp(command, "get wifi.powersaving") == 0) { snprintf(reply, n, "> %s", network.getWifiPowerSave()); return true; }
+  if (umcStartsWith(command, "set wifi.powersaving ")) {
+    snprintf(reply, n, network.setWifiPowerSave(command + 21) ? "OK" : "Err - use none|min|max");
+    return true;
+  }
+  if (strcmp(command, "wifi reconnect") == 0) { network.forceReconnect(); snprintf(reply, n, "OK - wifi reconnecting"); return true; }
+
+  // ---------------------------------------------------------------- clock, stats, system
+  if (strcmp(command, "clock") == 0) {
+    DateTime dt = DateTime(getRTCClock()->getCurrentTime());
+    snprintf(reply, n, "%02d:%02d - %d/%d/%d UTC", dt.hour(), dt.minute(), dt.day(), dt.month(), dt.year());
+    return true;
+  }
+  if (umcStartsWith(command, "time ")) {
+    uint32_t secs = strtoul(command + 5, NULL, 10);
+    if (secs <= getRTCClock()->getCurrentTime()) { snprintf(reply, n, "(ERR: clock cannot go backwards)"); return true; }
+    getRTCClock()->setCurrentTime(secs);
+    DateTime dt = DateTime(secs);
+    snprintf(reply, n, "OK - clock set: %02d:%02d - %d/%d/%d UTC", dt.hour(), dt.minute(), dt.day(), dt.month(), dt.year());
+    return true;
+  }
+  if (strcmp(command, "stats-core") == 0) {
+    StatsFormatHelper::formatCoreStats(reply, n, board, *_ms, _err_flags, _mgr);
+    return true;
+  }
+  if (strcmp(command, "stats-radio") == 0) {
+    StatsFormatHelper::formatRadioStats(reply, n, _radio, radio_driver, getTotalAirTime(), getReceiveAirTime());
+    return true;
+  }
+  if (strcmp(command, "stats-packets") == 0) {
+    StatsFormatHelper::formatPacketStats(reply, n, radio_driver, getNumSentFlood(), getNumSentDirect(), getNumRecvFlood(),
+                                         getNumRecvDirect());
+    return true;
+  }
+  if (strcmp(command, "memory") == 0) { StatsFormatHelper::formatMemoryStats(reply, n); return true; }
+  if (strcmp(command, "reboot") == 0) {
+    umc.scheduleReboot(1000);
+    snprintf(reply, n, "OK - rebooting");
+    return true;
+  }
+  return false;
+}
+#endif

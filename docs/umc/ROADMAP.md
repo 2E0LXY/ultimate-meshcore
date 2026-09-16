@@ -7,6 +7,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 ## Done in 0.1.0
 
 - ✅ Routes & trace: route table from adverts, pinned routes, per-hop SNR trace
+- ✅ Ultimate MeshCore Client: BLE (NimBLE) + USB + TCP 5000 + browser messenger (contacts, channels, remote admin, trace, telemetry), loop watchdog
 
 - ✅ Web UI for every repeater setting, setup wizard, open setup hotspot, rescue hotspot, captive portal
 - ✅ 3 WiFi networks, static IP, hostname/mDNS, scan, gateway watchdog
@@ -22,7 +23,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 | # | Item | Source | Status |
 |---|---|---|---|
 | 1.1 | Heltec V4 OLED / TFT / R8 repeater targets | upstream variants | ✅ builds (hardware test pending) |
-| 1.2 | **Client (companion) firmware** with USB + BLE + WiFi TCP (5000) + WebSocket (8765) at the same time, web UI, internet OTA | meshcomod, upstream companion, UMC | 🔜 |
+| 1.2 | **Ultimate MeshCore Client** (companion) with USB + BLE + WiFi TCP (5000) + browser messenger at the same time, web UI, internet OTA | meshcomod, upstream companion, UMC | ✅ (WebSocket 8765 📋) |
 | 1.3 | Room server firmware with the UMC web UI | upstream | 📋 |
 | 1.4 | LilyGo T-TWR + SX1262 variant (after hardware identification) | new | 📋 |
 | 1.5 | Dual-boot MeshCore/Meshtastic package (separate download) | mesh-loader | 💡 |

@@ -15,7 +15,7 @@ class WiFiClient;
 class UmcAppServer {
 public:
   static constexpr int kMaxClients = 3;
-  static constexpr size_t kMaxFrame = 172;
+  static constexpr size_t kMaxFrame = 176;  // MAX_FRAME_SIZE
   static constexpr int kQueueLen = 6;
 
   explicit UmcAppServer(UmcService& umc);
@@ -34,6 +34,8 @@ public:
   void setAppVersion(int client, uint8_t v) { if (client >= 0 && client < kMaxClients) _clients[client].app_ver = v; }
   int connectedCount() const;
   uint16_t port() const { return _port; }
+  // 0 = keep idle app sessions open (companion firmware: apps may sit silent for hours)
+  void setIdleDropMs(unsigned long ms) { _idle_drop_ms = ms; }
 
 private:
   struct Client {
@@ -59,4 +61,5 @@ private:
   WiFiServer* _server;
   uint16_t _port;
   Client _clients[kMaxClients];
+  unsigned long _idle_drop_ms;
 };

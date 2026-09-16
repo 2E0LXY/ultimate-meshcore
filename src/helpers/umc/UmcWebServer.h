@@ -46,6 +46,8 @@ private:
   static esp_err_t handleScan(httpd_req_t* req);
   static esp_err_t handleRoutes(httpd_req_t* req);
   static esp_err_t handleTraffic(httpd_req_t* req);
+  static esp_err_t handleAppPoll(httpd_req_t* req);
+  static esp_err_t handleAppPost(httpd_req_t* req);
   static esp_err_t handleOta(httpd_req_t* req);
   static esp_err_t handleCaptive(httpd_req_t* req);
   static esp_err_t handleNotFound(httpd_req_t* req, httpd_err_code_t err);

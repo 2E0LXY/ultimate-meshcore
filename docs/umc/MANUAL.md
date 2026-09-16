@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.0** · Covers the Heltec V3 / V3.2 repeater firmware. Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.0** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -26,10 +26,11 @@
 18. [Firmware updates](#18-firmware-updates)
 19. [Backup, restore and factory reset](#19-backup-restore-and-factory-reset)
 20. [Using apps and other tools](#20-using-apps-and-other-tools)
-21. [Security](#21-security)
-22. [Troubleshooting](#22-troubleshooting)
-23. [Command reference A–Z](#23-command-reference-az)
-24. [Glossary A–Z](#24-glossary-az)
+21. [Ultimate MeshCore Client](#21-ultimate-meshcore-client)
+21. [Security](#22-security)
+22. [Troubleshooting](#23-troubleshooting)
+23. [Command reference A–Z](#24-command-reference-az)
+24. [Glossary A–Z](#25-glossary-az)
 
 ---
 
@@ -51,15 +52,15 @@ It builds on upstream MeshCore 1.17.1 and the MeshCore-EastMesh fork, and brings
 | Type | What it does | Status |
 |---|---|---|
 | **Repeater** | Relays mesh packets to extend coverage. Managed over WiFi, USB, or remotely over the mesh. | Available (Heltec V3/V3.2) |
-| **Client (companion)** | Your personal radio, used with the MeshCore phone/desktop apps. | *(coming soon)* |
+| **Ultimate MeshCore Client** (companion) | Your personal radio: the MeshCore apps over Bluetooth, USB and WiFi at the same time, plus a complete messenger in the browser. | Available (Heltec V3/V3.2; V4 builds published) |
 | **Room server** | A shared message board on the mesh. | *(coming soon)* |
 
 ### Supported hardware
 
 | Board | Repeater | Client |
 |---|---|---|
-| Heltec WiFi LoRa 32 V3 / V3.2 | ✅ | *(coming soon)* |
-| Heltec V4 (OLED, TFT, R8) | ✅ (not yet tested on hardware) | *(coming soon)* |
+| Heltec WiFi LoRa 32 V3 / V3.2 | ✅ | ✅ |
+| Heltec V4 (OLED, TFT, R8) | ✅ (not yet tested on hardware) | ✅ (not yet tested on hardware) |
 | LilyGo T-TWR with SX1262 add-on | *(coming soon)* | *(coming soon)* |
 
 ---
@@ -188,7 +189,7 @@ Open `http://<device IP>/` or `http://umc-<name>.local/` from any device on the 
 - Each setting has its own **Save** button, and **Save all changes** saves everything you edited (changed fields are outlined). Replies from the device appear beside each field and as pop-ups.
 - If the device reboots or moves networks, a **Device not reachable** screen explains why, links to its home-network address, and reconnects automatically.
 
-Every web setting is a normal command. You can do the same from the USB serial console, telnet, or remotely over the mesh (see [§23](#23-command-reference-az)).
+Every web setting is a normal command. You can do the same from the USB serial console, telnet, or remotely over the mesh (see [§23](#24-command-reference-az)).
 
 ---
 
@@ -489,7 +490,7 @@ See [§3.1](#31-web-flasher-easiest).
 | **MQTT maps / analysers** | Via the MQTT settings |
 | **Official MeshCore app**, **meshcore-open** over WiFi | Add a TCP / WiFi device with the repeater's IP and port **5000**. See below. |
 | **meshcore_py**, **meshcore-cli**, **Home Assistant (meshcore-ha)** | TCP to the repeater's IP, port 5000 |
-| Direct app connection over Bluetooth | *(coming soon)* |
+| Direct app connection over Bluetooth | Use the **Ultimate MeshCore Client** firmware (section 21) |
 
 ### Connecting an app over WiFi (port 5000)
 
@@ -506,7 +507,98 @@ Notes:
 
 ---
 
-## 21. Security
+## 21. Ultimate MeshCore Client
+
+The **Ultimate MeshCore Client** is the companion (personal radio) version of UMC. It is the standard MeshCore companion firmware, so every MeshCore app works with it, with the UMC web interface, WiFi and updates added on top.
+
+### 21.1 What it does
+
+| Feature | Details |
+|---|---|
+| **All app links at once** | **Bluetooth** (PIN pairing), **USB** serial, **WiFi TCP port 5000** (up to 3 apps) and the **browser**, all at the same time. |
+| **Messenger in the browser** | Channels and direct messages with delivery ticks, round-trip time, hops and SNR, retry, search, unread counts and history saved in the browser. |
+| **Contacts** | List with type, path, advert age and map link. Favourite, remove, reset path, share (zero-hop), export/import `meshcore://` contacts, adverts waiting to be added. |
+| **Repeater and room tools** | Log in, **status**, **telemetry**, **remote admin console** (CLI over the mesh), **trace path** with per-hop SNR, **discover path**. |
+| **Channels** | Public, hashtag (`#name`), private (random secret) and shared-secret channels. Share, remove, export and import the list. |
+| **Settings** | Radio, messaging (extra ACKs, path hash size, location sharing, client repeat), auto-add rules, telemetry permissions, Bluetooth PIN, app connections, WiFi, and everything else in the UMC web UI. |
+| **Updates** | Same internet update, file update, USB web flasher and automatic rollback as the repeater. |
+| **Display** | Message count, Bluetooth PIN, recent adverts, radio, a **WiFi page** (network, IP, `.local` name, hotspot, connected apps), Bluetooth toggle, advert. |
+
+### 21.2 Installing
+
+1. Open the [web flasher](https://2e0lxy.github.io/ultimate-meshcore/), choose your board and **Ultimate MeshCore Client**, and press **Install**.
+2. Choose **Erase** for a brand-new client. Choose **No** to keep an existing client's identity and contacts. Don't install a client over a repeater you want to keep: it is a different identity and role.
+3. The device starts the open **`UMC-Setup-XXXX`** hotspot. Run the setup wizard (section 4) to set the radio preset, name, admin password and WiFi.
+
+### 21.3 Connecting apps
+
+| App link | How |
+|---|---|
+| **Bluetooth** | In the MeshCore app, connect to **MeshCore-<name>** and enter the PIN shown on the display (a new random PIN each boot), or the fixed PIN from **Bluetooth & apps**. |
+| **USB** | Plug in and choose serial / USB in the app, **meshcore-cli** or **meshcore_py**. |
+| **WiFi** | Add a **TCP / WiFi** device with the client's IP address and port **5000**. Works with the MeshCore app, meshcore-open, meshcore_py, meshcore-cli and Home Assistant. |
+| **Browser** | Open `http://umc-<name>.local/` or the IP address and sign in: the **Messages** page opens. |
+
+Every link sees the same contacts, channels and messages. The browser keeps its own copy of received messages, so a phone app collecting its queued messages doesn't hide them from the web page.
+
+### 21.4 Messages
+
+- The left column lists channels and contacts, newest conversation first, with unread counts. The search box filters by name.
+- Type a message and press **Enter** (Shift+Enter adds a new line). The counter shows bytes used. Direct messages allow 160 bytes; channel messages lose a few bytes to your name.
+- Direct message ticks: **⏳** sending · **✓ waiting** sent, awaiting confirmation · **✓✓ 2.3 s** delivered, with round-trip time · **✗** no confirmation. Press **retry** to send again.
+- Channel messages show **✓ sent** (channels have no delivery confirmation).
+- Received messages show the sender (for channels and room servers), hops and SNR.
+- **Log in** in a room server conversation to receive its posts. **Contact…** opens the contact's tools.
+- **Notifications** asks the browser to alert you while the page is open. Most browsers only allow this on HTTPS pages, so it may be refused on a plain local address.
+- History is stored **in this browser** (last 400 messages per conversation). **Clear history** removes it from this browser only.
+
+### 21.5 Contacts
+
+- Filter by type or favourites, and search by name or key.
+- **Open** shows the tools for a contact:
+  - **Message**: opens the conversation.
+  - **Log in…** *(repeaters, rooms, sensors)*: sends the password over the mesh. Blank = guest.
+  - **Status**: battery, uptime, noise floor, RSSI/SNR, packet counts, airtime, duplicates and errors. Repeaters usually need a login first.
+  - **Telemetry**: battery and sensors the node shares with you.
+  - **Trace path**: sends a trace out along the known path and back, showing the SNR each hop heard (1- and 2-byte path hashes).
+  - **Discover path**: floods a request and shows the route out and back. The contact's path is updated.
+  - **Reset path**: forget the stored route. The next message floods and learns a new one.
+  - **Share (zero-hop)**: broadcasts the contact to nodes in direct range.
+  - **Export…**: a `meshcore://` link to give someone.
+  - **Favourite**: favourites are kept when contacts are full, and can be given telemetry access.
+  - **Remove**.
+  - **Remote admin console**: after logging in with the admin password, send any repeater command (`ver`, `get radio`, `neighbors` …). Replies arrive over the mesh.
+- **Add contact…** imports a `meshcore://` link. **Share my contact…** exports your own.
+- With **Manual add only** on (Messaging settings), new adverts appear at the top with an **add** link.
+
+### 21.6 Channels
+
+| Kind | Use it when |
+|---|---|
+| **Hashtag** `#name` | A public topic. Everyone who adds the same name joins (the key is derived from the lower-case name). |
+| **Private** | A group only people you give the secret to can read. Use **Share…** to copy the name and secret. |
+| **Join with a shared secret** | Someone shared a private channel with you (32 hex characters or base64). |
+| **Public** | The default MeshCore public channel (already added on a new device). |
+
+**Export all…** copies the channel list, including the secrets, so keep it private. **Import list…** adds channels from an export, skipping duplicates.
+
+### 21.7 Client settings
+
+| Page | Settings |
+|---|---|
+| **Radio** | Preset / frequency / bandwidth / SF / CR (applied immediately), TX power, RX boosted gain, airtime factor, RX delay. |
+| **Messaging settings** | Extra ACKs, path hash size, location in adverts, client repeat (433.000 / 869.495 / 918.000 MHz only), manual add, auto-add per type, overwrite oldest, auto-add hop limit, telemetry permissions (nobody / favourites / everyone), storage use. |
+| **Bluetooth & apps** | Bluetooth on/off, fixed PIN or random PIN each boot, PIN in use, WiFi app connection (TCP), connected apps. |
+| **Identity & access** | Name, location, public key, web/telnet admin password. |
+| **Network, Live traffic, Console, Firmware, Backup** | As for the repeater (sections 12, 16–19). |
+
+### 21.8 Memory on the Heltec V3
+
+The V3 has no PSRAM, so the client uses the lightweight **NimBLE** Bluetooth stack, which leaves room for WiFi and the web interface. During an **internet firmware update** check or download, Bluetooth pauses for a few seconds to free memory, then comes back on its own. A phone app connected over Bluetooth reconnects afterwards. The V3 client stores up to 350 contacts, 40 channels and 64 messages waiting for an app.
+
+---
+
+## 22. Security
 
 - **Change the admin password** from `password`. The web page and telnet refuse to sign you in until you do.
 - The first-time **setup hotspot is open**. Anyone in range can configure a device that is in setup mode, so finish setup promptly.
@@ -518,7 +610,7 @@ Notes:
 
 ---
 
-## 22. Troubleshooting
+## 23. Troubleshooting
 
 | Problem | Fix |
 |---|---|
@@ -533,17 +625,27 @@ Notes:
 | **Update check says “HTTP 404” / “can't reach update server”** | The device needs internet access. Check `get update.url`. |
 | **ESP-NOW bridge not linking** | Both ends need the same channel and secret, and the channel must match the WiFi channel. |
 | **USB flasher can't see the device** | Use Chrome/Edge, a data cable, install the CP210x driver, and enter boot mode (hold PRG, tap RST). |
+| **Client: the app won't pair over Bluetooth** | Use the PIN on the display (it changes every boot unless a fixed PIN is set). Remove old pairings for the device from the phone's Bluetooth settings and try again. |
+| **Client: messages show the wrong time at others** | The client clock is set by the apps and the web page. Open the web page once, or connect an app, after a power cut. |
+| **Client: “No response over the mesh”** | The node is out of range or needs a login first. Try **Discover path**, or log in, then retry. |
+| **Client: Bluetooth dropped during an update check** | Normal on the V3: Bluetooth pauses while the device talks to the update server, then restarts. |
 
 ---
 
-## 23. Command reference A–Z
+## 24. Command reference A–Z
 
-Replies start with `>` for values, `OK` for success, or `Err`/`Error` for problems. *R* = repeater/room server.
+Replies start with `>` for values, `OK` for success, or `Err`/`Error` for problems. *R* = repeater/room server. *C* = Ultimate MeshCore Client.
 
 | Command | Description |
 |---|---|
 | `advert` | Send a flood advert now |
-| `advert.zerohop` | Send a zero-hop advert now |
+| `advert.zerohop` | Send a zero-hop advert now *(R)* |
+| `advert` / `advert.flood` | Zero-hop / flood advert *(C)* |
+| `get/set advert.loc none\|share` | Share location in adverts *(C)* |
+| `get/set af <0-9>` | Airtime factor *(C)* |
+| `get app.links` | Bluetooth, TCP and browser connections (JSON) *(C)* |
+| `get/set autoadd.chat\|repeater\|room\|sensor\|overwrite on\|off` | Auto-add rules *(C)* |
+| `get/set autoadd.maxhops <0-64>` | Auto-add hop limit *(C)* |
 | `board` | Board name |
 | `clear stats` | Reset statistics |
 | `clkreboot` | Reset clock and reboot |
@@ -561,7 +663,9 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get/set ap.password <pw>\|pin` | Rescue/always-on hotspot password |
 | `get/set ap.rescue <s>` | Seconds offline before the rescue hotspot starts (15–3600) |
 | `get ap.status` | Hotspot state and clients |
-| `get/set ble on\|off`, `ble.idle <min>` | Bluetooth *(coming soon)* |
+| `get/set ble on\|off` | Bluetooth on/off *(C)* |
+| `get ble.activepin` | Bluetooth PIN in use *(C)* |
+| `get/set ble.pin <6 digits\|0>` | Fixed pairing PIN, 0 = random each boot *(C)* |
 | `get/set bridge.channel <1-14>` | ESP-NOW channel |
 | `get/set bridge.delay <ms>` | Bridge delay |
 | `get/set bridge.enabled on\|off` | Bridge on/off |
@@ -569,6 +673,8 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get/set bridge.secret <text>` | ESP-NOW secret |
 | `get bridge.type` | Bridge type in this build |
 | `get build` | UMC version, build target and commit |
+| `get contacts.count` | Contacts, channels and queued messages (JSON) *(C)* |
+| `get/set contacts.manual on\|off` | Manual add only *(C)* |
 | `get/set cad on\|off` | Channel activity detection |
 | `get/set direct.txdelay <0-2>` | Direct retransmit delay factor *(R)* |
 | `get/set display.ip <s>` | Flashing network screen time |
@@ -609,7 +715,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get/set ntp.server1\|2\|3 <host>` | Time servers |
 | `get/set owner.info <text>` | Owner information *(R)* |
 | `password <new>` | Change admin password |
-| `get/set path.hash.mode 0\|1\|2` | Advert ID size *(R)* |
+| `get/set path.hash.mode 0\|1\|2` | Path hash size (repeater adverts / client sends) |
 | `get/set pin <8 digits>` | Device PIN (rescue hotspot password) |
 | `poweroff` / `shutdown` | Power off |
 | `powersaving [on\|off]` | Sleep between packets *(R)* |
@@ -632,14 +738,15 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `region put <name> [parent]` | Create a region |
 | `region remove <name>` | Remove a region (no sub-regions) |
 | `region save` | Save region changes |
-| `get/set repeat on\|off` | Repeat packets *(R)* |
+| `get/set repeat on\|off` | Repeat packets (client: only on allowed frequencies) |
 | `get role` | Firmware role |
-| `get/set rxdelay <0-20>` | RX delay base *(R)* |
+| `get/set rxdelay <0-20>` | RX delay base |
 | `sensor list\|get\|set` | Sensors (if fitted) |
 | `get setup`, `setup start`, `setup done` | Setup mode |
 | `setperm <pubkey> [0-3]` | Access permissions *(R)* |
 | `start ota` | Legacy OTA hotspot |
 | `stats-core`, `stats-radio`, `stats-packets` | Statistics (JSON) |
+| `get/set telemetry.base\|loc\|env deny\|contacts\|all` | Who may request telemetry *(C)* |
 | `get/set telnet on\|off` | Telnet command line |
 | `get/set app.tcp on\|off`, `get app.status` | MeshCore app connection on TCP port 5000 |
 | `tempradio <MHz>,<kHz>,<SF>,<CR>,<min>` | Temporary radio settings |
@@ -667,7 +774,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 
 ---
 
-## 24. Glossary A–Z
+## 25. Glossary A–Z
 
 - **ACK** — acknowledgement that a message arrived.
 - **Admin password** — password for full control of a repeater: web, telnet and remote admin.
@@ -678,7 +785,9 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 - **Bridge** — joins two LoRa areas through another link (ESP-NOW, RS-232, MQTT).
 - **CAD** — channel activity detection: listening for LoRa before transmitting.
 - **Coding rate (CR)** — error-correction overhead (4/5 … 4/8). Nodes with different CRs can still talk.
-- **Companion / client** — a personal radio used with a phone or desktop app.
+- **Companion / client** — a personal radio used with a phone or desktop app. UMC's is the **Ultimate MeshCore Client**.
+- **Hashtag channel** — a channel whose key comes from its `#name`, so anyone typing the same name joins.
+- **NimBLE** — a lightweight Bluetooth stack used by the client to save memory.
 - **Direct routing** — a packet follows a known path instead of flooding.
 - **Duty cycle** — share of time spent transmitting. Legally limited in some bands.
 - **ESP-NOW** — Espressif's direct 2.4 GHz link between ESP32 devices.
@@ -694,7 +803,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 - **Neighbour** — a repeater heard directly, without hops.
 - **Noise floor** — background radio noise level (lower is better, e.g. −105 dBm).
 - **OTA** — over-the-air firmware update.
-- **PIN** — 8-digit device code: rescue hotspot password (and future Bluetooth pairing).
+- **PIN** — 8-digit device code used as the rescue hotspot password. The client's Bluetooth pairing PIN is separate (6 digits).
 - **Preset** — a named set of radio parameters shared by a regional mesh.
 - **Region** — a named area used to scope flood traffic. Names are case-sensitive.
 - **Repeater** — a node that relays packets to extend coverage.

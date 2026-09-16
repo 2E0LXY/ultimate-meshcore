@@ -129,7 +129,7 @@ const api = {
     const run = async () => {
       const list = Array.isArray(cmds) ? cmds : [cmds];
       const out = [];
-      for (let i = 0; i < list.length; i += 40) out.push(...await http("POST", "/api/cli", list.slice(i, i + 40).join("\n")));
+      for (let i = 0; i < list.length; i += 16) out.push(...await http("POST", "/api/cli", list.slice(i, i + 16).join("\n")));
       return out;
     };
     const p = cliQueue.then(run, run);
@@ -170,6 +170,7 @@ function toast(text, kind = "") {
 function has(f) { return !f || (INFO && INFO.features.includes(f)); }
 function roleOk(roles) { return !roles || (INFO && roles.includes(INFO.role)); }
 const RS = ["repeater", "room_server"];
+const CL = ["companion"];
 
 // ================================================================ presets / constants
 const PRESETS = [
@@ -195,20 +196,59 @@ const onoff = {type: "toggle", on: "on", off: "off"};
 const F = (k, label, o = {}) => Object.assign({k, label, type: "text"}, o);
 const SECTIONS = [
   {id: "dash", title: "Dashboard", ico: "◉", special: "dash"},
+  {id: "chat", title: "Messages", ico: "💬", special: "chat", roles: CL},
+  {id: "contacts", title: "Contacts", ico: "👥", special: "contacts", roles: CL},
+  {id: "channels", title: "Channels", ico: "#", special: "channels", roles: CL},
   {id: "radio", title: "Radio", ico: "📡", groups: [
     {title: "LoRa parameters", sub: "All nodes in a mesh must share frequency, bandwidth and spreading factor.", fields: [
       F("radio", "Frequency / BW / SF / CR", {type: "radio", help: "Applies without a reboot on UMC. Coding rate may differ between nodes."}),
       F("tx", "TX power (dBm)", {type: "number", min: 1, max: 22, help: "Radio chip power. Boards with a PA (Heltec V4) add gain on top — stay within your local limit."}),
-      F("dutycycle", "Duty cycle limit (%)", {type: "number", min: 1, max: 100, help: "UK/EU 869.40–869.65 MHz allows 10%.", parse: v => parseFloat(v)}),
+      F("dutycycle", "Duty cycle limit (%)", {type: "number", min: 1, max: 100, help: "UK/EU 869.40–869.65 MHz allows 10%.", parse: v => parseFloat(v), roles: RS}),
+      F("af", "Airtime factor", {type: "number", min: 0, max: 9, step: 0.1, roles: CL, help: "Transmit budget: 1 = wait as long as the last transmission took. 0 = no limit."}),
       F("radio.rxgain", "RX boosted gain", onoff),
-      F("radio.fem.rxgain", "External LNA (FEM)", Object.assign({feature: "fem"}, onoff)),
+      F("radio.fem.rxgain", "External LNA (FEM)", Object.assign({feature: "fem", roles: RS}, onoff)),
     ]},
-    {title: "Interference handling", fields: [
+    {title: "Interference handling", roles: RS, fields: [
       F("agc.reset.interval", "AGC reset interval (s)", {type: "number", min: 0, max: 1020, step: 4, help: "4 cures 'deafness' from nearby strong signals. 0 = off."}),
       F("cad", "Channel activity detect", onoff),
       F("int.thresh", "Interference threshold", {type: "number", min: 0, max: 50}),
     ]},
-  ], actions: [["Temporary radio test…", "tempradio"]]},
+    {title: "Receive timing", roles: CL, fields: [
+      F("rxdelay", "RX delay base (experimental)", {type: "number", min: 0, max: 20, step: 0.5, help: "0 = off. Delays processing of weaker copies of a flood so the best path wins."}),
+    ]},
+  ], actions: [["Temporary radio test…", "tempradio", RS]]},
+  {id: "msgset", title: "Messaging settings", ico: "✉", roles: CL, groups: [
+    {title: "Sending", fields: [
+      F("multi.acks", "Extra ACK transmissions", {type: "select", options: [["0", "Off"], ["1", "On"]], help: "Sends delivery confirmations twice: more reliable on busy meshes."}),
+      F("path.hash.mode", "Path hash size", {type: "select", options: [["0", "1 byte (default)"], ["1", "2 bytes"], ["2", "3 bytes"]], help: "Larger hashes tell repeaters apart on big meshes. Everyone on the path must run firmware that supports it."}),
+      F("advert.loc", "Location in adverts", {type: "select", options: [["none", "Don't share"], ["share", "Share (rounded coordinates below)"]]}),
+      F("repeat", "Client repeat", Object.assign({help: "Lets this client relay packets for others. Only allowed on 433.000, 869.495 and 918.000 MHz."}, onoff)),
+    ]},
+    {title: "New contacts", sub: "Adverts heard over the mesh can be added automatically, or wait on the Contacts page for you to add them.", fields: [
+      F("contacts.manual", "Manual add only", Object.assign({help: "On: only the types switched on below are added automatically."}, onoff)),
+      F("autoadd.chat", "Auto-add chat nodes", onoff), F("autoadd.repeater", "Auto-add repeaters", onoff),
+      F("autoadd.room", "Auto-add room servers", onoff), F("autoadd.sensor", "Auto-add sensors", onoff),
+      F("autoadd.overwrite", "Overwrite oldest when full", Object.assign({help: "Replaces the oldest non-favourite contact when all slots are used."}, onoff)),
+      F("autoadd.maxhops", "Max hops for auto-add", {type: "number", min: 0, max: 64, help: "0 = any distance, 1 = direct neighbours only, N = up to N-1 hops."}),
+    ]},
+    {title: "Telemetry sharing", sub: "Who may request this device's battery, location and sensor readings.", fields: [
+      F("telemetry.base", "Battery & basic", {type: "select", options: [["deny", "Nobody"], ["contacts", "Favourite contacts"], ["all", "Everyone"]]}),
+      F("telemetry.loc", "Location", {type: "select", options: [["deny", "Nobody"], ["contacts", "Favourite contacts"], ["all", "Everyone"]]}),
+      F("telemetry.env", "Environment sensors", {type: "select", options: [["deny", "Nobody"], ["contacts", "Favourite contacts"], ["all", "Everyone"]]}),
+    ]},
+    {title: "Storage", fields: [F("contacts.count", "Contacts, channels & queued messages", {type: "readonly", parse: v => { try { const o = JSON.parse(v); return `${o.contacts}/${o.max_contacts} contacts · ${o.channels}/${o.max_channels} channels · ${o.queued} messages waiting for an app`; } catch { return v; } }})]},
+  ]},
+  {id: "apps", title: "Bluetooth & apps", ico: "📱", roles: CL, groups: [
+    {title: "Bluetooth", sub: "The MeshCore app pairs with the PIN shown on the display, or the fixed PIN below.", fields: [
+      F("ble", "Bluetooth", onoff),
+      F("ble.pin", "Fixed pairing PIN", {type: "number", min: 0, max: 999999, help: "6 digits. 0 = a new random PIN every boot, shown on the display. Applies after a reboot."}),
+      F("ble.activepin", "PIN in use now", {type: "readonly"}),
+    ]},
+    {title: "App connections", sub: "Bluetooth, USB, WiFi (TCP port 5000) and this web page all work at the same time.", fields: [
+      F("app.tcp", "WiFi app connection (TCP)", Object.assign({help: "For the MeshCore app / meshcore-open (TCP), meshcore_py, meshcore-cli and Home Assistant."}, onoff)),
+      F("app.links", "Connected now", {type: "readonly", parse: v => { try { const o = JSON.parse(v); return `Bluetooth: ${o.ble.on ? (o.ble.connected ? "connected" : "on, waiting") : "off"} · TCP apps: ${o.tcp.clients} · messages waiting: ${o.queued}`; } catch { return v; } }}),
+    ]},
+  ], actions: [["Reboot", "reboot"]]},
   {id: "mesh", title: "Mesh & routing", ico: "🔀", roles: RS, groups: [
     {title: "Forwarding", fields: [
       F("repeat", "Repeat packets", onoff),
@@ -240,11 +280,11 @@ const SECTIONS = [
       F("public.key", "Public key", {type: "readonly"}),
       F("role", "Firmware role", {type: "readonly"}),
     ]},
-    {title: "Passwords", sub: "The admin password protects remote admin, this web UI and telnet.", fields: [
-      F("__adminpw", "Admin password", {type: "password", secret: true, set: v => `password ${v}`, min: 8, help: "At least 8 characters.", roles: RS}),
+    {title: "Passwords", sub: "The admin password protects this web UI and telnet (and remote admin over the mesh on repeaters).", fields: [
+      F("__adminpw", "Admin password", {type: "password", secret: true, set: v => `password ${v}`, min: 8, help: "At least 8 characters."}),
       F("guest.password", "Guest password", {type: "text", roles: RS, help: "Blank = guests can log in without a password. Never reuse other passwords."}),
     ]},
-  ], actions: [["Set location from map (rounded)…", "geo"], ["Private key…", "prvkey"], ["Set permissions (ACL)…", "setperm"]]},
+  ], actions: [["Set location from map (rounded)…", "geo"], ["Private key…", "prvkey", RS], ["Set permissions (ACL)…", "setperm", RS]]},
   {id: "regions", title: "Regions", ico: "🗺", special: "regions", roles: RS},
   {id: "net", title: "Network", ico: "📶", special: "net"},
   {id: "mqtt", title: "MQTT", ico: "☁", feature: "mqtt", groups: [
@@ -281,21 +321,21 @@ const SECTIONS = [
   {id: "power", title: "Power & hardware", ico: "🔋", groups: [
     {title: "Power", fields: [
       F("powersaving", "Power saving (sleep between packets)", Object.assign({get: "powersaving", set: v => `powersaving ${v}`, roles: RS, help: "Disables WiFi services while asleep."}, onoff)),
-      F("adc.multiplier", "Battery ADC multiplier", {type: "number", min: 0, max: 10, step: 0.01, help: "0 = board default."}),
+      F("adc.multiplier", "Battery ADC multiplier", {type: "number", min: 0, max: 10, step: 0.01, help: "0 = board default.", roles: RS}),
     ]},
     {title: "GPS", feature: "gps", fields: [
       F("gps", "GPS", Object.assign({get: "gps", set: v => `gps ${v}`, parse: v => v.startsWith("on") ? "on" : "off"}, onoff)),
       F("gps.advert", "Location in adverts", {type: "select", options: ["none", "share", "prefs"], get: "gps advert", set: v => `gps advert ${v}`}),
     ]},
-    {title: "Display", feature: "display", sub: "Cycle: the IP address flashes, then each settings page shows, then live traffic. The button steps through pages.", fields: [
+    {title: "Display", feature: "display", roles: RS, sub: "Cycle: the IP address flashes, then each settings page shows, then live traffic. The button steps through pages.", fields: [
       F("display.mode", "Display mode", {type: "select", options: [["cycle", "Cycle (IP → settings → traffic)"], ["status", "Network status only"], ["off", "Off (button wakes)"]]}),
       F("display.ip", "Flashing IP screen (s)", {type: "number", min: 0, max: 60}),
       F("display.page", "Each settings page (s)", {type: "number", min: 1, max: 60}),
       F("display.traffic", "Live traffic screen (s)", {type: "number", min: 0, max: 600}),
       F("display.timeout", "Blank after (s, 0 = never)", {type: "number", min: 0, max: 3600, help: "Blanking reduces OLED burn-in on long-term installs."}),
     ]},
-    {title: "Hardware", fields: [F("__board", "Board", {type: "readonly", get: "board"}), F("pwrmgt.bootreason", "Boot reason", {type: "readonly"})]},
-  ], actions: [["Set GPS as location", "gps setloc"], ["Sync clock from GPS", "gps sync"]]},
+    {title: "Hardware", fields: [F("__board", "Board", {type: "readonly", get: "board"}), F("pwrmgt.bootreason", "Boot reason", {type: "readonly", roles: RS})]},
+  ], actions: [["Set GPS as location", "gps setloc", RS], ["Sync clock from GPS", "gps sync", RS]]},
   {id: "neigh", title: "Neighbours", ico: "👥", special: "neigh", roles: RS},
   {id: "routes", title: "Routes & trace", ico: "🧭", special: "routes", roles: RS},
   {id: "traffic", title: "Live traffic", ico: "📶", special: "traffic"},
@@ -377,7 +417,8 @@ async function renderSchemaSection(sec, view) {
     }
     html += `</div>`;
   }
-  if (sec.actions) html += `<div class="card"><h2>Actions</h2><div class="row">${sec.actions.map(([l, c]) => `<button class="btn" data-act="${esc(c)}">${esc(l)}</button>`).join("")}</div></div>`;
+  const acts = (sec.actions || []).filter(a => roleOk(a[2]));
+  if (acts.length) html += `<div class="card"><h2>Actions</h2><div class="row">${acts.map(([l, c]) => `<button class="btn" data-act="${esc(c)}">${esc(l)}</button>`).join("")}</div></div>`;
   view.innerHTML = html + `<div class="row"><button class="btn" id="reloadSec">Reload values</button><button class="btn pri" id="saveAll">Save all changes</button></div>`;
 
   const dirty = new Set();
@@ -491,16 +532,18 @@ async function renderDash(view) {
     <div class="card"><h2>Network</h2><div class="grid" id="dNet"></div></div>
     <div class="card"><h2>Radio</h2><div class="grid" id="dRadio"></div></div>
     <div class="card"><h2>Quick actions</h2><div class="row">
-      <button class="btn" data-q="advert">Flood advert</button><button class="btn" data-q="advert.zerohop">Zero-hop advert</button>
+      ${roleOk(CL) ? `<button class="btn pri" data-go="chat">Open messages</button><button class="btn" data-q="advert.flood">Flood advert</button><button class="btn" data-q="advert">Zero-hop advert</button>`
+        : `<button class="btn" data-q="advert">Flood advert</button><button class="btn" data-q="advert.zerohop">Zero-hop advert</button>`}
       <button class="btn" data-q="clocksync">Set clock from this browser</button><button class="btn" data-q="refresh">Refresh</button></div></div>`;
   const stat = (v, l) => `<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`;
   const refresh = async () => {
     const cmds = ["get name", "get update.status", "clock", "stats-core", "stats-radio", "stats-packets", "get radio", "get tx", "get net.status", "memory"];
     if (roleOk(RS)) cmds.push("get repeat", "neighbors");
+    if (roleOk(CL)) cmds.push("get contacts.count", "get app.links");
     if (has("mqtt")) cmds.push("get mqtt.status");
     const r = await api.cli(cmds); const g = i => r[i] || "";
     const core = parseJson(g(3)) || {}, radio = parseJson(g(4)) || {}, pk = parseJson(g(5)) || {}, net = parseJson(g(8)) || {};
-    $("#dName").textContent = val(g(0)); $("#dSub").textContent = `${INFO.board} · ${INFO.role} · Ultimate MeshCore ${INFO.umc}`;
+    $("#dName").textContent = val(g(0)); $("#dSub").textContent = `${INFO.board} · ${INFO.role} · ${isClient() ? "Ultimate MeshCore Client" : "Ultimate MeshCore"} ${INFO.umc}`;
     if (val(g(1)).startsWith("available") && !$("#dUpd")) {
       const d = document.createElement("div"); d.id = "dUpd"; d.className = "warnbox";
       d.innerHTML = `A firmware update is available. <a href="#fw">Open Firmware &amp; maintenance</a> to install it.`;
@@ -509,8 +552,11 @@ async function renderDash(view) {
     }
     const batt = core.battery_mv ? (core.battery_mv / 1000).toFixed(2) + " V" : "—";
     let neigh = "—"; if (roleOk(RS)) { const t = val(g(11)); neigh = t === "-none-" || !t ? "0" : String(t.split("\n").filter(Boolean).length); }
+    const cc = roleOk(CL) ? parseJson(g(10)) || {} : null, links = roleOk(CL) ? parseJson(g(11)) || {} : null;
     $("#dStats").innerHTML = stat(fmtUp(core.uptime_secs), INFO.reset ? "Uptime · last restart: " + INFO.reset : "Uptime") + stat(batt, "Battery") + stat(val(g(2)), "Clock (UTC)") +
-      stat((pk.recv ?? "—") + " / " + (pk.sent ?? "—"), "Packets rx / tx") + stat(neigh, "Neighbours") + stat(core.queue_len ?? "—", "TX queue") +
+      stat((pk.recv ?? "—") + " / " + (pk.sent ?? "—"), "Packets rx / tx") + (cc ? stat(`${cc.contacts ?? "—"} / ${cc.channels ?? "—"}`, "Contacts / channels") +
+        stat(links.ble ? (links.ble.connected ? "connected" : links.ble.on ? "waiting" : "off") : "—", "Bluetooth app") + stat(links.tcp ? links.tcp.clients : "—", "WiFi apps") +
+        stat(cc.queued ?? "—", "Waiting for an app") : stat(neigh, "Neighbours")) + stat(core.queue_len ?? "—", "TX queue") +
       (roleOk(RS) ? stat(val(g(10)), "Repeat") : "") + stat((() => { const m = parseJson(g(9)); return m && m.heap_free ? Math.round(m.heap_free / 1024) + " KB free" : "—"; })(), "Memory");
     const sta = net.sta || {}, ap = net.ap || {};
     $("#dNet").innerHTML = stat(sta.connected ? sta.ssid : "not connected", "WiFi") + stat(sta.ip || "—", "LAN IP") + stat(sta.connected ? sta.rssi + " dBm" : "—", "WiFi signal") +
@@ -522,6 +568,7 @@ async function renderDash(view) {
       stat((radio.tx_air_secs ?? "—") + " s", "TX airtime");
   };
   view.addEventListener("click", async e => {
+    const gto = e.target.closest("[data-go]")?.dataset.go; if (gto) return go(gto);
     const q = e.target.closest("[data-q]")?.dataset.q; if (!q) return;
     try {
       if (q === "refresh") return refresh();
@@ -958,6 +1005,660 @@ async function renderBackup(view) {
   };
 }
 
+// ================================================================ Ultimate MeshCore Client (companion role)
+// The browser speaks the MeshCore companion protocol - the same frames the phone apps use -
+// through /api/app, so every app feature works here without duplicating it in firmware.
+const isClient = () => !!INFO && INFO.role === "companion";
+const hex = u8 => Array.from(u8, b => b.toString(16).padStart(2, "0")).join("");
+const unhex = h => new Uint8Array((String(h).match(/[0-9a-f]{2}/gi) || []).map(x => parseInt(x, 16)));
+const u8 = (...parts) => {
+  const arr = parts.map(p => typeof p === "number" ? [p & 255] : p instanceof Uint8Array ? Array.from(p) : Array.isArray(p) ? p : Array.from(new TextEncoder().encode(String(p))));
+  return new Uint8Array(arr.flat());
+};
+const le32 = n => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
+const fixed = (s, n) => { const b = new TextEncoder().encode(s || ""); const o = new Uint8Array(n); o.set(b.subarray(0, n - 1)); return o; };
+const bytesLen = s => new TextEncoder().encode(s).length;
+const nowSecs = () => Math.floor(Date.now() / 1000);
+class Rd {
+  constructor(b, o = 0) { this.b = b; this.v = new DataView(b.buffer, b.byteOffset, b.byteLength); this.o = o; }
+  get left() { return this.b.length - this.o; }
+  u8() { return this.b[this.o++]; }
+  i8() { return this.v.getInt8(this.o++); }
+  u16() { const x = this.v.getUint16(this.o, true); this.o += 2; return x; }
+  i16() { const x = this.v.getInt16(this.o, true); this.o += 2; return x; }
+  u32() { const x = this.v.getUint32(this.o, true); this.o += 4; return x; }
+  i32() { const x = this.v.getInt32(this.o, true); this.o += 4; return x; }
+  bytes(n) { const x = this.b.subarray(this.o, this.o + n); this.o += n; return x; }
+  str(n) { return new TextDecoder().decode(this.bytes(n)).replace(/\0[\s\S]*$/, ""); }
+  rest() { return this.bytes(this.left); }
+  text() { return new TextDecoder().decode(this.rest()).replace(/\0[\s\S]*$/, ""); }
+}
+// SHA-256 (hashtag channel keys). crypto.subtle is unavailable on plain-http device pages.
+function sha256(data) {
+  const K = [], H = [];
+  let n = 2, c = 0;
+  const frac = x => (x - Math.floor(x)) * 4294967296 | 0;
+  while (c < 64) { let p = true; for (let f = 2; f * f <= n; f++) if (n % f === 0) { p = false; break; } if (p) { if (c < 8) H[c] = frac(Math.pow(n, 1 / 2)); K[c++] = frac(Math.pow(n, 1 / 3)); } n++; }
+  const l = data.length, words = new Uint8Array(((l + 9 + 63) >> 6) << 6);
+  words.set(data); words[l] = 0x80;
+  const dv = new DataView(words.buffer); dv.setUint32(words.length - 4, l * 8);
+  const w = new Int32Array(64);
+  for (let i = 0; i < words.length; i += 64) {
+    for (let t = 0; t < 16; t++) w[t] = dv.getInt32(i + t * 4);
+    for (let t = 16; t < 64; t++) {
+      const a = w[t - 15], b = w[t - 2];
+      w[t] = (((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10)) + w[t - 7] + (((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3)) + w[t - 16] | 0;
+    }
+    let [A, B, C, D, E, F, G, Hh] = H;
+    for (let t = 0; t < 64; t++) {
+      const t1 = Hh + (((E >>> 6) | (E << 26)) ^ ((E >>> 11) | (E << 21)) ^ ((E >>> 25) | (E << 7))) + ((E & F) ^ (~E & G)) + K[t] + w[t] | 0;
+      const t2 = (((A >>> 2) | (A << 30)) ^ ((A >>> 13) | (A << 19)) ^ ((A >>> 22) | (A << 10))) + ((A & B) ^ (A & C) ^ (B & C)) | 0;
+      Hh = G; G = F; F = E; E = D + t1 | 0; D = C; C = B; B = A; A = t1 + t2 | 0;
+    }
+    [A, B, C, D, E, F, G, Hh].forEach((x, k) => { H[k] = H[k] + x | 0; });
+  }
+  const out = new Uint8Array(32), odv = new DataView(out.buffer);
+  H.forEach((x, k) => odv.setInt32(k * 4, x));
+  return out;
+}
+const b64ToU8 = s => { try { return Uint8Array.from(atob(s.trim()), c => c.charCodeAt(0)); } catch { return null; } };
+const u8ToB64 = b => btoa(String.fromCharCode(...b));
+
+const CODE = {OK: 0, ERR: 1, CONTACTS_START: 2, CONTACT: 3, END_CONTACTS: 4, SELF_INFO: 5, SENT: 6, DM_OLD: 7, CH_OLD: 8, TIME: 9,
+  EXPORT: 11, BATT: 12, DM: 16, CH: 17, CHANNEL: 18, STATS: 24, ADVERT: 0x80, PATH_UPDATED: 0x81, ACK: 0x82, LOGIN_OK: 0x85, LOGIN_FAIL: 0x86,
+  STATUS: 0x87, TRACE: 0x89, NEW_ADVERT: 0x8A, TELEMETRY: 0x8B, BINARY: 0x8C, DISCOVERY: 0x8D, DELETED: 0x8F, FULL: 0x90};
+const ERRS = {1: "not supported", 2: "not found", 3: "busy or full - try again", 4: "busy", 5: "storage error", 6: "invalid"};
+const TYPES = {0: "unknown", 1: "chat", 2: "repeater", 3: "room", 4: "sensor"};
+const TYPE_ICO = {1: "💬", 2: "📡", 3: "🏠", 4: "🌡"};
+
+const MC = {
+  seq: 0, boot: null, running: false, fastUntil: 0, listeners: new Set(), queue: Promise.resolve(),
+  contacts: new Map(), channels: [], self: null, pending: new Map(), sent: new Map(), store: null, storeKey: "", lastPoll: 0,
+  on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+  start() {
+    if (this.running || !isClient()) return;
+    this.running = true;
+    this.loadStore();
+    this.pollLoop();
+    this.refreshAll().catch(err => toast("Client: " + err.message, "bad"));
+  },
+  wakeFn: null,
+  kick() { this.fastUntil = Math.max(this.fastUntil, Date.now() + 8000); if (this.wakeFn) this.wakeFn(); },
+  sleep(ms) { return new Promise(res => { const t = setTimeout(() => { this.wakeFn = null; res(); }, ms); this.wakeFn = () => { clearTimeout(t); this.wakeFn = null; res(); }; }); },
+  async pollLoop() {
+    while (this.running) {
+      let more = false;
+      try {
+        const r = await http("GET", "/api/app?since=" + this.seq);
+        if (this.boot !== null && r.boot !== this.boot) { this.seq = 0; this.boot = r.boot; toast("Device restarted - reloading contacts"); setTimeout(() => this.refreshAll().catch(() => {}), 2500); continue; }
+        this.boot = r.boot;
+        if (r.first > this.seq + 1 && this.seq) console.warn("app frames skipped", this.seq, r.first);
+        for (const f of r.frames || []) this.dispatch(unhex(f));
+        this.seq = r.seq; more = r.more; this.lastPoll = Date.now();
+      } catch { await new Promise(res => setTimeout(res, 3000)); }
+      await this.sleep(more ? 20 : Date.now() < this.fastUntil ? 350 : 1800);
+    }
+  },
+  dispatch(f) {
+    try { this.handle(f); } catch (e) { console.error(e); }
+    for (const fn of [...this.listeners]) { try { fn(f); } catch (e) { console.error(e); } }
+  },
+  // One request at a time; resolves with the first reply whose code is expected.
+  request(frame, codes, timeout = 10000) {
+    const run = () => new Promise((resolve, reject) => {
+      let off = null;
+      const t = setTimeout(() => { off && off(); reject(new Error("No reply from the device")); }, timeout);
+      off = this.on(f => {
+        if (f[0] === CODE.ERR) { clearTimeout(t); off(); reject(new Error(ERRS[f[1]] || "error " + f[1])); }
+        else if (codes.includes(f[0])) { clearTimeout(t); off(); resolve(f); }
+      });
+      http("POST", "/api/app", hex(frame)).then(() => setTimeout(() => this.kick(), 60), err => { clearTimeout(t); off(); reject(err); });
+    });
+    const p = this.queue.then(run, run);
+    this.queue = p.catch(() => {});
+    return p;
+  },
+  async listContacts() {
+    const run = () => new Promise((resolve, reject) => {
+      const list = [];
+      let off = null;
+      let t = setTimeout(() => { off(); reject(new Error("Contact list timed out")); }, 20000);
+      off = this.on(f => {
+        if (f[0] === CODE.CONTACT) { list.push(this.parseContact(f)); }
+        else if (f[0] === CODE.END_CONTACTS) { clearTimeout(t); off(); resolve(list); }
+        else if (f[0] === CODE.ERR) { clearTimeout(t); off(); reject(new Error(ERRS[f[1]] || "error")); }
+      });
+      this.fastUntil = Date.now() + 20000;
+      http("POST", "/api/app", hex(u8(4))).then(() => setTimeout(() => this.kick(), 60), err => { clearTimeout(t); off(); reject(err); });
+    });
+    const p = this.queue.then(run, run);
+    this.queue = p.catch(() => {});
+    const list = await p;
+    this.contacts = new Map(list.map(c => [c.key, c]));
+    return list;
+  },
+  parseContact(f) {
+    const r = new Rd(f, 1);
+    const raw = f.slice(1);
+    const c = {raw, key: hex(r.bytes(32)), type: r.u8(), flags: r.u8(), pathLen: r.u8()};
+    c.path = r.bytes(64).slice();
+    c.name = r.str(32);
+    c.lastAdvert = r.u32();
+    if (r.left >= 12) { c.lat = r.i32() / 1e6; c.lon = r.i32() / 1e6; c.lastmod = r.u32(); }
+    c.prefix = c.key.slice(0, 12);
+    c.hops = c.pathLen === 0xFF ? -1 : c.pathLen & 63;
+    c.hashSize = c.pathLen === 0xFF ? 1 : (c.pathLen >> 6) + 1;
+    c.fav = !!(c.flags & 1);
+    return c;
+  },
+  // Several frames in one POST (the device inbox holds 8); replies arrive in order.
+  requestBatch(frames, codes, timeout = 10000) {
+    const run = () => new Promise((resolve, reject) => {
+      const replies = [];
+      let off = null;
+      const t = setTimeout(() => { off(); reject(new Error("No reply from the device")); }, timeout);
+      off = this.on(f => {
+        if (f[0] === CODE.ERR || codes.includes(f[0])) { replies.push(f); if (replies.length === frames.length) { clearTimeout(t); off(); resolve(replies); } }
+      });
+      http("POST", "/api/app", frames.map(hex).join("\n")).then(() => setTimeout(() => this.kick(), 60), err => { clearTimeout(t); off(); reject(err); });
+    });
+    const p = this.queue.then(run, run);
+    this.queue = p.catch(() => {});
+    return p;
+  },
+  async listChannels() {
+    const out = [];
+    for (let i = 0; i < 40; i += 8) {
+      const replies = await this.requestBatch([0, 1, 2, 3, 4, 5, 6, 7].map(k => u8(31, i + k)), [CODE.CHANNEL]);
+      let end = false;
+      for (const f of replies) {
+        if (f[0] !== CODE.CHANNEL) { end = true; continue; }
+        const r = new Rd(f, 1); const idx = r.u8(), name = r.str(32), secret = r.bytes(16).slice();
+        if (name) out.push({idx, name, secret});
+      }
+      if (end) break;
+    }
+    this.channels = out;
+    return out;
+  },
+  async refreshAll() {
+    const self = await this.request(u8(1, 0, 0, 0, 0, 0, 0, 0, "UMC web"), [CODE.SELF_INFO]);
+    const r = new Rd(self, 1);
+    this.self = {type: r.u8(), tx: r.u8(), maxTx: r.u8(), key: hex(r.bytes(32)), lat: r.i32() / 1e6, lon: r.i32() / 1e6};
+    r.o += 4; r.u32(); r.u32(); r.u8(); r.u8();
+    this.self.name = r.text();
+    // Like the phone apps: keep the device clock right (message timestamps, repeater logins).
+    try {
+      const t = await this.request(u8(5), [CODE.TIME]);
+      const dev = new DataView(t.buffer, t.byteOffset).getUint32(1, true);
+      if (dev < nowSecs() - 30) await this.request(u8(6, le32(nowSecs())), [CODE.OK]);
+    } catch {}
+    await this.listContacts();
+    await this.listChannels();
+    this.emitChange();
+  },
+  changeFns: new Set(),
+  onChange(fn) { this.changeFns.add(fn); return () => this.changeFns.delete(fn); },
+  emitChange() { for (const fn of [...this.changeFns]) { try { fn(); } catch (e) { console.error(e); } } },
+
+  // ---- message history, kept in this browser per device identity ----
+  loadStore() {
+    const mac = INFO && INFO.net && INFO.net.sta && INFO.net.sta.mac;
+    const key = "umc_chat_" + String(mac || (INFO && INFO.name) || "device").replace(/[^0-9a-z]/gi, "");
+    if (this.storeKey === key && this.store) return;
+    let s = null; try { s = JSON.parse(localStorage.getItem(key) || "null"); } catch {}
+    this.store = s && s.conv ? s : {conv: {}, unread: {}, last: {}};
+    this.storeKey = key;
+  },
+  saveStore() { try { localStorage.setItem(this.storeKey, JSON.stringify(this.store)); } catch (e) { console.warn("history not saved", e); } },
+  addMsg(conv, m, silent) {
+    const list = this.store.conv[conv] || (this.store.conv[conv] = []);
+    if (m.dir === "in" && list.some(x => x.dir === "in" && x.ts === m.ts && x.text === m.text)) return null;  // replayed ring
+    m.id = m.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    list.push(m);
+    if (list.length > 400) list.splice(0, list.length - 400);
+    this.store.last[conv] = m.t;
+    if (!silent) {
+      if (m.dir === "in" && !(this.activeConv === conv && document.visibilityState === "visible")) this.store.unread[conv] = (this.store.unread[conv] || 0) + 1;
+      this.saveStore(); this.emitChange();
+    }
+    return m;
+  },
+  contactByPrefix(p) { p = p.toLowerCase(); for (const c of this.contacts.values()) if (c.key.startsWith(p)) return c; return null; },
+
+  handle(f) {
+    const code = f[0];
+    if (code === CODE.DM || code === CODE.DM_OLD) {
+      const r = new Rd(f, 1);
+      let snr = null;
+      if (code === CODE.DM) { snr = r.i8() / 4; r.o += 2; }
+      const prefix = hex(r.bytes(6)), pathLen = r.u8(), txtType = r.u8(), ts = r.u32();
+      let sender = null;
+      if (txtType === 2) sender = hex(r.bytes(4));
+      const text = r.text();
+      const c = this.contactByPrefix(prefix);
+      const conv = "c:" + prefix;
+      const m = {t: Date.now(), ts, dir: "in", text, snr, hops: pathLen === 0xFF ? null : pathLen & 63, kind: txtType === 1 ? "cli" : "msg"};
+      if (sender) { const s = this.contactByPrefix(sender); m.from = s ? s.name : sender; }
+      if (m.kind === "cli") { this.emitCli(prefix, m); this.addMsg(conv, m, true); this.saveStore(); return; }
+      if (this.addMsg(conv, m) && document.visibilityState !== "visible") notifyBrowser((c ? c.name : prefix) + ": " + text);
+    } else if (code === CODE.CH || code === CODE.CH_OLD) {
+      const r = new Rd(f, 1);
+      let snr = null;
+      if (code === CODE.CH) { snr = r.i8() / 4; r.o += 2; }
+      const idx = r.u8(), pathLen = r.u8(); r.u8(); const ts = r.u32();
+      const full = r.text(), cut = full.indexOf(": ");
+      const m = {t: Date.now(), ts, dir: "in", from: cut > 0 ? full.slice(0, cut) : "", text: cut > 0 ? full.slice(cut + 2) : full, snr, hops: pathLen === 0xFF ? null : pathLen & 63};
+      const ch = this.channels.find(x => x.idx === idx);
+      if (this.addMsg("ch:" + idx, m) && document.visibilityState !== "visible") notifyBrowser(`#${ch ? ch.name : idx} ${m.from}: ${m.text}`);
+    } else if (code === CODE.ACK) {
+      const ack = hex(f.subarray(1, 5)), rtt = new DataView(f.buffer, f.byteOffset).getUint32(5, true);
+      const ref = this.sent.get(ack);
+      if (ref) { ref.status = "delivered"; ref.rtt = rtt; this.sent.delete(ack); this.saveStore(); this.emitChange(); }
+    } else if (code === CODE.NEW_ADVERT) {
+      const c = this.parseContact(f);
+      if (!this.contacts.has(c.key)) { this.pending.set(c.key, c); this.emitChange(); }
+      setTimeout(() => this.listContacts().then(() => { for (const k of this.contacts.keys()) this.pending.delete(k); this.emitChange(); }).catch(() => {}), 1500);
+    } else if (code === CODE.PATH_UPDATED || code === CODE.DELETED) {
+      clearTimeout(this._reload); this._reload = setTimeout(() => this.listContacts().then(() => this.emitChange()).catch(() => {}), 1500);
+    } else if (code === CODE.FULL) {
+      toast("Contacts are full - remove some, or enable overwrite in Messaging settings", "bad");
+    }
+  },
+  cliFns: new Set(),
+  emitCli(prefix, m) { for (const fn of [...this.cliFns]) fn(prefix, m); },
+
+  // ---- actions ----
+  async sendText(conv, text, retryOf) {
+    const ts = retryOf ? retryOf.ts : nowSecs();
+    if (conv.startsWith("ch:")) {
+      const idx = +conv.slice(3);
+      const m = retryOf || this.addMsg(conv, {t: Date.now(), ts, dir: "out", text, from: this.self && this.self.name, status: "sending"});
+      try { await this.request(u8(3, 0, idx, le32(ts), text), [CODE.OK]); m.status = "sent"; }
+      catch (e) { m.status = "failed"; m.error = e.message; }
+      this.saveStore(); this.emitChange(); return;
+    }
+    const prefix = conv.slice(2), c = this.contactByPrefix(prefix);
+    const m = retryOf || this.addMsg(conv, {t: Date.now(), ts, dir: "out", text, status: "sending", attempt: 0});
+    if (retryOf) { m.attempt = (m.attempt || 0) + 1; m.status = "sending"; this.emitChange(); }
+    try {
+      const f = await this.request(u8(2, 0, m.attempt || 0, le32(ts), unhex(prefix), text), [CODE.SENT]);
+      const r = new Rd(f, 1); const flood = r.u8(), ack = hex(r.bytes(4)), est = r.u32();
+      m.status = "sent"; m.flood = !!flood; m.ack = ack;
+      this.sent.set(ack, m);
+      setTimeout(() => { if (m.status === "sent") { m.status = "failed"; m.error = "no delivery confirmation"; this.sent.delete(ack); this.saveStore(); this.emitChange(); } }, Math.max(est * 1.5, 6000) + 4000);
+    } catch (e) { m.status = "failed"; m.error = e.message; }
+    if (c) { c.lastMsg = Date.now(); }
+    this.saveStore(); this.emitChange();
+  },
+  waitPush(code, prefix, timeout) {
+    return new Promise((resolve, reject) => {
+      let off;
+      const t = setTimeout(() => { off(); reject(new Error("No response over the mesh (timed out)")); }, timeout);
+      off = this.on(f => {
+        if (f[0] !== code && !(code === CODE.LOGIN_OK && f[0] === CODE.LOGIN_FAIL)) return;
+        const pfx = code === CODE.LOGIN_OK || code === CODE.STATUS || code === CODE.TELEMETRY || code === CODE.DISCOVERY ? hex(f.subarray(2, 8)) : null;
+        if (prefix && pfx && !prefix.startsWith(pfx)) return;
+        clearTimeout(t); off(); resolve(f);
+      });
+    });
+  },
+  async sentThenPush(frame, code, key) {
+    const s = await this.request(frame, [CODE.SENT]);
+    const est = new DataView(s.buffer, s.byteOffset).getUint32(6, true);
+    this.fastUntil = Date.now() + est + 30000;
+    return this.waitPush(code, key, Math.max(est * 2, 10000) + 15000);
+  },
+  async login(c, password) {
+    const f = await this.sentThenPush(u8(26, unhex(c.key), password), CODE.LOGIN_OK, c.key);
+    if (f[0] === CODE.LOGIN_FAIL) throw new Error("Login refused (wrong password?)");
+    return {admin: !!(f[1] & 1), perms: f[1]};
+  },
+  async status(c) {
+    const f = await this.sentThenPush(u8(27, unhex(c.key)), CODE.STATUS, c.key);
+    const r = new Rd(f, 8);
+    const s = {battery_mv: r.u16(), tx_queue: r.u16(), noise_floor: r.i16(), last_rssi: r.i16(), packets_recv: r.u32(), packets_sent: r.u32(),
+      tx_air_secs: r.u32(), uptime_secs: r.u32(), sent_flood: r.u32(), sent_direct: r.u32(), recv_flood: r.u32(), recv_direct: r.u32(), errors: r.u16()};
+    if (r.left >= 2) s.last_snr = r.i16() / 4;
+    if (r.left >= 4) { s.direct_dups = r.u16(); s.flood_dups = r.u16(); }
+    if (r.left >= 4) s.rx_air_secs = r.u32();
+    return s;
+  },
+  async telemetry(c) {
+    const f = c ? await this.sentThenPush(u8(39, 0, 0, 0, unhex(c.key)), CODE.TELEMETRY, c.key) : await this.request(u8(39, 0, 0, 0), [CODE.TELEMETRY]);
+    return decodeLpp(f.subarray(8));
+  },
+  async discoverPath(c) {
+    const f = await this.sentThenPush(u8(52, 0, unhex(c.key)), CODE.DISCOVERY, c.key);
+    const r = new Rd(f, 8);
+    const rd = () => { const l = r.u8(); const n = l & 63, sz = (l >> 6) + 1; return {hops: n, hashes: hex(r.bytes(n * sz)).match(new RegExp(`.{${sz * 2}}`, "g")) || []}; };
+    return {out: rd(), back: rd()};
+  },
+  async trace(c) {
+    if (c.hops < 0) throw new Error("No known path yet - send a message or discover the path first");
+    if (c.hops === 0) throw new Error("Direct neighbour - nothing to trace");
+    if (c.hashSize !== 1 && c.hashSize !== 2) throw new Error("Trace supports 1 or 2 byte path hashes only");
+    const sz = c.hashSize === 2 ? 1 : 0;
+    const out = [...c.path.slice(0, c.hops * c.hashSize)];
+    const hashes = []; for (let i = 0; i < out.length; i += c.hashSize) hashes.push(out.slice(i, i + c.hashSize));
+    const route = hashes.concat(hashes.slice(0, -1).reverse()).flat();
+    const tag = (Math.random() * 4294967295) >>> 0;
+    const s = await this.request(u8(36, le32(tag), le32(0), sz, route), [CODE.SENT]);
+    const est = new DataView(s.buffer, s.byteOffset).getUint32(6, true);
+    this.fastUntil = Date.now() + est + 30000;
+    const f = await new Promise((resolve, reject) => {
+      let off; const t = setTimeout(() => { off(); reject(new Error("Trace timed out (a hop may be out of range)")); }, Math.max(est * 2, 10000) + 10000);
+      off = this.on(x => { if (x[0] === CODE.TRACE && new DataView(x.buffer, x.byteOffset).getUint32(4, true) === tag) { clearTimeout(t); off(); resolve(x); } });
+    });
+    const r = new Rd(f, 2); const pl = r.u8(), flags = r.u8(); r.u32(); r.u32();
+    const hs = 1 << (flags & 3), hb = r.bytes(pl), snrs = [];
+    for (let i = 0; i < pl >> (flags & 3); i++) snrs.push(r.i8() / 4);
+    const final = r.left ? r.i8() / 4 : null;
+    const hops = []; for (let i = 0; i < pl; i += hs) hops.push(hex(hb.subarray(i, i + hs)));
+    return {hops, snrs, final};
+  },
+  async setFavourite(c, fav) {
+    const raw = c.raw.slice(); raw[33] = fav ? (raw[33] | 1) : (raw[33] & ~1);
+    await this.request(u8(9, raw.subarray(0, 147)), [CODE.OK]);
+    c.flags = raw[33]; c.fav = fav; c.raw = raw; this.emitChange();
+  },
+  async exportContact(c) {
+    const f = await this.request(c ? u8(17, unhex(c.key)) : u8(17), [CODE.EXPORT]);
+    return "meshcore://" + hex(f.subarray(1));
+  },
+};
+
+function decodeLpp(b) {
+  const out = [], be = (o, n, signed) => { let v = 0; for (let i = 0; i < n; i++) v = v * 256 + b[o + i]; if (signed && v >= Math.pow(2, n * 8 - 1)) v -= Math.pow(2, n * 8); return v; };
+  const T = {0: ["Digital in", 1, 1, ""], 1: ["Digital out", 1, 1, ""], 2: ["Analog in", 2, 0.01, "", 1], 3: ["Analog out", 2, 0.01, "", 1], 100: ["Generic", 4, 1, ""],
+    101: ["Light", 2, 1, " lux"], 102: ["Presence", 1, 1, ""], 103: ["Temperature", 2, 0.1, " °C", 1], 104: ["Humidity", 1, 0.5, " %"], 115: ["Pressure", 2, 0.1, " hPa"],
+    116: ["Voltage", 2, 0.01, " V"], 117: ["Current", 2, 0.001, " A"], 118: ["Frequency", 4, 1, " Hz"], 120: ["Percentage", 1, 1, " %"], 121: ["Altitude", 2, 1, " m", 1],
+    125: ["Concentration", 2, 1, " ppm"], 128: ["Power", 2, 1, " W"], 130: ["Distance", 4, 0.001, " m"], 131: ["Energy", 4, 0.001, " kWh"], 132: ["Direction", 2, 1, "°"],
+    133: ["Time", 4, 1, ""], 142: ["Switch", 1, 1, ""]};
+  let o = 0;
+  while (o + 2 <= b.length) {
+    const ch = b[o], type = b[o + 1]; o += 2;
+    if (T[type]) { const [name, n, mult, unit, signed] = T[type]; if (o + n > b.length) break; const v = be(o, n, signed) * mult; o += n;
+      out.push({ch, name, value: type === 133 ? new Date(v * 1000).toLocaleString() : (Math.round(v * 1000) / 1000) + unit}); }
+    else if (type === 136) { if (o + 9 > b.length) break; out.push({ch, name: "GPS", value: `${(be(o, 3, 1) / 1e4).toFixed(4)}, ${(be(o + 3, 3, 1) / 1e4).toFixed(4)} · ${(be(o + 6, 3, 1) / 100).toFixed(1)} m`}); o += 9; }
+    else if (type === 113 || type === 134) { if (o + 6 > b.length) break; const m = type === 113 ? 0.001 : 0.01; out.push({ch, name: type === 113 ? "Accelerometer" : "Gyro", value: [0, 2, 4].map(i => (be(o + i, 2, 1) * m).toFixed(2)).join(", ")}); o += 6; }
+    else if (type === 135) { if (o + 3 > b.length) break; out.push({ch, name: "Colour", value: "#" + hex(b.subarray(o, o + 3))}); o += 3; }
+    else break;
+  }
+  return out;
+}
+function notifyBrowser(text) {
+  try { if ("Notification" in window && Notification.permission === "granted") new Notification(INFO ? INFO.name : "MeshCore", {body: text.slice(0, 140)}); } catch {}
+}
+const ago = secs => { secs = Math.max(0, secs); return secs < 90 ? Math.round(secs) + " s" : secs < 5400 ? Math.round(secs / 60) + " min" : secs < 129600 ? Math.round(secs / 3600) + " h" : Math.round(secs / 86400) + " days"; };
+const hopsLabel = c => c.hops < 0 ? "flood (no path)" : c.hops === 0 ? "direct" : `${c.hops} hop${c.hops > 1 ? "s" : ""}`;
+const convName = conv => {
+  if (conv.startsWith("ch:")) { const ch = MC.channels.find(x => x.idx === +conv.slice(3)); return ch ? ch.name : "Channel " + conv.slice(3); }
+  const c = MC.contactByPrefix(conv.slice(2)); return c ? c.name : conv.slice(2);
+};
+
+// ---------------------------------------------------------------- Messages page
+async function renderChat(view) {
+  view.innerHTML = `<style>
+    .chat{display:grid;grid-template-columns:280px 1fr;gap:12px;height:calc(100vh - 120px);min-height:420px}
+    .chat .side,.chat .conv{background:var(--card);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;min-height:0}
+    .chat .side input{margin:10px;width:auto;max-width:none}
+    .chat .items{overflow:auto;flex:1}
+    .chat .item{display:grid;grid-template-columns:28px 1fr auto;gap:2px 8px;padding:9px 12px;border-top:1px solid var(--line);cursor:pointer}
+    .chat .item:hover{background:var(--chip)}.chat .item.on{background:var(--chip);box-shadow:inset 3px 0 var(--acc)}
+    .chat .item b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chat .item .pv{grid-column:2/4;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .chat .badge{background:var(--acc);color:var(--acc-ink);border-radius:99px;font-size:11px;padding:0 7px;align-self:center}
+    .chat .hd{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .chat .hd h2{margin:0;font-size:15px;flex:1}
+    .chat .msgs{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+    .bub{max-width:78%;padding:7px 11px;border-radius:14px;background:var(--chip);align-self:flex-start;word-wrap:break-word;white-space:pre-wrap}
+    .bub.out{align-self:flex-end;background:var(--acc);color:var(--acc-ink)}
+    .bub .meta{display:block;font-size:11px;opacity:.72;margin-top:2px}.bub .who{display:block;font-size:12px;font-weight:600;opacity:.85}
+    .bub.failed{outline:2px solid var(--bad)}
+    .chat .compose{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);align-items:flex-end}
+    .chat .compose textarea{min-height:40px;max-height:140px;max-width:none;flex:1}
+    @media (max-width:820px){.chat{grid-template-columns:1fr;height:auto}.chat.inconv .side{display:none}.chat:not(.inconv) .conv{display:none}.chat .msgs{min-height:50vh}}
+    </style>
+    <div class="chat" id="chat"><div class="side"><input type="text" id="cSearch" placeholder="Search chats and contacts"><div class="items" id="cItems"></div>
+      <div class="row" style="padding:8px 10px;border-top:1px solid var(--line)"><button class="btn sm" id="cAdvert">Send advert</button><button class="btn sm" id="cNotif">Notifications</button></div></div>
+    <div class="conv" id="cConv"><div class="hd"><span class="val">Choose a channel or contact.</span></div></div></div>`;
+  MC.start();
+  let active = MC.activeConv || null, filter = "";
+  const items = () => {
+    const rows = [];
+    for (const ch of MC.channels) rows.push({conv: "ch:" + ch.idx, name: convName("ch:" + ch.idx), ico: "#", sub: "channel"});
+    for (const c of MC.contacts.values()) if (c.type === 1 || c.type === 3 || MC.store.conv["c:" + c.prefix]) rows.push({conv: "c:" + c.prefix, name: c.name, ico: TYPE_ICO[c.type] || "•", sub: TYPES[c.type], fav: c.fav});
+    for (const k of Object.keys(MC.store.conv)) if (!rows.some(r => r.conv === k)) rows.push({conv: k, name: convName(k), ico: "•", sub: "history"});
+    const f = filter.toLowerCase();
+    return rows.filter(r => !f || r.name.toLowerCase().includes(f)).sort((a, b) => (MC.store.last[b.conv] || 0) - (MC.store.last[a.conv] || 0) || (b.fav ? 1 : 0) - (a.fav ? 1 : 0) || a.name.localeCompare(b.name));
+  };
+  const drawList = () => {
+    const list = items();
+    $("#cItems").innerHTML = list.length ? list.map(r => {
+      const msgs = MC.store.conv[r.conv] || [], last = msgs[msgs.length - 1], un = MC.store.unread[r.conv];
+      return `<div class="item ${r.conv === active ? "on" : ""}" data-conv="${esc(r.conv)}"><span>${esc(r.ico)}</span><b>${r.fav ? "★ " : ""}${esc(r.name)}</b>${un ? `<span class="badge">${un}</span>` : `<span class="val">${last ? new Date(last.t).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) : ""}</span>`}
+        <span class="pv">${last ? esc((last.dir === "out" ? "You: " : last.from ? last.from + ": " : "") + last.text) : esc(r.sub)}</span></div>`;
+    }).join("") : `<p class="val" style="padding:12px">${MC.self ? "No channels or contacts yet. Send an advert so others can find you." : "Loading…"}</p>`;
+  };
+  const statusIcon = m => m.status === "sending" ? "⏳" : m.status === "sent" ? (m.ack ? "✓ waiting" : "✓ sent") : m.status === "delivered" ? `✓✓ ${m.rtt ? (m.rtt / 1000).toFixed(1) + " s" : ""}` : m.status === "failed" ? "✗ " + esc(m.error || "failed") : "";
+  const drawConv = keepScroll => {
+    if (!active) return;
+    const box = $("#cConv"), c = active.startsWith("c:") ? MC.contactByPrefix(active.slice(2)) : null, ch = active.startsWith("ch:") ? MC.channels.find(x => x.idx === +active.slice(3)) : null;
+    const msgs = MC.store.conv[active] || [];
+    const maxBytes = ch ? 160 - bytesLen((MC.self ? MC.self.name : "") + ": ") : 160;
+    if (!$("#cMsgs")) {
+      box.innerHTML = `<div class="hd"><button class="btn sm" id="cBack" style="display:none">←</button><h2>${esc(convName(active))}</h2><span class="val" id="cPath"></span>
+          ${c && (c.type === 3 || c.type === 2) ? `<button class="btn sm" data-a="login">Log in</button>` : ""}${c ? `<button class="btn sm" data-a="contact">Contact…</button>` : ""}<button class="btn sm" data-a="clear">Clear history</button></div>
+        <div class="msgs" id="cMsgs"></div>
+        <div class="compose"><textarea id="cText" placeholder="Message${ch ? " to " + esc(convName(active)) : ""} (Enter to send, Shift+Enter new line)"></textarea><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end"><span class="val" id="cCount"></span><button class="btn pri" id="cSend">Send</button></div></div>`;
+      if (matchMedia("(max-width:820px)").matches) $("#cBack").style.display = "";
+      const ta = $("#cText");
+      const count = () => { const n = bytesLen(ta.value); $("#cCount").textContent = `${n}/${maxBytes}`; $("#cCount").className = "val" + (n > maxBytes ? " msg bad" : ""); };
+      ta.addEventListener("input", count); count();
+      ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#cSend").click(); } });
+      $("#cSend").onclick = () => {
+        const t = ta.value.trim(); if (!t) return;
+        if (bytesLen(t) > maxBytes) return toast(`Too long: ${bytesLen(t)} of ${maxBytes} bytes`, "bad");
+        ta.value = ""; count(); MC.sendText(active, t);
+      };
+      ta.focus();
+    }
+    $("#cPath").textContent = c ? `${TYPES[c.type]} · ${hopsLabel(c)}` : ch ? "channel" : "";
+    const el = $("#cMsgs"), atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    el.innerHTML = msgs.length ? msgs.map(m => `<div class="bub ${m.dir === "out" ? "out" : ""} ${m.status === "failed" ? "failed" : ""}">${m.dir === "in" && m.from ? `<span class="who">${esc(m.from)}</span>` : ""}${m.kind === "cli" ? "⌨ " : ""}${esc(m.text)}
+        <span class="meta">${new Date(m.t).toLocaleString([], {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"})}${m.dir === "in" ? (m.hops != null ? ` · ${m.hops} hop${m.hops === 1 ? "" : "s"}` : " · direct") + (m.snr != null ? ` · SNR ${m.snr}` : "") : " · " + statusIcon(m)}${m.status === "failed" ? ` <a href="#" data-retry="${m.id}">retry</a>` : ""}</span></div>`).join("")
+      : `<p class="val">No messages yet.${ch ? " Channel messages from everyone who shares this channel appear here." : ""}</p>`;
+    if (!keepScroll || atBottom) el.scrollTop = el.scrollHeight;
+  };
+  const open = conv => {
+    active = conv; MC.activeConv = conv; delete MC.store.unread[conv]; MC.saveStore();
+    $("#cConv").innerHTML = ""; $("#chat").classList.add("inconv");
+    drawList(); drawConv();
+  };
+  const offChange = MC.onChange(() => { if (!document.body.contains(view)) return offChange(); drawList(); drawConv(true); });
+  view.addEventListener("input", e => { if (e.target.id === "cSearch") { filter = e.target.value; drawList(); } });
+  view.addEventListener("click", async e => {
+    const it = e.target.closest("[data-conv]"); if (it) return open(it.dataset.conv);
+    const rt = e.target.closest("[data-retry]");
+    if (rt) { e.preventDefault(); const m = (MC.store.conv[active] || []).find(x => x.id === rt.dataset.retry); if (m) MC.sendText(active, m.text, m); return; }
+    const b = e.target.closest("button"); if (!b) return;
+    try {
+      if (b.id === "cBack") { $("#chat").classList.remove("inconv"); active = null; MC.activeConv = null; drawList(); }
+      else if (b.id === "cAdvert") { await MC.request(u8(7, 1), [CODE.OK]); toast("Flood advert sent", "ok"); }
+      else if (b.id === "cNotif") { if (!("Notification" in window)) return toast("This browser has no notifications", "bad"); const p = await Notification.requestPermission(); toast(p === "granted" ? "Notifications on (while this page is open)" : "Notifications blocked - browsers usually only allow them on https pages", p === "granted" ? "ok" : "bad"); }
+      else if (b.dataset.a === "clear") { if (confirm("Clear this conversation's history in this browser?")) { delete MC.store.conv[active]; MC.saveStore(); $("#cMsgs").innerHTML = ""; drawConv(); drawList(); } }
+      else if (b.dataset.a === "login") { const c = MC.contactByPrefix(active.slice(2)); const pw = prompt(`Password for ${c.name} (blank for guest):`, ""); if (pw === null) return; toast("Logging in over the mesh…"); const r = await MC.login(c, pw); toast(`Logged in to ${c.name}${r.admin ? " as admin" : ""}`, "ok"); }
+      else if (b.dataset.a === "contact") { sessionStorage.setItem("umc_focus_contact", MC.contactByPrefix(active.slice(2)).key); go("contacts"); }
+    } catch (err) { toast(err.message, "bad"); }
+  });
+  drawList();
+  if (active) open(active);
+}
+
+// ---------------------------------------------------------------- Contacts page
+async function renderContacts(view) {
+  view.innerHTML = `<div class="card"><h2>Contacts</h2><p class="sub">Everyone this device knows. Stored on the device and shared by every app and this page.</p>
+      <div class="row" style="margin-bottom:10px"><input type="text" id="ctSearch" placeholder="Search" style="max-width:220px">
+        <select id="ctType" style="max-width:160px"><option value="">All types</option><option value="fav">Favourites</option><option value="1">Chat</option><option value="2">Repeaters</option><option value="3">Room servers</option><option value="4">Sensors</option></select>
+        <button class="btn" id="ctRefresh">Refresh</button><button class="btn" id="ctAdvZ">Zero-hop advert</button><button class="btn" id="ctAdvF">Flood advert</button><button class="btn" id="ctMe">Share my contact…</button><button class="btn" id="ctImport">Add contact…</button></div>
+      <div id="ctPending"></div>
+      <div style="overflow-x:auto"><table><thead><tr><th></th><th>Name</th><th>Type</th><th>Path</th><th>Advert</th><th>Location</th><th></th></tr></thead><tbody id="ctBody"><tr><td colspan="7" class="val">Loading…</td></tr></tbody></table></div></div>
+    <div id="ctDetail"></div>`;
+  MC.start();
+  let filter = "", type = "", open = sessionStorage.getItem("umc_focus_contact") || null;
+  sessionStorage.removeItem("umc_focus_contact");
+  const draw = () => {
+    const f = filter.toLowerCase(), now = nowSecs();
+    const list = [...MC.contacts.values()].filter(c => (!f || c.name.toLowerCase().includes(f) || c.key.startsWith(f)) && (!type || (type === "fav" ? c.fav : String(c.type) === type)))
+      .sort((a, b) => (b.fav - a.fav) || (b.lastAdvert - a.lastAdvert));
+    $("#ctBody").innerHTML = list.length ? list.map(c => `<tr><td>${c.fav ? "★" : ""}</td><td><a href="#" data-open="${c.key}"><b>${esc(c.name || c.prefix)}</b></a><div class="val">${c.key.slice(0, 16)}…</div></td>
+        <td>${TYPE_ICO[c.type] || ""} ${esc(TYPES[c.type] || c.type)}</td><td>${esc(hopsLabel(c))}</td><td>${c.lastAdvert ? esc(ago(now - c.lastAdvert)) + " ago" : "—"}</td>
+        <td>${c.lat || c.lon ? `<a href="https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lon}#map=13/${c.lat}/${c.lon}" target="_blank" rel="noopener">${c.lat.toFixed(3)}, ${c.lon.toFixed(3)}</a>` : "—"}</td>
+        <td><button class="btn sm" data-open="${c.key}">Open</button></td></tr>`).join("")
+      : `<tr><td colspan="7" class="val">${MC.self ? "No contacts match." : "Loading…"}</td></tr>`;
+    $("#ctPending").innerHTML = MC.pending.size ? `<div class="warnbox"><b>New adverts waiting to be added</b> (manual add is on):<div class="row" style="margin-top:6px">${[...MC.pending.values()].map(c => `<span class="pill">${TYPE_ICO[c.type] || ""} ${esc(c.name)} <a href="#" data-add="${c.key}">add</a></span>`).join("")}</div></div>` : "";
+    drawDetail();
+  };
+  const drawDetail = () => {
+    const c = open && MC.contacts.get(open), box = $("#ctDetail");
+    if (!c) { box.innerHTML = ""; return; }
+    if (box.dataset.key === c.key && box.innerHTML) { $("#dtPath").textContent = hopsLabel(c); return; }
+    box.dataset.key = c.key;
+    const server = c.type === 2 || c.type === 3 || c.type === 4;
+    box.innerHTML = `<div class="card"><h2>${TYPE_ICO[c.type] || ""} ${esc(c.name)}</h2><p class="sub">${esc(TYPES[c.type])} · <span id="dtPath">${esc(hopsLabel(c))}</span> · key <code>${c.key}</code></p>
+      <div class="row">
+        <button class="btn pri" data-d="msg">Message</button>
+        ${server ? `<button class="btn" data-d="login">Log in…</button><button class="btn" data-d="status">Status</button>` : ""}
+        <button class="btn" data-d="telem">Telemetry</button><button class="btn" data-d="trace">Trace path</button><button class="btn" data-d="discover">Discover path</button>
+        <button class="btn" data-d="reset">Reset path</button><button class="btn" data-d="share">Share (zero-hop)</button><button class="btn" data-d="export">Export…</button>
+        <button class="btn" data-d="fav">${c.fav ? "Unfavourite" : "Favourite"}</button><button class="btn danger" data-d="remove">Remove</button></div>
+      <div id="dtOut" style="margin-top:12px"></div>
+      ${server ? `<div style="margin-top:12px"><h2>Remote admin console</h2><p class="sub">Log in with the node's admin password first, then send CLI commands (e.g. <code>ver</code>, <code>get radio</code>, <code>neighbors</code>, <code>advert</code>). Replies travel back over the mesh.</p>
+        <pre class="term" id="dtTerm" style="height:220px"></pre><div class="row"><input type="text" id="dtCmd" placeholder="command" style="max-width:360px"><button class="btn" data-d="cli">Send</button></div></div>` : ""}</div>`;
+    const term = $("#dtTerm");
+    if (term) {
+      const hist = (MC.store.conv["c:" + c.prefix] || []).filter(m => m.kind === "cli").slice(-40);
+      term.textContent = hist.map(m => (m.dir === "out" ? "> " : "") + m.text).join("\n");
+      term.scrollTop = term.scrollHeight;
+      $("#dtCmd").addEventListener("keydown", e => { if (e.key === "Enter") box.querySelector('[data-d="cli"]').click(); });
+    }
+  };
+  const statGrid = o => `<div class="grid">${Object.entries(o).map(([k, v]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join("")}</div>`;
+  const offCli = (() => { const fn = (prefix, m) => { const c = open && MC.contacts.get(open); const t = $("#dtTerm"); if (c && t && c.key.startsWith(prefix)) { t.textContent += (t.textContent ? "\n" : "") + m.text; t.scrollTop = t.scrollHeight; } }; MC.cliFns.add(fn); return () => MC.cliFns.delete(fn); })();
+  const offChange = MC.onChange(() => { if (!document.body.contains(view)) { offChange(); offCli(); return; } draw(); });
+  view.addEventListener("input", e => { if (e.target.id === "ctSearch") { filter = e.target.value; draw(); } if (e.target.id === "ctType") { type = e.target.value; draw(); } });
+  view.addEventListener("change", e => { if (e.target.id === "ctType") { type = e.target.value; draw(); } });
+  view.addEventListener("click", async e => {
+    const o = e.target.closest("[data-open]"); if (o) { e.preventDefault(); open = o.dataset.open; $("#ctDetail").innerHTML = ""; draw(); $("#ctDetail").scrollIntoView({behavior: "smooth"}); return; }
+    const ad = e.target.closest("[data-add]");
+    if (ad) { e.preventDefault(); const c = MC.pending.get(ad.dataset.add); try { await MC.request(u8(9, c.raw.subarray(0, 147)), [CODE.OK]); MC.pending.delete(c.key); await MC.listContacts(); toast(`Added ${c.name}`, "ok"); draw(); } catch (err) { toast(err.message, "bad"); } return; }
+    const b = e.target.closest("button"); if (!b) return;
+    const c = open && MC.contacts.get(open), out = $("#dtOut");
+    const busy = t => { if (out) out.innerHTML = `<p class="val">${esc(t)}</p>`; };
+    try {
+      if (b.id === "ctRefresh") { await MC.refreshAll(); toast("Contacts reloaded", "ok"); }
+      else if (b.id === "ctAdvZ") { await MC.request(u8(7), [CODE.OK]); toast("Zero-hop advert sent", "ok"); }
+      else if (b.id === "ctAdvF") { await MC.request(u8(7, 1), [CODE.OK]); toast("Flood advert sent", "ok"); }
+      else if (b.id === "ctMe") { const uri = await MC.exportContact(null); prompt("Your contact (share this with others, they paste it into Add contact):", uri); }
+      else if (b.id === "ctImport") {
+        const t = prompt("Paste a contact (meshcore://… from an app or this page):"); if (!t) return;
+        const raw = unhex(t.replace(/^meshcore:\/\//i, "").replace(/[^0-9a-f]/gi, ""));
+        if (raw.length < 100) return toast("That doesn't look like an exported contact", "bad");
+        await MC.request(u8(18, raw), [CODE.OK]); await MC.listContacts(); toast("Contact added", "ok"); draw();
+      }
+      else if (!c) return;
+      else if (b.dataset.d === "msg") { MC.activeConv = "c:" + c.prefix; go("chat"); }
+      else if (b.dataset.d === "login") { const pw = prompt(`Password for ${c.name} (blank = guest):`, ""); if (pw === null) return; busy("Logging in over the mesh…"); const r = await MC.login(c, pw); out.innerHTML = `<p class="msg ok">Logged in${r.admin ? " as admin" : ""}.</p>`; }
+      else if (b.dataset.d === "status") {
+        busy("Requesting status over the mesh…"); const s = await MC.status(c);
+        out.innerHTML = statGrid({"Battery": (s.battery_mv / 1000).toFixed(2) + " V", "Uptime": fmtUp(s.uptime_secs), "Noise floor": s.noise_floor + " dBm", "Last RSSI / SNR": `${s.last_rssi} / ${s.last_snr ?? "—"}`,
+          "Packets rx / tx": `${s.packets_recv} / ${s.packets_sent}`, "Flood rx / tx": `${s.recv_flood} / ${s.sent_flood}`, "Direct rx / tx": `${s.recv_direct} / ${s.sent_direct}`,
+          "TX airtime": s.tx_air_secs + " s", "RX airtime": (s.rx_air_secs ?? "—") + " s", "TX queue": s.tx_queue, "Duplicates (flood/direct)": `${s.flood_dups ?? "—"} / ${s.direct_dups ?? "—"}`, "Errors": s.errors});
+      }
+      else if (b.dataset.d === "telem") { busy("Requesting telemetry over the mesh…"); const t = await MC.telemetry(c); out.innerHTML = t.length ? statGrid(Object.fromEntries(t.map(x => [`${x.name} (ch ${x.ch})`, x.value]))) : `<p class="val">No telemetry shared (the node may only share it with favourites / contacts).</p>`; }
+      else if (b.dataset.d === "trace") {
+        busy("Tracing…"); const t = await MC.trace(c);
+        out.innerHTML = `<table><thead><tr><th>#</th><th>Hop</th><th>SNR received there</th></tr></thead><tbody>${t.hops.map((h, i) => { const r = [...MC.contacts.values()].find(x => x.key.startsWith(h)); return `<tr><td>${i + 1}</td><td>${r ? esc(r.name) : ""} <code>${h}</code></td><td>${t.snrs[i] != null ? t.snrs[i] + " dB" : "—"}</td></tr>`; }).join("")}<tr><td></td><td>back here</td><td>${t.final ?? "—"} dB</td></tr></tbody></table>`;
+      }
+      else if (b.dataset.d === "discover") {
+        busy("Discovering the path (flood request)…"); const p = await MC.discoverPath(c);
+        const names = hs => hs.map(h => { const r = [...MC.contacts.values()].find(x => x.key.startsWith(h)); return r ? r.name : h; }).join(" → ") || "direct";
+        out.innerHTML = `<p><b>Out:</b> ${esc(names(p.out.hashes))} (${p.out.hops} hops)<br><b>Back:</b> ${esc(names(p.back.hashes))} (${p.back.hops} hops)</p>`;
+        await MC.listContacts(); MC.emitChange();
+      }
+      else if (b.dataset.d === "reset") { await MC.request(u8(13, unhex(c.key)), [CODE.OK]); await MC.listContacts(); toast("Path reset - the next message floods and learns a new route", "ok"); draw(); }
+      else if (b.dataset.d === "share") { await MC.request(u8(16, unhex(c.key)), [CODE.OK]); toast(`Shared ${c.name} with nodes in direct range`, "ok"); }
+      else if (b.dataset.d === "export") { prompt(`Contact for ${c.name} (copy and share):`, await MC.exportContact(c)); }
+      else if (b.dataset.d === "fav") { await MC.setFavourite(c, !c.fav); $("#ctDetail").innerHTML = ""; draw(); }
+      else if (b.dataset.d === "remove") { if (!confirm(`Remove ${c.name} from this device?`)) return; await MC.request(u8(15, unhex(c.key)), [CODE.OK]); MC.contacts.delete(c.key); open = null; draw(); toast("Removed", "ok"); }
+      else if (b.dataset.d === "cli") {
+        const inp = $("#dtCmd"), cmd = inp.value.trim(); if (!cmd) return; inp.value = "";
+        const t = $("#dtTerm"); t.textContent += (t.textContent ? "\n" : "") + "> " + cmd; t.scrollTop = t.scrollHeight;
+        MC.addMsg("c:" + c.prefix, {t: Date.now(), ts: nowSecs(), dir: "out", text: cmd, kind: "cli"}, true); MC.saveStore();
+        await MC.request(u8(2, 1, 0, le32(nowSecs()), unhex(c.prefix), cmd), [CODE.SENT]);
+      }
+    } catch (err) { if (out && b.dataset.d && b.dataset.d !== "cli") out.innerHTML = `<p class="msg bad">${esc(err.message)}</p>`; else toast(err.message, "bad"); }
+  });
+  draw();
+  if (!MC.self) await MC.refreshAll().catch(err => toast(err.message, "bad"));
+  draw();
+}
+
+// ---------------------------------------------------------------- Channels page
+async function renderChannels(view) {
+  view.innerHTML = `<div class="card"><h2>Channels</h2><p class="sub">Group chats shared by everyone with the same channel secret. Up to 40 on this device.</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Name</th><th>Secret</th><th></th></tr></thead><tbody id="chBody"><tr><td colspan="4" class="val">Loading…</td></tr></tbody></table></div></div>
+    <div class="card"><h2>Add a channel</h2><div class="stack">
+      <div><label>Kind</label><select id="chKind" style="max-width:320px"><option value="hash">Hashtag channel (#name — anyone who types the same name joins)</option><option value="private">Private channel (random secret you share)</option><option value="import">Join with a shared secret</option><option value="public">Public channel (default MeshCore key)</option></select></div>
+      <div><label>Name</label><input type="text" id="chName" placeholder="#yorkshire" maxlength="31"></div>
+      <div id="chSecretRow" class="hidden"><label>Secret (32 hex characters or base64)</label><input type="text" id="chSecret"></div>
+      <div class="row"><button class="btn pri" id="chAdd">Add channel</button><button class="btn" id="chExport">Export all…</button><button class="btn" id="chImportAll">Import list…</button></div></div></div>`;
+  MC.start();
+  const draw = () => {
+    $("#chBody").innerHTML = MC.channels.length ? MC.channels.map(ch => `<tr><td>${ch.idx}</td><td><b>${esc(ch.name)}</b></td><td><code data-sec="${ch.idx}">••••••••</code> <a href="#" data-show="${ch.idx}">show</a></td>
+      <td><button class="btn sm" data-chat="${ch.idx}">Open chat</button> <button class="btn sm" data-share="${ch.idx}">Share…</button> <button class="btn sm danger" data-del="${ch.idx}">Remove</button></td></tr>`).join("")
+      : `<tr><td colspan="4" class="val">${MC.self ? "No channels." : "Loading…"}</td></tr>`;
+  };
+  const freeSlot = () => { for (let i = 0; i < 40; i++) if (!MC.channels.some(c => c.idx === i)) return i; return -1; };
+  const parseSecret = s => { s = s.trim(); if (/^[0-9a-f]{32}$/i.test(s)) return unhex(s); const b = b64ToU8(s); return b && b.length === 16 ? b : null; };
+  const setChannel = async (idx, name, secret) => { await MC.request(u8(32, idx, fixed(name, 32), secret), [CODE.OK]); await MC.listChannels(); MC.emitChange(); };
+  const kindUi = () => { const k = $("#chKind").value; $("#chSecretRow").classList.toggle("hidden", k !== "import"); $("#chName").placeholder = k === "hash" ? "#yorkshire" : k === "public" ? "Public" : "Channel name"; if (k === "public") $("#chName").value = "Public"; };
+  $("#chKind").onchange = kindUi;
+  const offChange = MC.onChange(() => { if (!document.body.contains(view)) return offChange(); draw(); });
+  view.addEventListener("click", async e => {
+    const sh = e.target.closest("[data-show]");
+    if (sh) { e.preventDefault(); const ch = MC.channels.find(c => c.idx === +sh.dataset.show); const code = view.querySelector(`[data-sec="${ch.idx}"]`); code.textContent = code.textContent.startsWith("•") ? hex(ch.secret) : "••••••••"; return; }
+    const b = e.target.closest("button"); if (!b) return;
+    try {
+      if (b.dataset.chat) { MC.activeConv = "ch:" + b.dataset.chat; go("chat"); }
+      else if (b.dataset.share) { const ch = MC.channels.find(c => c.idx === +b.dataset.share); prompt(`Share "${ch.name}" - the other person adds it with "Join with a shared secret":`, `${ch.name} ${hex(ch.secret)}`); }
+      else if (b.dataset.del) { const ch = MC.channels.find(c => c.idx === +b.dataset.del); if (!confirm(`Remove channel ${ch.name}?`)) return; await setChannel(ch.idx, "", new Uint8Array(16)); toast("Channel removed", "ok"); }
+      else if (b.id === "chAdd") {
+        const kind = $("#chKind").value; let name = $("#chName").value.trim(), secret;
+        const idx = freeSlot(); if (idx < 0) return toast("All 40 channel slots are in use", "bad");
+        if (kind === "hash") { if (!name) return toast("Enter a name", "bad"); if (!name.startsWith("#")) name = "#" + name; name = name.toLowerCase(); secret = sha256(new TextEncoder().encode(name)).slice(0, 16); }
+        else if (kind === "public") { secret = b64ToU8("izOH6cXN6mrJ5e26oRXNcg=="); name = name || "Public"; }
+        else if (kind === "private") { if (!name) return toast("Enter a name", "bad"); secret = crypto.getRandomValues(new Uint8Array(16)); }
+        else { secret = parseSecret($("#chSecret").value); if (!name || !secret) return toast("Enter a name and a 32-hex-character secret", "bad"); }
+        if (MC.channels.some(c => hex(c.secret) === hex(secret))) return toast("That channel is already added", "bad");
+        await setChannel(idx, name, secret); $("#chName").value = ""; $("#chSecret").value = "";
+        toast(`Added ${name}${kind === "private" ? " - use Share to give others the secret" : ""}`, "ok");
+      }
+      else if (b.id === "chExport") { prompt("Channel list (keep private - it contains the secrets):", JSON.stringify(MC.channels.map(c => ({name: c.name, secret: hex(c.secret)})))); }
+      else if (b.id === "chImportAll") {
+        const t = prompt("Paste an exported channel list:"); if (!t) return;
+        let list; try { list = JSON.parse(t); } catch { return toast("Not a channel list", "bad"); }
+        let n = 0;
+        for (const it of list) { const s = parseSecret(it.secret || ""); if (!s || MC.channels.some(c => hex(c.secret) === hex(s))) continue; const idx = freeSlot(); if (idx < 0) break; await setChannel(idx, String(it.name).slice(0, 31), s); n++; }
+        toast(`Imported ${n} channel(s)`, "ok");
+      }
+    } catch (err) { toast(err.message, "bad"); }
+  });
+  draw();
+  if (!MC.self) await MC.refreshAll().catch(err => toast(err.message, "bad"));
+  draw();
+}
+
 // ================================================================ setup wizard
 const W = {step: 0, data: {}};
 function wizardSteps() {
@@ -987,17 +1688,17 @@ function renderWizard() {
   const nav = (next = "Next") => `<div class="row" style="margin-top:18px;justify-content:space-between">${W.step ? `<button class="btn" id="wBack">Back</button>` : "<span></span>"}<button class="btn pri" id="wNext">${next}</button></div>`;
   let h = "";
   if (st === "welcome") h = `<h1>Welcome</h1><p>Let's set up this <b>${esc(INFO.board)}</b> as a <b>${esc(INFO.role.replace("_", " "))}</b>.</p>
-    <div class="stat"><b>Ultimate MeshCore ${esc(INFO.umc)}</b></div>
+    <div class="stat"><b>${isClient() ? "Ultimate MeshCore Client" : "Ultimate MeshCore"} ${esc(INFO.umc)}</b></div>
     <p>Existing settings (name, radio, identity) are kept and pre-filled. Nothing is saved until the last step.</p>${nav("Start")}`;
   if (st === "radio") h = `<h1>Region &amp; radio</h1><p>Choose the preset used by your local mesh. Currently: ${d.fr ? d.fr.toFixed(3) : "?"} MHz, ${d.bw} kHz, SF${d.sf}, CR 4/${d.cr}.</p><div class="stack">
     <div><label>Preset</label><select id="wPreset"><option value="">Keep current settings</option>${PRESETS.map((p, i) => `<option value="${i}" ${d.preset === i ? "selected" : ""}>${esc(p[0])} — ${p[1]} MHz · ${p[2]} kHz · SF${p[3]}${i === d.preset0 ? " (current)" : ""}</option>`).join("")}</select></div>
     <div><label>TX power (dBm)</label><input type="number" id="wTx" min="1" max="22" value="${d.tx}"></div>
-    <div><label>Duty cycle limit (%)</label><input type="number" id="wDuty" min="1" max="100" value="${d.duty}"><div class="val">UK/EU 869.4–869.65 MHz: 10%.</div></div></div>${nav()}`;
+    ${roleOk(RS) ? `<div><label>Duty cycle limit (%)</label><input type="number" id="wDuty" min="1" max="100" value="${d.duty}"><div class="val">UK/EU 869.4–869.65 MHz: 10%.</div></div>` : ""}</div>${nav()}`;
   if (st === "identity") h = `<h1>Name &amp; location</h1><div class="stack">
     <div><label>Node name</label><input type="text" id="wName" value="${esc(d.name)}" maxlength="31"></div>
     <div><label>Location (optional)</label><div class="row"><input type="number" id="wLat" step="any" placeholder="latitude" value="${esc(d.lat)}" style="max-width:160px"><input type="number" id="wLon" step="any" placeholder="longitude" value="${esc(d.lon)}" style="max-width:160px"><button class="btn sm" id="wGeo">Pick from map…</button></div>
       <div class="val">Rounded to 3 decimals (~100 m) so your exact address isn't published.</div></div></div>${nav()}`;
-  if (st === "security") h = `<h1>Admin password</h1><p>Protects remote admin over the mesh, this web page and telnet. At least 8 characters.</p><div class="stack">
+  if (st === "security") h = `<h1>Admin password</h1><p>Protects ${roleOk(RS) ? "remote admin over the mesh, " : ""}this web page and telnet. At least 8 characters.</p><div class="stack">
     <div><label>New admin password</label><input type="password" id="wPw" autocomplete="new-password" value="${esc(d.pw || "")}"></div>
     <div><label>Confirm</label><input type="password" id="wPw2" autocomplete="new-password" value="${esc(d.pw || "")}"></div>
     ${roleOk(RS) ? `<div><label>Guest password (optional)</label><input type="text" id="wGuest" value="${esc(d.guest || "")}"><div class="val">Blank lets anyone view basic stats. Don't reuse other passwords.</div></div>` : ""}
@@ -1031,7 +1732,7 @@ function renderWizard() {
 }
 function collect(st) {
   const d = W.data, g = id => $("#" + id);
-  if (st === "radio") { d.preset = g("wPreset").value === "" ? "" : +g("wPreset").value; d.tx = +g("wTx").value; d.duty = +g("wDuty").value; }
+  if (st === "radio") { d.preset = g("wPreset").value === "" ? "" : +g("wPreset").value; d.tx = +g("wTx").value; if (g("wDuty")) d.duty = +g("wDuty").value; }
   if (st === "identity") { d.name = g("wName").value.trim(); d.lat = g("wLat").value; d.lon = g("wLon").value; }
   if (st === "security") {
     const a = g("wPw").value, b = g("wPw2").value;
@@ -1094,7 +1795,7 @@ async function go(id) {
   const old = $("#view"), view = old.cloneNode(false); old.replaceWith(view);  // drop old listeners
   view.innerHTML = `<p class="val">Loading…</p>`;
   try {
-    const fn = {dash: renderDash, neigh: renderNeigh, routes: renderRoutes, traffic: renderTraffic, regions: renderRegions, net: renderNet, console: renderConsole, fw: renderFw, backup: renderBackup}[sec.special];
+    const fn = {dash: renderDash, chat: renderChat, contacts: renderContacts, channels: renderChannels, neigh: renderNeigh, routes: renderRoutes, traffic: renderTraffic, regions: renderRegions, net: renderNet, console: renderConsole, fw: renderFw, backup: renderBackup}[sec.special];
     if (fn) await fn(view); else await renderSchemaSection(sec, view);
   } catch (err) { view.innerHTML = `<div class="card"><h2>Couldn't load</h2><p class="msg bad">${esc(err.message)}</p></div>`; }
 }
@@ -1104,7 +1805,9 @@ function updatePills() {
   p.textContent = sta.connected ? `WiFi · ${sta.ip}` : n.ap && n.ap.active ? `Hotspot · ${n.ap.ssid}` : "Offline";
   $("#pillRole").textContent = `${INFO.name} · ${INFO.role}`;
   $("#navSub").textContent = `${INFO.board} · v${INFO.umc}`;
-  document.title = `${INFO.name} · Ultimate MeshCore`;
+  const brand = isClient() ? "Ultimate MeshCore Client" : "Ultimate MeshCore";
+  document.title = `${INFO.name} · ${brand}`;
+  document.querySelector("#nav .brand").firstChild.textContent = brand;
 }
 function showLogin() {
   $("#app").classList.add("hidden"); $("#wizard").classList.add("hidden"); $("#login").classList.remove("hidden");
@@ -1115,7 +1818,8 @@ function showLogin() {
 async function startApp() {
   $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
   buildNav(); updatePills();
-  const id = location.hash.slice(1); await go(SECTIONS.some(s => s.id === id) ? id : "dash");
+  MC.start();  // client: collect messages in the background on every page
+  const id = location.hash.slice(1); await go(SECTIONS.some(s => s.id === id && roleOk(s.roles)) ? id : isClient() ? "chat" : "dash");
   setInterval(async () => { try { INFO = await api.info(); updatePills(); } catch {} }, 30000);
 }
 async function boot() {

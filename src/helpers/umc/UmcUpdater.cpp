@@ -1,4 +1,5 @@
 #include "UmcUpdater.h"
+#include "UmcLog.h"
 
 #include <helpers/TxtDataHelpers.h>
 #include <string.h>
@@ -25,7 +26,7 @@
 
 namespace {
 constexpr uint32_t kFirstAutoCheckMs = 5UL * 60UL * 1000UL;  // a few minutes after boot
-constexpr size_t kBuildsJsonMax = 16384;
+constexpr size_t kBuildsJsonMax = 8192;   // ~25 published builds
 
 // Find "key": "value" at the top level of a small JSON text (no nesting needed here).
 bool jsonString(const char* json, const char* key, char* out, size_t out_size) {
@@ -115,10 +116,22 @@ bool UmcUpdater::setIntervalHours(uint16_t h) {
 void UmcUpdater::setError(const char* msg) {
   StrHelper::strncpy(_error, msg, sizeof(_error));
   _state = State::Error;
-  Serial.printf("[UMC] update: %s\n", msg);
+  UMC_LOGF("[UMC] update: %s\n", msg);
+}
+
+void UmcUpdater::tlsBegin() {
+  if (!_tls_held && _umc.host() != nullptr) {
+    _umc.host()->umcTlsBegin();
+    _tls_held = true;
+  }
 }
 
 void UmcUpdater::loop(bool network_up) {
+  if (_tls_release && !_task_running) {
+    _tls_release = false;
+    if (_tls_held && _state != State::Done && _umc.host() != nullptr) _umc.host()->umcTlsEnd();  // Done = rebooting
+    _tls_held = false;
+  }
   if (_state == State::Done && !_umc.isRebootPending()) {
     _umc.scheduleReboot(3000);
   }
@@ -134,8 +147,10 @@ bool UmcUpdater::startCheck() {
   if (_task_running) return false;
   _task_running = true;
   _state = State::Checking;
+  tlsBegin();
   if (xTaskCreate(checkTask, "umc-upd-check", 8192, this, 1, nullptr) != pdPASS) {
     _task_running = false;
+    _tls_release = true;
     setError("no memory for update task");
     return false;
   }
@@ -156,8 +171,10 @@ bool UmcUpdater::startInstall() {
   _state = State::Downloading;
   _progress = 0;
   _umc.notifyOtaStarting();
+  tlsBegin();
   if (xTaskCreate(installTask, "umc-upd-ota", 8192, this, 1, nullptr) != pdPASS) {
     _task_running = false;
+    _tls_release = true;
     setError("no memory for update task");
     return false;
   }
@@ -179,6 +196,7 @@ void UmcUpdater::checkTask(void* arg) {
     self->_umc.notifyOtaStarting();
     self->doInstall();
   }
+  self->_tls_release = true;
   self->_task_running = false;
   vTaskDelete(nullptr);
 }
@@ -186,6 +204,7 @@ void UmcUpdater::checkTask(void* arg) {
 void UmcUpdater::installTask(void* arg) {
   auto* self = static_cast<UmcUpdater*>(arg);
   self->doInstall();
+  self->_tls_release = true;
   self->_task_running = false;
   vTaskDelete(nullptr);
 }
@@ -254,7 +273,7 @@ bool UmcUpdater::doCheck() {
   }
   bool newer = strncmp(_latest_commit, buildCommit(), 7) != 0;
   _state = newer ? State::Available : State::UpToDate;
-  Serial.printf("[UMC] update check: running %s, latest %s (%.7s) -> %s\n", buildCommit(), _latest_version,
+  UMC_LOGF("[UMC] update check: running %s, latest %s (%.7s) -> %s\n", buildCommit(), _latest_version,
                 _latest_commit, newer ? "update available" : "up to date");
   return newer;
 }
@@ -262,7 +281,7 @@ bool UmcUpdater::doCheck() {
 bool UmcUpdater::doInstall() {
   char full[192];
   snprintf(full, sizeof(full), "%sfirmware/%s/firmware.bin", _url, buildEnv());
-  Serial.printf("[UMC] update: downloading %s\n", full);
+  UMC_LOGF("[UMC] update: downloading %s\n", full);
 
   esp_http_client_config_t http = {};
   http.url = full;
@@ -302,7 +321,7 @@ bool UmcUpdater::doInstall() {
   }
   _progress = 100;
   _state = State::Done;
-  Serial.println("[UMC] update: installed, rebooting");
+  UMC_LOGLN("[UMC] update: installed, rebooting");
   return true;
 }
 #endif

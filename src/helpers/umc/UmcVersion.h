@@ -1,6 +1,8 @@
 #pragma once
 
-#define UMC_NAME        "Ultimate MeshCore"
+#ifndef UMC_NAME
+  #define UMC_NAME      "Ultimate MeshCore"
+#endif
 #define UMC_SHORT_NAME  "UMC"
 
 #ifndef UMC_VERSION

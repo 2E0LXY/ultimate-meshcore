@@ -58,4 +58,7 @@ private:
   uint16_t _interval_h;
   unsigned long _next_auto_ms;
   bool _task_running;
+  volatile bool _tls_release = false;  // task finished: give the host its memory back (loop task)
+  bool _tls_held = false;
+  void tlsBegin();
 };

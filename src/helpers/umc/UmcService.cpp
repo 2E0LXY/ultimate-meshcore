@@ -1,4 +1,5 @@
 #include "UmcService.h"
+#include "UmcLog.h"
 
 #include <helpers/NetworkService.h>
 #include <helpers/TxtDataHelpers.h>
@@ -73,7 +74,7 @@ bool umcOtaPendingVerify() {
 
 void umcOtaFailBoot() {
   if (umcOtaPendingVerify()) {
-    Serial.println("[UMC] new firmware failed its boot check - rolling back to the previous version");
+    UMC_LOGLN("[UMC] new firmware failed its boot check - rolling back to the previous version");
     delay(200);
     esp_ota_mark_app_invalid_rollback_and_reboot();
   }
@@ -204,10 +205,10 @@ void UmcService::begin(UmcHost* host, NetworkService* network) {
   // begin() and loop() both run on the Arduino loop task, so this watches the whole mesh loop.
   esp_task_wdt_init(kLoopWatchdogSecs, true);
   esp_task_wdt_add(nullptr);
-  Serial.printf("[UMC] last reset: %s\n", resetReasonLabel(esp_reset_reason()));
+  UMC_LOGF("[UMC] last reset: %s\n", resetReasonLabel(esp_reset_reason()));
 #endif
 
-  Serial.printf("[UMC] %s v%s (%s, %s) setup=%s pin=%s\n", UMC_NAME, UMC_VERSION, _host->umcRole(),
+  UMC_LOGF("[UMC] %s v%s (%s, %s) setup=%s pin=%s\n", UMC_NAME, UMC_VERSION, _host->umcRole(),
                 _host->umcFirmwareVersion(), isSetupMode() ? "pending" : "done", _prefs.pin);
 }
 
@@ -249,13 +250,13 @@ void UmcService::loop() {
     _ota_confirmed = true;
     if (umcOtaPendingVerify()) {
       esp_ota_mark_app_valid_cancel_rollback();
-      Serial.println("[UMC] new firmware ran healthily for 60 s - confirmed");
+      UMC_LOGLN("[UMC] new firmware ran healthily for 60 s - confirmed");
     }
   }
 #endif
   if (_reboot_at != 0 && millis() >= _reboot_at) {
     _reboot_at = 0;
-    Serial.println("[UMC] rebooting");
+    UMC_LOGLN("[UMC] rebooting");
     if (_host != nullptr) _host->umcBeforeReboot();
     delay(100);
 #if defined(ESP_PLATFORM)
@@ -286,6 +287,14 @@ bool UmcService::checkAdminPassword(const char* password) const {
     diff |= static_cast<uint8_t>(password[i] ^ (i < la ? admin[i] : 0));
   }
   return diff == 0 && la > 0;
+}
+
+bool UmcService::setLocalAdminPassword(const char* password) {
+  if (password == nullptr) return false;
+  size_t n = strlen(password);
+  if (n < 8 || n >= sizeof(_prefs.admin_pw)) return false;
+  strcpy(_prefs.admin_pw, password);
+  return UmcPrefsStore::save(_prefs);
 }
 
 bool UmcService::isDefaultAdminPassword() const {
@@ -330,7 +339,8 @@ void UmcService::formatInfoJson(char* out, size_t out_size) const {
   pos = appendJsonEscaped(out, out_size, pos, _host ? _host->umcBoardName() : "");
   pos += snprintf(&out[pos], out_size - pos, ",\"env\":\"%s\",\"commit\":\"%.7s\"", UmcUpdater::buildEnv(), UmcUpdater::buildCommit());
 #if defined(ESP_PLATFORM)
-  pos += snprintf(&out[pos], out_size - pos, ",\"reset\":\"%s\"", resetReasonLabel(esp_reset_reason()));
+  pos += snprintf(&out[pos], out_size - pos, ",\"reset\":\"%s\",\"heap\":{\"free\":%u,\"max_block\":%u,\"min_free\":%u}",
+                  resetReasonLabel(esp_reset_reason()), ESP.getFreeHeap(), ESP.getMaxAllocHeap(), ESP.getMinFreeHeap());
 #endif
   pos += snprintf(&out[pos], out_size - pos, ",\"setup\":%s,\"default_pw\":%s,\"features\":[",
                   isSetupMode() ? "true" : "false", isDefaultAdminPassword() ? "true" : "false");
@@ -364,6 +374,7 @@ void UmcService::formatInfoJson(char* out, size_t out_size) const {
 #ifdef UMC_WITH_BLE
   appendFeature(out, out_size, pos, "ble");
 #endif
+  if (_webapp != nullptr) appendFeature(out, out_size, pos, "webapp");
 #if defined(BOARD_HAS_PSRAM)
   appendFeature(out, out_size, pos, "psram");
 #endif
@@ -954,6 +965,36 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
       snprintf(reply, reply_size, net->setWifiPasswordSlot(slot, command + strlen(key)) ? "OK" : "Err - bad password");
       return true;
     }
+  }
+  // slot 1 (wifi.ssid / wifi.pwd) - every role: the setup wizard and the apps use these
+  if (strcmp(command, "get wifi.ssid") == 0) {
+    snprintf(reply, reply_size, "> %s", net_c->getWifiSSIDSlot(1)[0] ? net_c->getWifiSSIDSlot(1) : "-");
+    return true;
+  }
+  if (startsWith(command, "set wifi.ssid ")) {
+    snprintf(reply, reply_size, net->setWifiSSIDSlot(1, command + 14) ? "OK" : "Err - bad ssid");
+    return true;
+  }
+  if (startsWith(command, "set wifi.pwd ")) {
+    snprintf(reply, reply_size, net->setWifiPasswordSlot(1, command + 13) ? "OK" : "Err - bad password");
+    return true;
+  }
+  if (strcmp(command, "get wifi.status") == 0) {
+    net_c->formatWifiStatusReply(reply, reply_size);
+    return true;
+  }
+  if (strcmp(command, "get wifi.powersaving") == 0) {
+    snprintf(reply, reply_size, "> %s", net_c->getWifiPowerSave());
+    return true;
+  }
+  if (startsWith(command, "set wifi.powersaving ")) {
+    snprintf(reply, reply_size, net->setWifiPowerSave(command + 21) ? "OK" : "Err - use none|min|max");
+    return true;
+  }
+  if (strcmp(command, "wifi reconnect") == 0) {
+    net->forceReconnect();
+    snprintf(reply, reply_size, "OK - wifi reconnecting");
+    return true;
   }
   if (strcmp(command, "get wifi.pwd") == 0) {
     snprintf(reply, reply_size, "> %s", net_c->hasWifiPasswordSlot(1) ? "set" : "-");

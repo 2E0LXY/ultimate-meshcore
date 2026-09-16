@@ -18,7 +18,11 @@ MultiSerialInterface interface_manager;
 
 // include bluetooth interface
 #if defined(BLE_PIN_CODE)
-  #ifdef ESP32
+  #if defined(ESP32) && defined(UMC_NIMBLE)
+    // NimBLE host: same app-facing service, far less RAM (Bluetooth + WiFi on boards without PSRAM)
+    #include <helpers/esp32/SerialNimBLEInterface.h>
+    SerialNimBLEInterface bluetooth_interface;
+  #elif defined(ESP32)
     // include esp32 bluetooth interface
     #include <helpers/esp32/SerialBLEInterface.h>
     SerialBLEInterface bluetooth_interface;
@@ -43,6 +47,12 @@ MultiSerialInterface interface_manager;
   #else
     #error "SerialWifiInterface is not defined for this platform"
   #endif
+#endif
+
+#ifdef UMC_BUILD
+  // Ultimate MeshCore Client: TCP apps (port 5000) and the browser messenger join the
+  // same interface manager as Bluetooth and USB.
+  #include <helpers/umc/UmcService.h>
 #endif
 
 // include usb interface
@@ -104,6 +114,9 @@ MyMesh the_mesh(radio_driver, fast_rng, rtc_clock, tables, store
 /* END GLOBAL OBJECTS */
 
 void halt() {
+#ifdef UMC_BUILD
+  umcOtaFailBoot();  // an unconfirmed update that can't start rolls back to the previous firmware
+#endif
   while (1) ;
 }
 
@@ -119,6 +132,9 @@ void halt() {
 
 void setup() {
   Serial.begin(115200);
+#ifdef UMC_QUIET_SERIAL
+  esp_log_level_set("*", ESP_LOG_NONE);  // USB serial carries the app protocol: keep system logs off it
+#endif
   board.begin();
 
 #ifdef HAS_EXTERNAL_WATCHDOG
@@ -238,7 +254,21 @@ void setup() {
   interface_manager.addInterface(InterfaceType::HardwareSerial, &hardware_serial_interface);
 #endif
 
+#ifdef UMC_BUILD
+  interface_manager.addInterface(InterfaceType::WiFi, &the_mesh.getAppLink());
+  interface_manager.addInterface(InterfaceType::WiFi, &umc_webapp);
+#endif
+
   the_mesh.startInterface(interface_manager);
+#ifdef UMC_BUILD
+  the_mesh.umcBegin(&SPIFFS,
+  #if defined(BLE_PIN_CODE)
+                    &bluetooth_interface
+  #else
+                    NULL
+  #endif
+  );
+#endif
   sensors.begin();
 
 #if ENV_INCLUDE_GPS == 1

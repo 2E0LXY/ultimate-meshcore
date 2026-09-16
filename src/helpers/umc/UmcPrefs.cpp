@@ -39,6 +39,7 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.group_hops_max = 64;
   p.app_tcp = true;
   p.app_tcp_port = 5000;
+  strcpy(p.admin_pw, "password");
 }
 
 bool UmcPrefsStore::isValidPin(const char* pin) {
@@ -71,6 +72,7 @@ void UmcPrefsStore::load(UmcPrefs& p) {
     p.app_tcp = nvs.getBool("app_tcp", p.app_tcp);
     p.app_tcp_port = nvs.getUShort("app_port", p.app_tcp_port);
     nvs.getString("pin", p.pin, sizeof(p.pin));
+    if (nvs.isKey("admin_pw")) nvs.getString("admin_pw", p.admin_pw, sizeof(p.admin_pw));
     nvs.end();
   }
   if (!isValidPin(p.pin)) {
@@ -102,6 +104,7 @@ bool UmcPrefsStore::save(const UmcPrefs& p) {
   nvs.putBool("app_tcp", p.app_tcp);
   nvs.putUShort("app_port", p.app_tcp_port);
   nvs.putString("pin", p.pin);
+  nvs.putString("admin_pw", p.admin_pw);
   nvs.end();
   return true;
 #else
