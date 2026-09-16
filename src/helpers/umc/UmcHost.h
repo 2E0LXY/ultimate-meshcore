@@ -31,6 +31,9 @@ public:
   // without PSRAM can release memory here (the companion pauses Bluetooth). Loop task.
   virtual void umcTlsBegin() {}
   virtual void umcTlsEnd() {}
+  // True when a secure download can't fit alongside what the host is running (Bluetooth on
+  // boards without PSRAM): the updater then restarts into a short update mode without it.
+  virtual bool umcNeedsUpdateBoot() const { return false; }
 
   // Called just before an OTA image starts streaming into flash.
   virtual void umcPrepareForOta() {}

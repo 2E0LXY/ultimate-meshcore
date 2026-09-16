@@ -233,7 +233,8 @@ void UmcService::loop() {
   // Tearing them down on a short WiFi drop is what can stall the loop (httpd_stop waits for
   // its task), so once the network has been up they stay up until disabled in settings.
   if (_network != nullptr && _network->isNetworkReachable()) _net_seen = true;
-  const bool net = _net_seen;
+  // update mode needs every byte for the secure download: no web page, telnet or app port
+  const bool net = _net_seen && !(_updater != nullptr && _updater->inUpdateBoot());
   if (_web != nullptr) {
     _web->loop(_prefs.http_enabled && net);
   }

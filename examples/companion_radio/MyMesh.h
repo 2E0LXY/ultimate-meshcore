@@ -150,6 +150,7 @@ public:
   void umcBeforeReboot() override;
   void umcTlsBegin() override;
   void umcTlsEnd() override;
+  bool umcNeedsUpdateBoot() const override;
   void umcAppFrame(UmcAppServer& server, int client, const uint8_t* frame, size_t len) override;
 #endif
 

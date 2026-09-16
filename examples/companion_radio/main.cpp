@@ -53,6 +53,7 @@ MultiSerialInterface interface_manager;
   // Ultimate MeshCore Client: TCP apps (port 5000) and the browser messenger join the
   // same interface manager as Bluetooth and USB.
   #include <helpers/umc/UmcService.h>
+  #include <helpers/umc/UmcUpdater.h>
 #endif
 
 // include usb interface
@@ -206,8 +207,16 @@ void setup() {
 
 // add bluetooth interface
 #if defined(BLE_PIN_CODE)
-  bluetooth_interface.begin(BLE_NAME_PREFIX, the_mesh.getNodePrefs()->node_name, the_mesh.getBLEPin());
-  interface_manager.addInterface(InterfaceType::Bluetooth, &bluetooth_interface);
+#ifdef UMC_BUILD
+  // update mode: this boot is only for a firmware download, so leave Bluetooth off
+  const bool umc_ble = !UmcUpdater::updateBootRequested();
+#else
+  const bool umc_ble = true;
+#endif
+  if (umc_ble) {
+    bluetooth_interface.begin(BLE_NAME_PREFIX, the_mesh.getNodePrefs()->node_name, the_mesh.getBLEPin());
+    interface_manager.addInterface(InterfaceType::Bluetooth, &bluetooth_interface);
+  }
 #endif
 
 // add wifi interface
@@ -263,7 +272,7 @@ void setup() {
 #ifdef UMC_BUILD
   the_mesh.umcBegin(&SPIFFS,
   #if defined(BLE_PIN_CODE)
-                    &bluetooth_interface
+                    umc_ble ? &bluetooth_interface : NULL
   #else
                     NULL
   #endif

@@ -892,7 +892,7 @@ async function renderFw(view) {
       <pre id="webUpdStatus">Press Check to look for a newer build.</pre>
       <div class="row"><button class="btn" id="webUpdCheck">Check</button><button class="btn pri" id="webUpdInstall" disabled>Download &amp; install</button></div>
       <div class="progress hidden" id="webUpdBarWrap" style="margin-top:10px"><i id="webUpdBar"></i></div></div>
-    <div class="card"><h2>Update from the internet (by the device)</h2><p class="sub">The device downloads and installs the latest build itself, and can do it automatically. Needs WiFi with internet access. On boards without PSRAM running Bluetooth (Heltec V3 client) the device may not have enough memory for the secure download — use <b>Update through this browser</b> above instead.</p>
+    <div class="card"><h2>Update from the internet (by the device)</h2><p class="sub">The device downloads and installs the latest build itself, and can do it automatically. Needs WiFi with internet access. On the Heltec V3 client the device restarts into a short update mode with Bluetooth off (about a minute), then comes back by itself.</p>
       <pre id="updStatus">…</pre>
       <div class="row"><button class="btn" id="updCheck">Check for updates</button><button class="btn pri" id="updInstall">Install latest</button></div>
       <div class="progress hidden" id="updBarWrap" style="margin-top:10px"><i id="updBar"></i></div>
@@ -979,13 +979,15 @@ async function renderFw(view) {
       : s.startsWith("downloading") ? `Downloading and installing… ${s.replace("downloading ", "")}`
       : s.startsWith("installed") ? "Installed — rebooting. This page reconnects automatically."
       : s.startsWith("error") ? `Problem: ${s.replace(/^error /, "")}`
-      : s.startsWith("checking") ? "Checking…" : `Not checked yet (${s})`;
+      : s.startsWith("checking") ? "Checking…"
+      : s.startsWith("restarting") ? "Restarting into update mode — this page reconnects when the device is back (about a minute)."
+      : `Not checked yet (${s})`;
     $("#updStatus").textContent = human;
     $("#updAuto").value = val(auto); $("#updInt").value = val(iv); $("#updBuild").textContent = `This build: ${val(build)}`;
     const m = s.match(/downloading (-?\d+)%/);
     $("#updBarWrap").classList.toggle("hidden", !m);
     if (m) $("#updBar").style.width = Math.max(0, +m[1]) + "%";
-    const busy = /^(checking|downloading|installed)/.test(s);
+    const busy = /^(checking|downloading|installed|restarting)/.test(s);
     if (busy && !updPoll) updPoll = setInterval(() => updRefresh().catch(() => {}), 2000);
     if (!busy && updPoll) { clearInterval(updPoll); updPoll = null; }
   };

@@ -57,18 +57,88 @@ UmcUpdater::UmcUpdater(UmcService& umc)
 const char* UmcUpdater::buildEnv() { return UMC_ENV; }
 const char* UmcUpdater::buildCommit() { return UMC_COMMIT; }
 
+bool UmcUpdater::updateBootRequested() {
+#if defined(ESP_PLATFORM)
+  Preferences nvs;
+  if (!nvs.begin("umc_upd", true)) return false;
+  const bool req = nvs.getUChar("boot", 0) != 0;
+  nvs.end();
+  return req;
+#else
+  return false;
+#endif
+}
+
 void UmcUpdater::begin() {
+  bool skip_auto = false;
   StrHelper::strncpy(_url, UMC_UPDATE_URL, sizeof(_url));
 #if defined(ESP_PLATFORM)
   Preferences nvs;
-  if (nvs.begin("umc_upd", true)) {
+  if (nvs.begin("umc_upd", false)) {
     if (nvs.isKey("url")) nvs.getString("url", _url, sizeof(_url));
     _auto_mode = nvs.getUChar("auto", _auto_mode);
     _interval_h = nvs.getUShort("interval", _interval_h);
+    _boot_mode = nvs.getUChar("boot", 0);
+    if (_boot_mode != 0) nvs.putUChar("boot", 0);   // cleared first: a crash here boots normally next time
+    skip_auto = nvs.getUChar("skipauto", 0) != 0;   // just back from update mode: don't check again yet
+    if (skip_auto) nvs.putUChar("skipauto", 0);
     nvs.end();
   }
 #endif
-  _next_auto_ms = millis() + kFirstAutoCheckMs;
+  loadResult();
+  _next_auto_ms = millis() + (skip_auto ? static_cast<unsigned long>(_interval_h) * 3600000UL : kFirstAutoCheckMs);
+  if (_boot_mode != 0) {
+    _next_auto_ms = millis() + 3000;               // as soon as WiFi is up
+    _install_after_check = _boot_mode == 2;
+    UMC_LOGF("[UMC] update mode (%s)\n", _boot_mode == 2 ? "install" : "check");
+  }
+}
+
+// The result of the last check survives the restarts of update mode, so the web page can show it.
+void UmcUpdater::saveResult() {
+#if defined(ESP_PLATFORM)
+  Preferences nvs;
+  if (!nvs.begin("umc_upd", false)) return;
+  if (_boot_mode != 0) nvs.putUChar("skipauto", 1);
+  nvs.putUChar("r_state", static_cast<uint8_t>(_state));
+  nvs.putString("r_ver", _latest_version);
+  nvs.putString("r_commit", _latest_commit);
+  nvs.putString("r_err", _error);
+  nvs.end();
+#endif
+}
+
+void UmcUpdater::loadResult() {
+#if defined(ESP_PLATFORM)
+  Preferences nvs;
+  if (!nvs.begin("umc_upd", true)) return;
+  if (nvs.isKey("r_state")) {
+    const State s = static_cast<State>(nvs.getUChar("r_state", 0));
+    nvs.getString("r_ver", _latest_version, sizeof(_latest_version));
+    nvs.getString("r_commit", _latest_commit, sizeof(_latest_commit));
+    nvs.getString("r_err", _error, sizeof(_error));
+    if (s == State::UpToDate || s == State::Available || s == State::Error) _state = s;
+    // installed since that check: now current
+    if (_state == State::Available && strncmp(_latest_commit, buildCommit(), 7) == 0) _state = State::UpToDate;
+  }
+  nvs.end();
+#endif
+}
+
+bool UmcUpdater::requestUpdateBoot(uint8_t mode) {
+#if defined(ESP_PLATFORM)
+  Preferences nvs;
+  if (!nvs.begin("umc_upd", false)) return false;
+  nvs.putUChar("boot", mode);
+  nvs.end();
+  _state = State::Restarting;
+  UMC_LOGF("[UMC] restarting into update mode (%s)\n", mode == 2 ? "install" : "check");
+  _umc.scheduleReboot(1500);
+  return true;
+#else
+  (void)mode;
+  return false;
+#endif
 }
 
 void UmcUpdater::save() {
@@ -132,8 +202,18 @@ void UmcUpdater::tlsBegin() {
 }
 
 void UmcUpdater::loop(bool network_up) {
+  if (_tls_release && !_task_running && _boot_mode != 0) {
+    // update mode finished without installing: keep the result and go back to normal
+    _tls_release = false;
+    if (_state != State::Done) {
+      saveResult();
+      if (!_umc.isRebootPending()) _umc.scheduleReboot(1500);
+    }
+    return;
+  }
   if (_tls_release && !_task_running) {
     _tls_release = false;
+    saveResult();
     if (_tls_held && _state != State::Done && _umc.host() != nullptr) {  // Done = rebooting
       _umc.host()->umcTlsEnd();
       _umc.setQuietServers(false);
@@ -143,8 +223,28 @@ void UmcUpdater::loop(bool network_up) {
   if (_state == State::Done && !_umc.isRebootPending()) {
     _umc.scheduleReboot(3000);
   }
+  if (_boot_mode != 0) {
+    if (!_task_running && _state != State::Done && millis() > 180000UL && !_umc.isRebootPending()) {
+      // never stay without Bluetooth: give up and go back to normal
+      if (_state != State::Error) setError("update mode timed out (no WiFi / internet?)");
+      saveResult();
+      _umc.scheduleReboot(1000);
+      return;
+    }
+    if (!network_up || _task_running || _state == State::Checking || _state == State::Downloading) return;
+    if (millis() < _next_auto_ms) return;
+    if (_state == State::Done || _umc.isRebootPending()) return;
+    _next_auto_ms = millis() + 3600000UL;
+    if (!startCheck()) _umc.scheduleReboot(1500);
+    return;
+  }
   if (_auto_mode == 0 || !network_up || _task_running) return;
   if (millis() < _next_auto_ms) return;
+  // Daily checks don't restart a device that needs update mode unless automatic install is on.
+  if (_umc.host() != nullptr && _umc.host()->umcNeedsUpdateBoot() && _auto_mode != 2) {
+    _next_auto_ms = millis() + static_cast<unsigned long>(_interval_h) * 3600000UL;
+    return;
+  }
   _next_auto_ms = millis() + static_cast<unsigned long>(_interval_h) * 3600000UL;
   _install_after_check = _auto_mode == 2;
   startCheck();
@@ -153,6 +253,9 @@ void UmcUpdater::loop(bool network_up) {
 bool UmcUpdater::startCheck() {
 #if defined(ESP_PLATFORM)
   if (_task_running) return false;
+  if (_boot_mode == 0 && _umc.host() != nullptr && _umc.host()->umcNeedsUpdateBoot()) {
+    return requestUpdateBoot(_install_after_check ? 2 : 1);
+  }
   _task_running = true;
   _state = State::Checking;
   tlsBegin();
@@ -171,6 +274,9 @@ bool UmcUpdater::startCheck() {
 bool UmcUpdater::startInstall() {
 #if defined(ESP_PLATFORM)
   if (_task_running) return false;
+  if (_boot_mode == 0 && _umc.host() != nullptr && _umc.host()->umcNeedsUpdateBoot()) {
+    return requestUpdateBoot(2);
+  }
   if (_state != State::Available) {
     _install_after_check = true;  // check first, then install if newer
     return startCheck();
@@ -365,6 +471,9 @@ void UmcUpdater::formatStatus(char* reply, size_t reply_size) const {
       break;
     case State::Error:
       snprintf(reply, reply_size, "> error %s", _error);
+      break;
+    case State::Restarting:
+      snprintf(reply, reply_size, "> restarting into update mode (about a minute; Bluetooth is off meanwhile)");
       break;
   }
 }

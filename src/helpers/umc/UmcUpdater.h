@@ -14,7 +14,7 @@ class UmcService;
 // image (the old one stays in the other OTA slot).
 class UmcUpdater {
 public:
-  enum class State : uint8_t { Idle, Checking, UpToDate, Available, Downloading, Done, Error };
+  enum class State : uint8_t { Idle, Checking, UpToDate, Available, Downloading, Done, Error, Restarting };
 
   explicit UmcUpdater(UmcService& umc);
   void begin();
@@ -34,6 +34,12 @@ public:
   static const char* autoModeLabel(uint8_t mode);
   uint16_t intervalHours() const { return _interval_h; }
   bool setIntervalHours(uint16_t h);
+
+  // Update mode: set before a restart so the next boot leaves Bluetooth off, runs the check
+  // (and install) with plenty of memory, then restarts back to normal. Read this before
+  // starting Bluetooth.
+  static bool updateBootRequested();
+  bool inUpdateBoot() const { return _boot_mode != 0; }
 
   static const char* buildEnv();
   static const char* buildCommit();
@@ -61,4 +67,8 @@ private:
   volatile bool _tls_release = false;  // task finished: give the host its memory back (loop task)
   bool _tls_held = false;
   void tlsBegin();
+  bool requestUpdateBoot(uint8_t mode);
+  void saveResult();
+  void loadResult();
+  uint8_t _boot_mode = 0;       // 0 normal, 1 check, 2 check + install
 };

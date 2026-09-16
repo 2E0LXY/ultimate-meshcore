@@ -5,6 +5,7 @@
 #ifdef UMC_BUILD
 #include <helpers/StatsFormatHelper.h>
 #include <helpers/umc/UmcChatLog.h>
+#include <helpers/umc/UmcUpdater.h>
 #ifdef UMC_NIMBLE
 #include <helpers/esp32/SerialNimBLEInterface.h>
 #endif
@@ -2639,8 +2640,11 @@ void MyMesh::umcBegin(FILESYSTEM* fs, BaseSerialInterface* ble) {
   if (ble != NULL) network.setMinPowerSave(1);  // WiFi/Bluetooth coexistence needs modem sleep
   // EastMesh companion builds kept one WiFi network in the node prefs: carry it over once.
   network.begin(fs, _prefs.wifi_powersave, _prefs.wifi_ssid, _prefs.wifi_pwd);
-  umc_webapp.begin();
-  umc.setWebApp(&umc_webapp);
+  const bool update_mode = UmcUpdater::updateBootRequested();
+  if (!update_mode) {
+    umc_webapp.begin();
+    umc.setWebApp(&umc_webapp);
+  }
   umc.begin(this, &network);
   app_link.attach(umc.appServer());
 }
@@ -2702,6 +2706,14 @@ void MyMesh::umcBeforeReboot() {
 void MyMesh::umcTlsBegin() {
 #if defined(UMC_NIMBLE) && !defined(BOARD_HAS_PSRAM)
   if (_umc_ble != NULL) static_cast<SerialNimBLEInterface*>(_umc_ble)->suspend();
+#endif
+}
+
+bool MyMesh::umcNeedsUpdateBoot() const {
+#if defined(UMC_NIMBLE) && !defined(BOARD_HAS_PSRAM)
+  return _umc_ble != NULL;   // Bluetooth leaves too little continuous memory for HTTPS
+#else
+  return false;
 #endif
 }
 
