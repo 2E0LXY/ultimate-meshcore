@@ -84,7 +84,7 @@ jobs:
           gh release create latest $files \
             --title "Latest build ($(date -u +%Y-%m-%d) ${GITHUB_SHA::7})" \
             --notes "Automatic build of ${GITHUB_SHA} from main. Use the web flasher, or flash *-merged.bin at 0x0 for a fresh install; the non-merged .bin updates an existing device (also via the device's web UI)." \
-            --prerelease --target "$GITHUB_SHA"
+            --latest --target "$GITHUB_SHA"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

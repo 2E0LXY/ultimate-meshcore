@@ -4,6 +4,10 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.1
+
+- ✅ T-Deck / T-Deck Plus touch client: Home dashboard (clock, sunrise/sunset, channel busy, tap-through cards) and Radio tab (airtime per packet, NOW / FLOOR / PEAK / MARGIN meters, live RSSI spectrum)
+
 ## Done in 0.1.0
 
 - ✅ Routes & trace: route table from adverts, pinned routes, per-hop SNR trace
