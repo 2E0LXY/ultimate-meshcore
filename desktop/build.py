@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Builds Ultimate MeshCore Desktop into a single program for this computer (Windows or Linux).
+"""Builds Ultimate MeshCore Desktop for this computer (Windows or Linux).
 
     pip install -r requirements.txt pyinstaller pillow
-    python build.py
-
-Output: dist/UltimateMeshCoreDesktop.exe (Windows) or dist/ultimate-meshcore-desktop (Linux).
+    python build.py               # single program: dist/UltimateMeshCoreDesktop.exe or dist/ultimate-meshcore-desktop
+    python build.py --installer   # Windows: dist/UltimateMeshCoreDesktop-Setup.exe (needs Inno Setup 6)
 """
+import argparse
 import os
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,18 +36,39 @@ def make_icon():
     img.save(HERE / "icon.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 
 
+def find_iscc():
+    found = shutil.which("iscc") or shutil.which("ISCC")
+    if found:
+        return found
+    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"), os.environ.get("LOCALAPPDATA")):
+        for rel in (r"Inno Setup 6\ISCC.exe", r"Programs\Inno Setup 6\ISCC.exe"):
+            if base and (Path(base) / rel).exists():
+                return str(Path(base) / rel)
+    return None
+
+
+def version():
+    text = (PKG / "__init__.py").read_text(encoding="utf-8")
+    return re.search(r'__version__ = "([^"]+)"', text).group(1)
+
+
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--installer", action="store_true", help="Windows installer (folder build + Inno Setup)")
+    opts = ap.parse_args()
     web = PKG / "web"
     web.mkdir(exist_ok=True)
     shutil.copy(REPO / "web" / "umc" / "index.html", web / "index.html")
     make_icon()
     windows = sys.platform == "win32"
+    if opts.installer and not windows:
+        sys.exit("--installer is for Windows")
     name = "UltimateMeshCoreDesktop" if windows else "ultimate-meshcore-desktop"
     sep = os.pathsep
     args = [
         str(HERE / "run_umc_desktop.py"),
         "--name", name,
-        "--onefile",
+        "--onedir" if opts.installer else "--onefile",
         "--noconfirm",
         "--clean",
         "--distpath", str(HERE / "dist"),
@@ -64,7 +87,15 @@ def main():
     else:
         args += ["--collect-submodules", "dbus_fast"]
     PyInstaller.__main__.run(args)
-    print("built", HERE / "dist" / (name + (".exe" if windows else "")))
+    if not opts.installer:
+        print("built", HERE / "dist" / (name + (".exe" if windows else "")))
+        return
+    iscc = find_iscc()
+    if not iscc:
+        sys.exit("Inno Setup 6 not found (https://jrsoftware.org/isinfo.php)")
+    subprocess.run([iscc, f"/DAppVersion={version()}", f"/DSourceDir={HERE / 'dist' / name}",
+                    f"/DOutputDir={HERE / 'dist'}", str(HERE / "windows" / "installer.iss")], check=True)
+    print("built", HERE / "dist" / "UltimateMeshCoreDesktop-Setup.exe")
 
 
 if __name__ == "__main__":

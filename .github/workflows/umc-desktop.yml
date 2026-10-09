@@ -37,9 +37,15 @@ jobs:
       - name: Install build tools
         working-directory: desktop
         run: pip install -r requirements.txt pyinstaller pillow
-      - name: Build
+      - name: Build the portable program
         working-directory: desktop
         run: python build.py
+      - name: Build the Windows installer
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        run: |
+          choco install innosetup --no-progress -y
+          python build.py --installer
       - name: Check the built program starts
         shell: bash
         run: |
@@ -59,7 +65,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          cp desktop/dist/UltimateMeshCoreDesktop.exe out/UltimateMeshCoreDesktop-windows.exe
+          cp desktop/dist/UltimateMeshCoreDesktop-Setup.exe out/UltimateMeshCoreDesktop-Setup.exe
+          cp desktop/dist/UltimateMeshCoreDesktop.exe out/UltimateMeshCoreDesktop-portable.exe
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -86,6 +93,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -la out
-          notes=$(printf 'Ultimate MeshCore Desktop, built from %s on %s.\n\nWindows: download UltimateMeshCoreDesktop-windows.exe and run it (Windows may ask you to confirm the first time).\nLinux: download the .tar.gz, extract it and run ./install.sh (or run ultimate-meshcore-desktop directly).\n\nConnect to radios over USB, Bluetooth or WiFi, and to Ultimate MeshCore devices on your network.\n' "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%d)")
+          notes=$(printf 'Ultimate MeshCore Desktop, built from %s on %s.\n\nWindows: download UltimateMeshCoreDesktop-Setup.exe and run it to install (Start menu shortcut, no admin rights needed). UltimateMeshCoreDesktop-portable.exe runs without installing. Windows may ask you to confirm the first time.\nLinux: download the .tar.gz, extract it and run ./install.sh (or run ultimate-meshcore-desktop directly).\n\nConnect to radios over USB, Bluetooth or WiFi, and to Ultimate MeshCore devices on your network.\n' "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%d)")
           gh release delete desktop-latest --yes --cleanup-tag 2>/dev/null || true
           gh release create desktop-latest out/* --title "Ultimate MeshCore Desktop (latest)" --notes "$notes"
