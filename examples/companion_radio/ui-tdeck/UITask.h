@@ -38,7 +38,7 @@ public:
   const char* mapStatus() { return _tiles.status(); }
 
 private:
-  enum Tab { TAB_MSGS = 0, TAB_CONTACTS, TAB_MAP, TAB_INFO, TAB_COUNT };
+  enum Tab { TAB_HOME = 0, TAB_MSGS, TAB_CONTACTS, TAB_MAP, TAB_RADIO, TAB_INFO, TAB_COUNT };
 
   void draw();
   void drawHeader();
@@ -47,6 +47,9 @@ private:
   void drawContacts();
   void drawMap();
   void drawInfo();
+  void drawHome();
+  void drawRadio();
+  void sampleRadio();
   void drawCompose();
   void drawAlert();
 
@@ -90,4 +93,12 @@ private:
   double _centre_lat = 0, _centre_lon = 0;
   bool _follow_self = true;
   int _map_marker_sel = -1;
+
+  // radio tab: one RSSI sample per second (about two minutes of history) and channel-busy estimate
+  static const int RSSI_HIST = 120;
+  int8_t _rssi_hist[RSSI_HIST] = {0};
+  uint8_t _rssi_n = 0, _rssi_head = 0;
+  unsigned long _next_rssi = 0, _next_fast = 0;
+  unsigned long _busy_t = 0, _busy_rx = 0, _busy_tx = 0;
+  int _busy_pct = -1;        // -1 until the first 15 s window has completed
 };

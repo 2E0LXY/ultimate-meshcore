@@ -61,7 +61,7 @@ It builds on upstream MeshCore 1.17.1 and the MeshCore-EastMesh fork, and brings
 |---|---|---|
 | Heltec WiFi LoRa 32 V3 / V3.2 | ✅ | ✅ |
 | Heltec V4 (OLED, TFT, R8) | ✅ (not yet tested on hardware) | ✅ (not yet tested on hardware) |
-| LilyGo T-Deck / T-Deck Plus | — | ✅ touch client with maps (not yet tested on hardware) |
+| LilyGo T-Deck / T-Deck Plus | — | ✅ touch client with home dashboard, radio meters and maps (not yet tested on hardware) |
 | LilyGo T-TWR with SX1262 add-on | *(coming soon)* | *(coming soon)* |
 
 ---
@@ -674,9 +674,11 @@ The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x2
 
 | Tab | What you get |
 |---|---|
+| **Home** | Clock and date, sunrise and sunset (needs a position fix and a set clock), channel-busy percentage and noise floor, and six cards: battery, GPS, nodes, messages, last signal and links. Tap a card to jump to the matching tab. |
 | **Msgs** | The conversation log. **To:** at the top picks the channel or contact (tap **change** to cycle). Type on the keyboard and press **Enter** (or tap **Send**). Drag the list to scroll back. |
 | **People** | Contacts with type, path and how long ago they were heard. Tap one, then **Message**, **Show map**, **Share** (zero-hop) or **Reset path**. |
 | **Map** | Offline map with your position and every contact that shares a location. Drag to pan, **+**/**−** to zoom, **me** to recentre. |
+| **Radio** | Frequency, spreading factor, bandwidth, coding rate and power; airtime for 32, 100 and 200 byte packets at the live settings; **NOW**, **FLOOR**, **PEAK** and **MARGIN** meters; a live two-minute RSSI spectrum (one bar a second); channel-busy percentage and packet counters. **MARGIN** is the last received packet's RSSI above the noise floor. |
 | **Info** | Node name, WiFi and web address, Bluetooth PIN, radio settings, GPS fix, map status, contacts, memory, and buttons for **Advert**, **Flood advert**, **Bluetooth on/off** and **Reboot**. |
 
 **GPS** — the T-Deck Plus has shipped with two different receivers (u-blox at 38400 baud and L76K at 9600). The firmware tries each speed at boot and uses whichever answers, so both work without a setting. Turn the receiver on with `gps on` (or Power & hardware in the web UI); **Info** shows the position once it has a fix.
