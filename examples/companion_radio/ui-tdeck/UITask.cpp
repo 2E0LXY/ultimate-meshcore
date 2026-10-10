@@ -4,6 +4,7 @@
 #include <helpers/ui/ST7789LCDDisplay.h>
 
 #include "../MyMesh.h"
+#include "UmcSplash.h"
 #include "target.h"
 
 #include <math.h>
@@ -140,12 +141,9 @@ void UITask::begin(DisplayDriver* disp, SensorManager* sensors, NodePrefs* node_
   _sensors = sensors;
   _prefs = node_prefs;
   if (_display) _display->turnOn();
-  // start screen
-  fill(0, 0, SCR_W, SCR_H, C_BG);
-  text(40, 60, "Ultimate MeshCore", C_ACC, 2);
-  text(88, 96, "Client v" UMC_VERSION, C_TXT, 2);
-  text(104, 128, "MeshCore " FIRMWARE_VERSION, C_DIM);
-  text(76, 168, "By Daren Loxley  2E0LXY", C_TXT);
+  // start screen: full-screen artwork, with the MeshCore version over it
+  gfx()->drawRGBBitmap(0, 0, const_cast<uint16_t*>(UMC_SPLASH), UMC_SPLASH_W, UMC_SPLASH_H);
+  text(8, 224, "MeshCore " FIRMWARE_VERSION, C_DIM);
   delay(2500);
   _input.begin(SCR_W, SCR_H, the_mesh.getUmc().prefs().touch_map);
   _tiles.begin();
@@ -245,8 +243,11 @@ void UITask::loop() {
     if (_input.touchMap() != the_mesh.getUmc().prefs().touch_map) _input.setTouchMap(the_mesh.getUmc().prefs().touch_map);
     _dirty = true;
   }
-  if (_dirty) {
+  // A full redraw flickers, so never do more than a few a second however often something
+  // asks for one.
+  if (_dirty && millis() - _last_draw >= kMinRedrawMs) {
     _dirty = false;
+    _last_draw = millis();
     draw();
   }
 }
@@ -424,6 +425,11 @@ void UITask::drawContacts() {
 
 void UITask::drawMap() {
   const int top = BODY_Y;
+  // A card put in after start-up (or one that wasn't ready then) is picked up here.
+  if (!_tiles.available() && millis() - _tiles_retry > 10000) {
+    _tiles_retry = millis();
+    _tiles.begin();
+  }
   double self_lat, self_lon;
   const bool have_self = selfLocation(self_lat, self_lon);
   if (_centre_lat == 0 && _centre_lon == 0) {
@@ -551,8 +557,13 @@ void UITask::drawInfo() {
 
   text(4, y, "GPS", C_DIM);
   double lat, lon;
-  if (selfLocation(lat, lon)) snprintf(buf, sizeof(buf), "%.4f, %.4f", lat, lon);
-  else snprintf(buf, sizeof(buf), "no fix / not set");
+  char fixtxt[32];
+  if (selfLocation(lat, lon)) snprintf(fixtxt, sizeof(fixtxt), "%.4f, %.4f", lat, lon);
+  else snprintf(fixtxt, sizeof(fixtxt), "no fix / not set");
+  const uint32_t gbaud = sensors.gpsBaudDetected();   // which receiver answered at start-up
+  const char* grx = gbaud == 38400 ? "u-blox 38400" : gbaud == 9600 ? "L76K 9600"
+                    : gbaud ? "found" : "none found";
+  snprintf(buf, sizeof(buf), "%s  (%s)", fixtxt, grx);
   textClip(60, y, 250, buf, C_TXT); y += lh;
 
   text(4, y, "Maps", C_DIM); textClip(60, y, 250, _tiles.status(), _tiles.available() ? C_TXT : C_DIM); y += lh;
@@ -565,6 +576,14 @@ void UITask::drawInfo() {
   snprintf(buf, sizeof(buf), "%u KB free, PSRAM %u KB", (unsigned)(ESP.getFreeHeap() / 1024), (unsigned)(ESP.getFreePsram() / 1024));
   textClip(60, y, 250, buf, C_TXT); y += lh;
 
+  // Uptime and why it last restarted: an unexpected restart shows up here.
+  text(4, y, "Running", C_DIM);
+  const unsigned long up = millis() / 1000;
+  const char* died = UmcService::lastBootStage();
+  snprintf(buf, sizeof(buf), "%luh %lum %lus  ·  last restart: %s%s%s", up / 3600, (up % 3600) / 60, up % 60,
+           UmcService::lastResetReason(), died[0] ? " while starting: " : "", died);
+  textClip(60, y, 250, buf, C_TXT); y += lh;
+
   const int by = SCR_H - TAB_H - 30;
   button(2, by, 74, 26, "Advert");
   button(80, by, 74, 26, "Flood adv");
@@ -574,11 +593,21 @@ void UITask::drawInfo() {
 
 // ---------------------------------------------------------------- home + radio
 
+// The newest received (not transmitted) packet in the log, or NULL when nothing is logged.
+static const UmcTraffic::Entry* lastReceived() {
+  for (int i = 0; i < umc_traffic.count(); i++) {
+    const UmcTraffic::Entry* e = umc_traffic.get(i);
+    if (e != NULL && !e->tx) return e;
+  }
+  return NULL;
+}
+
 void UITask::sampleRadio() {
-  // one RSSI reading a second while the radio is listening (not transmitting)
-  if (radio_driver.isInRecvMode()) {
-    const int r = clampi((int)radio_driver.getCurrentRSSI(), -140, 0);
-    _rssi_hist[_rssi_head] = (int8_t)r;
+  // The noise floor the radio driver already measures. Reading the radio over SPI from
+  // here would fight the screen and SD card for the same bus and stall the whole device.
+  const int nf = radio_driver.getNoiseFloor();
+  if (nf) {
+    _rssi_hist[_rssi_head] = (int8_t)clampi(nf, -140, 0);
     _rssi_head = (_rssi_head + 1) % RSSI_HIST;
     if (_rssi_n < RSSI_HIST) _rssi_n++;
   }
@@ -659,8 +688,9 @@ void UITask::drawHome() {
   // ---- status cards ----
   const uint16_t batt = _board->getBattMilliVolts();
   NetworkService& net = the_mesh.getNetwork();
-  const float rssi = radio_driver.getLastRSSI();
-  const float snr = radio_driver.getLastSNR();
+  const UmcTraffic::Entry* last_rx = lastReceived();
+  const float rssi = last_rx ? last_rx->rssi : 0.0f;
+  const float snr = last_rx ? last_rx->snr4 / 4.0f : 0.0f;
   double glat, glon;
   const bool fix = selfLocation(glat, glon);
 
@@ -740,7 +770,8 @@ void UITask::drawRadio() {
     if (v > peak) peak = v;
   }
   const int floor_db = radio_driver.getNoiseFloor() ? radio_driver.getNoiseFloor() : -120;
-  const float last_rssi = radio_driver.getLastRSSI();
+  const UmcTraffic::Entry* last_rx = lastReceived();
+  const float last_rssi = last_rx ? last_rx->rssi : 0.0f;
 
   // dBm scale -130 .. -40 across the bar
   struct Row { const char* label; int dbm; uint16_t col; bool valid; };

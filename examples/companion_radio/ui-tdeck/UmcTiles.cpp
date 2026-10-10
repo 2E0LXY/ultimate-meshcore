@@ -16,7 +16,7 @@ extern DISPLAY_CLASS display;   // the T-Deck shares one SPI bus for display, ra
 bool UmcTiles::begin(int cache_tiles) {
   if (_ok) return true;
   // The card sits on the same SPI bus as the display; reuse that bus object.
-  if (!SD.begin(TDECK_SD_CS, display.spiBus(), 20000000)) {
+  if (!SD.begin(TDECK_SD_CS, display.spiBus(), 4000000)) {   // 20 MHz can wedge the shared SPI bus
     strncpy(_status, "no SD card", sizeof(_status) - 1);
     return false;
   }

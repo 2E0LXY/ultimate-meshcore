@@ -5,6 +5,7 @@
 #include <helpers/SensorManager.h>
 #include <helpers/ui/DisplayDriver.h>
 #include <helpers/umc/UmcChatLog.h>
+#include <helpers/umc/UmcTraffic.h>
 
 #include "../AbstractUITask.h"
 #include "../NodePrefs.h"
@@ -69,6 +70,9 @@ private:
 
   Tab _tab = TAB_MSGS;
   bool _dirty = true;
+  unsigned long _last_draw = 0;
+  unsigned long _tiles_retry = 0;
+  static const unsigned long kMinRedrawMs = 400;
   unsigned long _next_refresh = 0;
   unsigned long _alert_expiry = 0;
   char _alert[64] = {0};

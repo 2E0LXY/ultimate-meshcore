@@ -36,6 +36,10 @@ protected:
   #endif
 
 public:
+  // Which GPS receiver answered at start-up (0 = none): the T-Deck Plus ships with either
+  // a u-blox at 38400 or an L76K at 9600.
+  uint32_t gpsBaudDetected() const { return gps_baud_detected; }
+
   #if ENV_INCLUDE_GPS
   EnvironmentSensorManager(LocationProvider &location): _location(&location){};
   LocationProvider* getLocationProvider() { return _location; }

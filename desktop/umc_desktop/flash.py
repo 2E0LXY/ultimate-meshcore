@@ -16,6 +16,18 @@ def check_image(data):
     return None
 
 
+def native_usb(port):
+    """True when the board's USB is the ESP32's own (Espressif 0x303A), not a USB-serial chip."""
+    try:
+        import serial.tools.list_ports
+        for p in serial.tools.list_ports.comports():
+            if p.device.lower() == str(port).lower():
+                return p.vid == 0x303A
+    except Exception:
+        pass
+    return False
+
+
 def flash_app(port, data, baud=460800):
     """Blocking. Writes the app image and restarts the board. Returns esptool's output."""
     import esptool
@@ -30,7 +42,10 @@ def flash_app(port, data, baud=460800):
             f.write(data)
         with os.fdopen(fd2, "wb") as f:
             f.write(bytes([0xFF]) * OTADATA[1])
-        args = ["--chip", "auto", "--port", port, "--baud", str(baud), "write-flash", "-z",
+        # Boards wired straight to the ESP32's own USB (T-Deck and friends) ignore the usual
+        # reset line, and would sit in the flasher instead of starting the new firmware.
+        after = "watchdog-reset" if native_usb(port) else "hard-reset"
+        args = ["--chip", "auto", "--port", port, "--baud", str(baud), "--after", after, "write-flash", "-z",
                 hex(OTADATA[0]), blank, hex(APP_OFFSET), path]
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             esptool.main(args)

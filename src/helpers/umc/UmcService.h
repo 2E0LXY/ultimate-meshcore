@@ -41,6 +41,14 @@ public:
   // array of reply strings into out. Returns false on timeout / overload.
   bool runBatch(const char* commands, char* out, size_t out_size, uint32_t timeout_ms = 15000);
 
+  // Why the device last restarted ("power-on", "watchdog (hang)", "crash"…).
+  static const char* lastResetReason();
+
+  // Start-up progress. The current stage is kept in RTC memory, which survives a watchdog
+  // reset or a crash, so a device that hangs while starting says where it stopped.
+  static void bootStage(const char* name);
+  static const char* lastBootStage();   // what the previous boot was doing when it died ("" if it finished)
+
   // Loop task only: run commands now (JSON array of replies).
   void runCommandsNow(const char* commands, char* out, size_t out_size);
   // USB / Bluetooth bridge for the desktop app (loop task only). See UmcService.cpp.

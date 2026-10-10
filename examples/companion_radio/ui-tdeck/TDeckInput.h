@@ -56,29 +56,51 @@ public:
   uint8_t touchMap() const { return _map; }
 
   // One key press from the built-in keyboard, 0 if none. 8 = backspace, 13 = enter.
+  // Polled at a human rate: the main loop runs thousands of times a second, and asking the
+  // keyboard every time floods the I2C bus the touch panel shares.
   char readKey() {
-    if (!_kbd) return 0;
+    if (!_kbd || millis() - _last_key_poll < kKeyPollMs) return 0;
+    _last_key_poll = millis();
     if (Wire.requestFrom((uint8_t)TDECK_KEYBOARD_ADDR, (uint8_t)1) != 1) return 0;
     int c = Wire.read();
     return c > 0 ? (char)c : 0;
   }
 
   // Trackball as arrow keys: returns 'U', 'D', 'L', 'R' or 0.
+  // One step per few pulses, and never faster than kBallStepMs, so a flick of the ball
+  // moves a line or two instead of racing to the end.
   char readTrackball() {
-    uint8_t now = trackballBits();
-    uint8_t changed = now ^ _tb_state;
+    const uint8_t now = trackballBits();
+    const uint8_t changed = now ^ _tb_state;
     _tb_state = now;
-    if (changed & 1) return 'U';
-    if (changed & 2) return 'D';
-    if (changed & 4) return 'L';
-    if (changed & 8) return 'R';
+    for (int i = 0; i < 4; i++) {
+      if (changed & (1 << i)) _tb_pulses[i]++;
+    }
+    if (millis() - _last_ball_step < kBallStepMs) return 0;
+    static const char kDirs[4] = {'U', 'D', 'L', 'R'};
+    for (int i = 0; i < 4; i++) {
+      if (_tb_pulses[i] >= kBallPulsesPerStep) {
+        for (int k = 0; k < 4; k++) _tb_pulses[k] = 0;   // one direction at a time
+        _last_ball_step = millis();
+        return kDirs[i];
+      }
+    }
     return 0;
   }
 
   TouchEvent poll() {
     TouchEvent ev;
     ev.down = _down;
-    if (_addr == 0) return ev;
+    if (_addr == 0) {
+      // Some panels only answer once the board has settled: keep looking, slowly.
+      if (millis() - _last_probe > 3000) {
+        _last_probe = millis();
+        _addr = probe(0x5D) ? 0x5D : (probe(0x14) ? 0x14 : 0);
+      }
+      return ev;
+    }
+    if (millis() - _last_touch_poll < kTouchPollMs) return ev;
+    _last_touch_poll = millis();
 
     uint8_t status = 0;
     if (!readReg(0x814E, &status, 1)) return ev;
@@ -88,6 +110,10 @@ public:
       if (readReg(0x8150, p, 4)) {
         int rx = p[0] | (p[1] << 8);
         int ry = p[2] | (p[3] << 8);
+        if (rx > 4095 || ry > 4095) {   // nonsense from a noisy read: ignore this frame
+          writeReg(0x814E, 0);
+          return ev;
+        }
         mapPoint(rx, ry, ev.x, ev.y);
         if (!_down) {
           _down = true;
@@ -157,6 +183,13 @@ private:
            (digitalRead(TDECK_TB_LEFT) ? 4 : 0) | (digitalRead(TDECK_TB_RIGHT) ? 8 : 0);
   }
 
+  static const unsigned long kKeyPollMs = 30;
+  static const unsigned long kTouchPollMs = 25;
+  static const unsigned long kBallStepMs = 70;
+  static const uint8_t kBallPulsesPerStep = 2;
+
+  unsigned long _last_key_poll = 0, _last_touch_poll = 0, _last_ball_step = 0, _last_probe = 0;
+  uint8_t _tb_pulses[4] = {0, 0, 0, 0};
   uint8_t _addr = 0;
   bool _kbd = false;
   bool _down = false;

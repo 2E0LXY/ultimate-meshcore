@@ -255,8 +255,13 @@ The messenger also works on a phone browser:
 - **Radio tab**: live radio settings, airtime per packet, NOW / FLOOR / PEAK / MARGIN meters and a two-minute RSSI spectrum.
 - **Offline maps from the SD card**, with your position and contacts plotted. `scripts/umc_make_map_tiles.py` builds the tiles.
 - Without tiles, contacts are plotted by range and bearing, with distance rings.
-- **GPS auto-detection** for both receivers used on the T-Deck Plus (u-blox at 38400 baud, L76K at 9600).
-- The same Bluetooth, USB and WiFi app links, web interface and updates as the other client builds.
+- **GPS auto-detection** for both receivers used on the T-Deck Plus (u-blox at 38400 baud, L76K at 9600). The Info tab names the one that answered.
+- **Info tab** also shows how long it has been running and why it last restarted.
+- **Start screen** with the Ultimate MeshCore artwork.
+- The same USB and WiFi app links, web interface and updates as the other client builds.
+- **Bluetooth starts switched off on this board**: with it on, the T-Deck restarts about every 50 seconds. Turn it on with `set ble on` if you want to try it. USB, WiFi and the screen are unaffected.
+
+![T-Deck start screen](docs/images/tdeck-splash.png)
 
 ---
 

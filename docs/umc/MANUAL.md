@@ -668,7 +668,9 @@ Regional meshes ask clients to **scope** their flood traffic so it doesn't cross
 
 ### 21.8 T-Deck and T-Deck Plus: touch screen and maps
 
-The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x240 screen, using the keyboard, trackball and touch panel. It is the same client firmware, so Bluetooth, USB, WiFi apps, the web interface and updates all work as on any other board.
+The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x240 screen, using the keyboard, trackball and touch panel. It is the same client firmware, so USB, WiFi apps, the web interface and updates all work as on any other board.
+
+> **Bluetooth is switched off by default on the T-Deck.** With Bluetooth running, this board restarts about every 50 seconds (the restart shows as `watchdog` on the Info tab). Everything else — USB, WiFi, the screen, the radio — is unaffected. `set ble on` turns it on if you want to try it on your unit; `set ble off` turns it back off. The cause is still being tracked down.
 
 **Tabs along the bottom**
 
@@ -679,7 +681,7 @@ The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x2
 | **People** | Contacts with type, path and how long ago they were heard. Tap one, then **Message**, **Show map**, **Share** (zero-hop) or **Reset path**. |
 | **Map** | Offline map with your position and every contact that shares a location. Drag to pan, **+**/**−** to zoom, **me** to recentre. |
 | **Radio** | Frequency, spreading factor, bandwidth, coding rate and power; airtime for 32, 100 and 200 byte packets at the live settings; **NOW**, **FLOOR**, **PEAK** and **MARGIN** meters; a live two-minute RSSI spectrum (one bar a second); channel-busy percentage and packet counters. **MARGIN** is the last received packet's RSSI above the noise floor. |
-| **Info** | Node name, WiFi and web address, Bluetooth PIN, radio settings, GPS fix, map status, contacts, memory, and buttons for **Advert**, **Flood advert**, **Bluetooth on/off** and **Reboot**. |
+| **Info** | Node name, WiFi and web address, Bluetooth PIN, radio settings, GPS fix and which receiver was found (u-blox 38400 or L76K 9600), map card status, contacts, memory, how long it has been running and why it last restarted, and buttons for **Advert**, **Flood advert**, **Bluetooth on/off** and **Reboot**. |
 
 **GPS** — the T-Deck Plus has shipped with two different receivers (u-blox at 38400 baud and L76K at 9600). The firmware tries each speed at boot and uses whichever answers, so both work without a setting. Turn the receiver on with `gps on` (or Power & hardware in the web UI); **Info** shows the position once it has a fix.
 

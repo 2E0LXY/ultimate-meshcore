@@ -214,6 +214,50 @@ void UmcService::begin(UmcHost* host, NetworkService* network) {
                 _host->umcFirmwareVersion(), isSetupMode() ? "pending" : "done", _prefs.pin);
 }
 
+#if defined(ESP_PLATFORM)
+// Kept out of the normal data section so a reset doesn't clear it.
+RTC_NOINIT_ATTR static char s_boot_stage[24];
+RTC_NOINIT_ATTR static uint32_t s_boot_magic;
+static char s_prev_stage[24];
+static constexpr uint32_t kBootMagic = 0x554D4331;  // "UMC1"
+#endif
+
+void UmcService::bootStage(const char* name) {
+#if defined(ESP_PLATFORM)
+  static bool first = true;
+  if (first) {
+    first = false;
+    if (s_boot_magic == kBootMagic) {
+      memcpy(s_prev_stage, s_boot_stage, sizeof(s_prev_stage));
+      s_prev_stage[sizeof(s_prev_stage) - 1] = 0;
+    } else {
+      s_prev_stage[0] = 0;
+      s_boot_magic = kBootMagic;
+    }
+  }
+  StrHelper::strncpy(s_boot_stage, name, sizeof(s_boot_stage));
+#else
+  (void)name;
+#endif
+}
+
+const char* UmcService::lastBootStage() {
+#if defined(ESP_PLATFORM)
+  // "done" means the previous boot got all the way through start-up.
+  return strcmp(s_prev_stage, "done") == 0 ? "" : s_prev_stage;
+#else
+  return "";
+#endif
+}
+
+const char* UmcService::lastResetReason() {
+#if defined(ESP_PLATFORM)
+  return resetReasonLabel(esp_reset_reason());
+#else
+  return "";
+#endif
+}
+
 void UmcService::applySetupState() {
   if (_network != nullptr) {
     _network->setSetupMode(isSetupMode());
@@ -350,8 +394,9 @@ void UmcService::formatInfoJson(char* out, size_t out_size) const {
   pos = appendJsonEscaped(out, out_size, pos, _host ? _host->umcBoardName() : "");
   pos += snprintf(&out[pos], out_size - pos, ",\"env\":\"%s\",\"commit\":\"%.7s\"", UmcUpdater::buildEnv(), UmcUpdater::buildCommit());
 #if defined(ESP_PLATFORM)
-  pos += snprintf(&out[pos], out_size - pos, ",\"reset\":\"%s\",\"heap\":{\"free\":%u,\"max_block\":%u,\"min_free\":%u}",
-                  resetReasonLabel(esp_reset_reason()), ESP.getFreeHeap(), ESP.getMaxAllocHeap(), ESP.getMinFreeHeap());
+  pos += snprintf(&out[pos], out_size - pos, ",\"reset\":\"%s\",\"died_at\":\"%s\",\"heap\":{\"free\":%u,\"max_block\":%u,\"min_free\":%u}",
+                  resetReasonLabel(esp_reset_reason()), lastBootStage(), ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
+                  ESP.getMinFreeHeap());
 #endif
   pos += snprintf(&out[pos], out_size - pos, ",\"setup\":%s,\"default_pw\":%s,\"features\":[",
                   isSetupMode() ? "true" : "false", isDefaultAdminPassword() ? "true" : "false");

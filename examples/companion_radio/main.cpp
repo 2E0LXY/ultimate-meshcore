@@ -131,8 +131,48 @@ void halt() {
   #endif
 #endif
 
+#ifdef UMC_BUILD
+static DisplayDriver* umc_boot_display = NULL;
+
+// Records the stage and, once the screen is up, shows it: a device that stops while
+// starting then says where on its own screen.
+static void umcBootStage(const char* name) {
+  UmcService::bootStage(name);
+#ifdef UMC_BOOT_TRACE
+  Serial.printf("[UMC] stage: %s (%lu ms)\r\n", name, (unsigned long)millis());
+  Serial.flush();
+#endif
+  if (umc_boot_display != NULL) {
+    umc_boot_display->startFrame();
+    umc_boot_display->setTextSize(1);
+    umc_boot_display->drawTextCentered(umc_boot_display->width() / 2, umc_boot_display->height() - 14, name);
+    umc_boot_display->endFrame();
+  }
+}
+  #define UMC_BOOT_STAGE(name) umcBootStage(name)
+#else
+  #define UMC_BOOT_STAGE(name)
+#endif
+
 void setup() {
   Serial.begin(115200);
+  UMC_BOOT_STAGE("board");
+#ifdef UMC_BOOT_TRACE
+  Serial.printf("[UMC] boot, last reset: %s\r\n", UmcService::lastResetReason());
+  Serial.flush();
+#endif
+#ifdef UMC_BUILD
+  // If the last start never finished, say where it stopped (one line, before the app protocol starts).
+  if (UmcService::lastBootStage()[0]) {
+    // repeated: USB re-enumerates after a restart, so a single line is easily missed
+    for (int i = 0; i < 6; i++) {
+      Serial.printf("\r\n[UMC] previous start stopped at: %s (%s)\r\n", UmcService::lastBootStage(),
+                    UmcService::lastResetReason());
+      Serial.flush();
+      delay(300);
+    }
+  }
+#endif
 #ifdef UMC_QUIET_SERIAL
   esp_log_level_set("*", ESP_LOG_NONE);  // USB serial carries the app protocol: keep system logs off it
 #endif
@@ -143,6 +183,7 @@ void setup() {
 #endif
 
 #ifdef DISPLAY_CLASS
+  UMC_BOOT_STAGE("display");
   DisplayDriver* disp = NULL;
   if (display.begin()) {
     disp = &display;
@@ -152,9 +193,13 @@ void setup() {
   #endif
     disp->drawTextCentered(disp->width() / 2, 28, "Loading...");
     disp->endFrame();
+#ifdef UMC_BUILD
+    umc_boot_display = disp;   // later stages show their name here
+#endif
   }
 #endif
 
+  UMC_BOOT_STAGE("radio");
   if (!radio_init()) { halt(); }
 
   fast_rng.begin(radio_driver.getRngSeed());
@@ -268,8 +313,10 @@ void setup() {
   interface_manager.addInterface(InterfaceType::WiFi, &umc_webapp);
 #endif
 
+  UMC_BOOT_STAGE("interfaces");
   the_mesh.startInterface(interface_manager);
 #ifdef UMC_BUILD
+  UMC_BOOT_STAGE("umc");
   the_mesh.umcBegin(&SPIFFS,
   #if defined(BLE_PIN_CODE)
                     umc_ble ? &bluetooth_interface : NULL
@@ -278,6 +325,7 @@ void setup() {
   #endif
   );
 #endif
+  UMC_BOOT_STAGE("sensors");
   sensors.begin();
 
 #if ENV_INCLUDE_GPS == 1
@@ -285,13 +333,28 @@ void setup() {
 #endif
 
 #ifdef DISPLAY_CLASS
+  UMC_BOOT_STAGE("screen");
   ui_task.begin(disp, &sensors, the_mesh.getNodePrefs());  // still want to pass this in as dependency, as prefs might be moved
 #endif
 
+  UMC_BOOT_STAGE("done");
   board.onBootComplete();
 }
 
 void loop() {
+#ifdef UMC_BOOT_TRACE
+  {
+    static unsigned long next_alive = 0;
+    static unsigned long loops = 0;
+    loops++;
+    if (millis() > next_alive) {
+      next_alive = millis() + 1000;
+      Serial.printf("[UMC] running (%lu ms, %lu loops, %u KB free)\r\n", (unsigned long)millis(), loops,
+                    (unsigned)(ESP.getFreeHeap() / 1024));
+      Serial.flush();
+    }
+  }
+#endif
 #if defined(TBEAM_1W)
   board.updateFanControl();
 #endif
