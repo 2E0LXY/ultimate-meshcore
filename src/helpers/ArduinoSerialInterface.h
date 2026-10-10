@@ -9,10 +9,11 @@ class ArduinoSerialInterface : public BaseSerialInterface {
   uint16_t _frame_len;
   uint16_t rx_len;
   Stream* _serial;
+  unsigned long _rx_started;       // when the frame being read began, for the stall timeout
   uint8_t rx_buf[MAX_FRAME_SIZE];
 
 public:
-  ArduinoSerialInterface() { _isEnabled = false; _state = 0; }
+  ArduinoSerialInterface() { _isEnabled = false; _state = 0; _rx_started = 0; }
 
   void begin(Stream& serial) { 
     _serial = &serial; 

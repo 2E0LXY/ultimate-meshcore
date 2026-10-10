@@ -348,9 +348,18 @@ void loop() {
     static unsigned long loops = 0;
     loops++;
     if (millis() > next_alive) {
-      next_alive = millis() + 1000;
-      Serial.printf("[UMC] running (%lu ms, %lu loops, %u KB free)\r\n", (unsigned long)millis(), loops,
-                    (unsigned)(ESP.getFreeHeap() / 1024));
+      next_alive = millis() + 2000;
+      const int rxw = (int)Serial.available();
+      const int mgr_on = interface_manager.isEnabled() ? 1 : 0;
+#if defined(ENABLE_USB_INTERFACE)
+      const int usb_on = usb_serial_interface.isEnabled() ? 1 : 0;
+#else
+      const int usb_on = -1;
+#endif
+      const int is_mgr = the_mesh.umcSerialIsManager() ? 1 : 0;
+      Serial.printf("[UMC] t=%lu rx=%d mgr=%d usb=%d ismgr=%d frames=%lu loops=%lu\r\n",
+                    (unsigned long)millis(), rxw, mgr_on, usb_on, is_mgr,
+                    (unsigned long)the_mesh.umcFramesRead(), loops);
       Serial.flush();
     }
   }

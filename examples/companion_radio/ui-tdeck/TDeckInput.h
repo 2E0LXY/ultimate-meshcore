@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <Wire.h>
 
+extern bool tdeck_i2c_ok;   // set by radio_init(): false when the bus is jammed
+
 // Input for the LilyGo T-Deck / T-Deck Plus: capacitive touch (GT911), the built-in
 // keyboard (an I2C co-processor at 0x55) and the trackball.
 //
@@ -43,6 +45,27 @@ public:
     _w = screen_w;
     _h = screen_h;
     _map = touch_map;
+    _bus_ok = tdeck_i2c_ok;
+    if (!_bus_ok) {
+      pinMode(TDECK_TOUCH_INT, INPUT);
+      for (int pin : {TDECK_TB_UP, TDECK_TB_DOWN, TDECK_TB_LEFT, TDECK_TB_RIGHT}) pinMode(pin, INPUT_PULLUP);
+      _tb_state = trackballBits();
+      return;   // trackball still works; the keyboard and touch panel are on the dead bus
+    }
+#ifdef UMC_BOOT_TRACE
+    {
+      const uint8_t want[] = {0x55, 0x5D, 0x14, 0x51};   // keyboard, touch (two addresses), clock
+      Serial.printf("[UMC] I2C bus_ok=%d, devices:", _bus_ok ? 1 : 0);
+      for (uint8_t i = 0; i < sizeof(want); i++) {
+        const unsigned long t0 = millis();
+        Wire.beginTransmission(want[i]);
+        const bool ack = Wire.endTransmission() == 0;
+        Serial.printf(" 0x%02X=%s(%lums)", want[i], ack ? "yes" : "no", (unsigned long)(millis() - t0));
+      }
+      Serial.printf("\r\n");
+      Serial.flush();
+    }
+#endif
     pinMode(TDECK_TOUCH_INT, INPUT);
     _addr = probe(0x5D) ? 0x5D : (probe(0x14) ? 0x14 : 0);
     _kbd = probe(TDECK_KEYBOARD_ADDR);
@@ -52,6 +75,7 @@ public:
 
   bool hasTouch() const { return _addr != 0; }
   bool hasKeyboard() const { return _kbd; }
+  bool busOk() const { return _bus_ok; }
   void setTouchMap(uint8_t m) { _map = m & 7; }
   uint8_t touchMap() const { return _map; }
 
@@ -59,13 +83,15 @@ public:
   // Polled at a human rate: the main loop runs thousands of times a second, and asking the
   // keyboard every time floods the I2C bus the touch panel shares.
   char readKey() {
-    if (millis() - _last_key_poll < kKeyPollMs) return 0;
+    if (!_bus_ok || millis() - _last_key_poll < kKeyPollMs) return 0;
     _last_key_poll = millis();
     if (!_kbd) {
-      if (millis() - _last_kbd_probe < 2000) return 0;
+      if (_kbd_tries >= kMaxProbes || millis() - _last_kbd_probe < 5000) return 0;
       _last_kbd_probe = millis();
+      _kbd_tries++;
       _kbd = probe(TDECK_KEYBOARD_ADDR);
       if (!_kbd) return 0;
+      _kbd_tries = 0;
     }
     if (Wire.requestFrom((uint8_t)TDECK_KEYBOARD_ADDR, (uint8_t)1) != 1) {
       while (Wire.available()) Wire.read();
@@ -108,10 +134,12 @@ public:
   TouchEvent poll() {
     TouchEvent ev;
     ev.down = _down;
+    if (!_bus_ok) return ev;
     if (_addr == 0) {
       // Some panels only answer once the board has settled: keep looking, slowly.
-      if (millis() - _last_probe > 3000) {
+      if (_touch_tries < kMaxProbes && millis() - _last_probe > 5000) {
         _last_probe = millis();
+        _touch_tries++;
         _addr = probe(0x5D) ? 0x5D : (probe(0x14) ? 0x14 : 0);
       }
       return ev;
@@ -213,6 +241,9 @@ private:
   unsigned long _last_key_poll = 0, _last_touch_poll = 0, _last_ball_step = 0, _last_probe = 0;
   unsigned long _last_kbd_probe = 0, _last_ball_pulse = 0;
   uint16_t _kbd_misses = 0;
+  static const uint8_t kMaxProbes = 6;   // then stop: a bus with nothing on it must not stall the loop
+  uint8_t _kbd_tries = 0, _touch_tries = 0;
+  bool _bus_ok = false;
   uint8_t _tb_pulses[4] = {0, 0, 0, 0};
   uint8_t _addr = 0;
   bool _kbd = false;

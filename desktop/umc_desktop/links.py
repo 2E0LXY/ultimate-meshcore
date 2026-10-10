@@ -144,6 +144,15 @@ class SerialFrameLink(Link):
         loop = asyncio.get_running_loop()
         if self.ser is None:
             self.ser = await loop.run_in_executor(None, open_serial, self.port)
+        # The radio may be part-way through reading a frame from whatever used the port
+        # before (a flash tool, another app). Padding finishes that off, then it listens
+        # for a fresh frame; the padding itself is ignored because it holds no header.
+        try:
+            self.ser.reset_input_buffer()
+            self.ser.write(bytes(256))
+            self.ser.flush()
+        except Exception:
+            pass
         self.reader = SerialReader(self.ser, loop, self.deframer.feed, lambda e: self._closed_by_peer(e))
 
     async def send(self, payload):

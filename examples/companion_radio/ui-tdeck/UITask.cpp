@@ -604,6 +604,11 @@ void UITask::drawInfo() {
   snprintf(buf, sizeof(buf), "%s  (%s)", fixtxt, grx);
   textClip(60, y, 250, buf, C_TXT); y += lh;
 
+  text(4, y, "Input", C_DIM);
+  snprintf(buf, sizeof(buf), "%s  keyboard %s  touch %s", _input.busOk() ? "I2C ok" : "I2C BUS JAMMED",
+           _input.hasKeyboard() ? "yes" : "no", _input.hasTouch() ? "yes" : "no");
+  textClip(60, y, 250, buf, _input.busOk() && _input.hasKeyboard() && _input.hasTouch() ? C_TXT : C_WARN); y += lh;
+
   text(4, y, "Maps", C_DIM); textClip(60, y, 250, _tiles.status(), _tiles.available() ? C_TXT : C_DIM); y += lh;
 
   text(4, y, "Contacts", C_DIM);

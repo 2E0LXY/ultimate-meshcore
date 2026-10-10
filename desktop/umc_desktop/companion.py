@@ -55,6 +55,7 @@ class CompanionBackend:
         self.device = {}
         self.me = {}
         self.bridge = False
+        self._bridge_checked = 0.0
         self.sync_pending = False
         self.closed = False
         self.worker = None
@@ -184,10 +185,16 @@ class CompanionBackend:
             finally:
                 self.current = None
 
-    async def cmd(self, frame, timeout=10):
-        fut = asyncio.get_running_loop().create_future()
-        await self.jobs.put(Job(bytes(frame), "backend", fut))
-        return await asyncio.wait_for(fut, timeout)
+    async def cmd(self, frame, timeout=10, expect=None):
+        """Sends one command. `expect` is the reply code to wait for: a late answer to an
+        earlier command is otherwise easily mistaken for this one's."""
+        for _ in range(3):
+            fut = asyncio.get_running_loop().create_future()
+            await self.jobs.put(Job(bytes(frame), "backend", fut))
+            r = await asyncio.wait_for(fut, timeout)
+            if expect is None or r[0] in (expect, RESP_ERR):
+                return r
+        return r
 
     async def want(self, frame, code, size=1):
         r = await self.cmd(frame)
@@ -208,21 +215,41 @@ class CompanionBackend:
         await self._handshake()
         self.status = "connected"
 
-    async def _handshake(self):
-        d = await self.cmd([CMD_DEVICE_QUERY, 8])
-        if d[0] != 13:
-            raise RuntimeError("this device doesn't answer as a MeshCore companion radio")
+    async def _handshake(self, hello_seconds=45):
+        # Opening the port restarts some boards, so keep saying hello until it answers
+        # (a T-Deck takes the best part of 20 seconds to start up).
+        deadline = time.monotonic() + hello_seconds
+        d = None
+        while True:
+            try:
+                d = await self.cmd([CMD_DEVICE_QUERY, 8], timeout=3, expect=13)
+            except (TimeoutError, asyncio.TimeoutError, LinkClosed):
+                d = None
+            if d is not None and d[0] == 13:
+                break
+            if time.monotonic() > deadline:
+                raise RuntimeError("this device doesn't answer as a MeshCore companion radio")
+            await asyncio.sleep(1)
         self.device = parse_device_info(d)
-        await self.refresh_self()
-        try:
-            info = await self.bridge_request("info")
-            self.bridge = isinstance(json.loads(info), dict)
-        except Exception:
-            self.bridge = False
+        for attempt in range(3):     # the radio may still be settling after its restart
+            try:
+                await self.refresh_self()
+                break
+            except (TimeoutError, asyncio.TimeoutError, LinkClosed):
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(2)
+        self.bridge = False
+        for _ in range(2):           # Ultimate MeshCore firmware answers this; others don't
+            try:
+                self.bridge = isinstance(json.loads(await self.bridge_request("info")), dict)
+                break
+            except Exception:
+                await asyncio.sleep(1)
         self._queue_sync()   # messages that arrived while no app was connected
 
     async def refresh_self(self):
-        r = await self.cmd(bytes([CMD_APP_START, 3, 0, 0, 0, 0, 0, 0]) + APP_NAME)
+        r = await self.cmd(bytes([CMD_APP_START, 3, 0, 0, 0, 0, 0, 0]) + APP_NAME, expect=5)
         self.me = parse_self_info(r)
 
     async def close(self):
@@ -235,17 +262,40 @@ class CompanionBackend:
 
     # ------------------------------------------------------------ desktop bridge (UMC clients)
     async def bridge_request(self, req):
-        r = await self.cmd(bytes([CMD_BRIDGE, 0]) + req.encode())
-        if r[0] != CMD_BRIDGE:
+        """The reply comes back in chunks. Each one says where it belongs, so a repeated or
+        re-ordered chunk can't scramble the answer."""
+        r = await self.cmd(bytes([CMD_BRIDGE, 0]) + req.encode(), expect=CMD_BRIDGE)
+        if r[0] != CMD_BRIDGE or len(r) < 5:
             raise ValueError("no bridge")
         total = struct.unpack_from("<H", r, 1)[0]
-        data = bytearray(r[5:])
-        while len(data) < total:
-            r = await self.cmd(bytes([CMD_BRIDGE, 1]) + struct.pack("<H", len(data)))
+        if total == 0:
+            return ""
+        buf = bytearray(total)
+        filled = bytearray(total)
+
+        def place(frame):
+            off = struct.unpack_from("<H", frame, 3)[0]
+            chunk = frame[5:]
+            end = min(off + len(chunk), total)
+            if off >= total or end <= off:
+                return
+            buf[off:end] = chunk[:end - off]
+            for i in range(off, end):
+                filled[i] = 1
+
+        place(r)
+        for _ in range(total // 8 + 8):
+            try:
+                missing = filled.index(0)
+            except ValueError:
+                break
+            r = await self.cmd(bytes([CMD_BRIDGE, 1]) + struct.pack("<H", missing), expect=CMD_BRIDGE)
             if r[0] != CMD_BRIDGE or len(r) <= 5:
                 raise ValueError("bridge read failed")
-            data += r[5:]
-        return data.decode("utf-8", "replace")
+            place(r)
+        if 0 in filled:
+            raise ValueError("bridge reply incomplete")
+        return buf.decode("utf-8", "replace")
 
     async def bridge_cli(self, commands):
         out, batch = [], []
@@ -265,8 +315,25 @@ class CompanionBackend:
         await flush()
         return out
 
+    async def ensure_bridge(self):
+        """Ultimate MeshCore firmware answers the desktop bridge; a radio busy with its own
+        start-up may miss the first ask, so keep checking now and then."""
+        if self.bridge or time.monotonic() - self._bridge_checked < 20:
+            return
+        self._bridge_checked = time.monotonic()
+        for _ in range(3):
+            try:
+                self.bridge = isinstance(json.loads(await self.bridge_request("info")), dict)
+                if self.bridge:
+                    return
+            except Exception:
+                pass
+            await asyncio.sleep(1.5)
+
     # ------------------------------------------------------------ web API
     async def api(self, method, path, query, body):
+        if path in ("/api/info", "/api/cli", "/api/routes", "/api/traffic", "/api/scan"):
+            await self.ensure_bridge()
         if path == "/api/info":
             return 200, await self.info()
         if path == "/api/login":

@@ -2540,6 +2540,7 @@ void MyMesh::loopRecoveryAP() {
 void MyMesh::checkSerialInterface() {
   size_t len = _serial->checkRecvFrame(cmd_frame);
   if (len > 0) {
+    _umc_frames_read++;
     handleCmdFrame(len);
   } else if (_iter_started              // check if our ContactsIterator is 'running'
              && !_serial->isWriteBusy() // don't spam the Serial Interface too quickly!

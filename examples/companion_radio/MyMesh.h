@@ -135,6 +135,8 @@ public:
   // Call after startInterface(); ble may be NULL on builds without Bluetooth.
   void umcBegin(FILESYSTEM* fs, BaseSerialInterface* ble);
   UmcService& getUmc() { return umc; }
+  bool umcSerialIsManager() const { return _serial == _umc_all_serial; }
+  unsigned long umcFramesRead() const { return _umc_frames_read; }
   NetworkService& getNetwork() { return network; }
   UmcAppLink& getAppLink() { return app_link; }
 
@@ -298,6 +300,7 @@ private:
   uint32_t _active_ble_pin;
   bool _iter_started;
   bool _cli_rescue;
+  unsigned long _umc_frames_read = 0;
   bool send_unscoped;   // force un-scoped flood (instead of using send_scope)
   char cli_command[80];
 #if defined(ESP32) && defined(WIFI_SSID)

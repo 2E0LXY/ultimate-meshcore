@@ -134,28 +134,42 @@ async def start_or_close(backend):
         raise
 
 
+async def wait_for_port(port, seconds=30):
+    """Boards wired to the ESP32's own USB disappear while they restart."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if any(p["port"].lower() == str(port).lower() for p in list_serial_ports()):
+            return True
+        await asyncio.sleep(1)
+    return False
+
+
 async def connect_serial(port):
     """Companion radios answer an app-protocol query; repeaters answer the command line."""
     loop = asyncio.get_running_loop()
-    ser = await loop.run_in_executor(None, open_serial, port)
-    link = SerialFrameLink(port, ser)
-    await link.open()
 
     async def reopen():
         l2 = SerialFrameLink(port)
         await l2.open()
         return l2
 
+    # Opening the port restarts some boards (the T-Deck and other native-USB ones), so the
+    # first hello can be lost while it starts up again. Give it a few goes.
+    link = await reopen()
     companion = CompanionBackend(link, reconnect=reopen)
     try:
-        await asyncio.wait_for(companion.start(), 4)
+        await asyncio.wait_for(companion.start(), 60)
         return companion
     except Exception:
         companion.closed = True
         if companion.worker:
             companion.worker.cancel()
-        link.reader.stop()
-        await asyncio.sleep(0.4)
+        try:
+            await link.close()
+        except Exception:
+            pass
+    await asyncio.sleep(0.4)
+    ser = await loop.run_in_executor(None, open_serial, port)
     text = SerialTextLink(port, ser)
     rep = RepeaterSerialBackend(text)
     try:

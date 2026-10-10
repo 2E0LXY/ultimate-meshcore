@@ -37,6 +37,12 @@ size_t ArduinoSerialInterface::writeFrame(const uint8_t src[], size_t len) {
 }
 
 size_t ArduinoSerialInterface::checkRecvFrame(uint8_t dest[]) {
+  // A frame that never finishes means we started reading mid-stream (left-over bytes from a
+  // flash tool, or a host that opened the port mid-frame). Without this the half-read frame
+  // swallows everything that follows and the link looks dead until the device restarts.
+  if (_state != RECV_STATE_IDLE && millis() - _rx_started > 1000) {
+    _state = RECV_STATE_IDLE;
+  }
   while (_serial->available()) {
     int c = _serial->read();
     if (c < 0) break;
@@ -45,6 +51,7 @@ size_t ArduinoSerialInterface::checkRecvFrame(uint8_t dest[]) {
       case RECV_STATE_IDLE:
         if (c == '<') {
           _state = RECV_STATE_HDR_FOUND;
+          _rx_started = millis();
         }
         break;
       case RECV_STATE_HDR_FOUND:
@@ -54,7 +61,10 @@ size_t ArduinoSerialInterface::checkRecvFrame(uint8_t dest[]) {
       case RECV_STATE_LEN1_FOUND:
         _frame_len |= ((uint16_t)c) << 8;   // MSB
         rx_len = 0;
-        _state = _frame_len > 0 ? RECV_STATE_LEN2_FOUND : RECV_STATE_IDLE;
+        // A length no real frame can have means we started reading mid-stream. Waiting for
+        // that many bytes would swallow everything that follows and the link would look
+        // dead, so drop back and look for the next header instead.
+        _state = (_frame_len > 0 && _frame_len <= MAX_FRAME_SIZE) ? RECV_STATE_LEN2_FOUND : RECV_STATE_IDLE;
         break;
       default:
         if (rx_len < MAX_FRAME_SIZE) {
