@@ -167,8 +167,15 @@ void UITask::setBrightness(uint8_t pct) {
 }
 
 void UITask::showAlert(const char* t, int duration_millis) {
-  strncpy(_alert, t, sizeof(_alert) - 1);
-  _alert[sizeof(_alert) - 1] = 0;
+  size_t n = 0;
+  for (; t != NULL && t[n] != 0 && n < sizeof(_alert) - 1; n++) {
+    const char c = t[n];
+    _alert[n] = (c >= 32 && c < 127) ? c : ' ';   // anything else would draw as nonsense
+  }
+  _alert[n] = 0;
+  if (n == 0) { _alert_expiry = 0; return; }      // nothing to say: don't cover the screen
+  if (duration_millis < 300) duration_millis = 300;
+  if (duration_millis > 5000) duration_millis = 5000;
   _alert_expiry = millis() + duration_millis;
   _dirty = true;
 }
@@ -239,9 +246,13 @@ void UITask::loop() {
     _dirty = true;
   }
   if (millis() > _next_refresh) {   // clock, battery, GPS and stats tick over
-    _next_refresh = millis() + 5000;
+    _next_refresh = millis() + 2000;
     if (_input.touchMap() != the_mesh.getUmc().prefs().touch_map) _input.setTouchMap(the_mesh.getUmc().prefs().touch_map);
-    _dirty = true;
+    const uint32_t sig = screenSignature();
+    if (sig != _last_sig) {   // nothing on screen has changed: leave it alone, redrawing flickers
+      _last_sig = sig;
+      _dirty = true;
+    }
   }
   // A full redraw flickers, so never do more than a few a second however often something
   // asks for one.
@@ -250,6 +261,33 @@ void UITask::loop() {
     _last_draw = millis();
     draw();
   }
+}
+
+// What the current tab is showing, as one number: while this doesn't change there is
+// nothing to redraw, and a full redraw flickers.
+uint32_t UITask::screenSignature() {
+  uint32_t h = (uint32_t)_tab * 2654435761u;
+  const uint32_t clock_now = rtc_clock.getCurrentTime();
+  h ^= clock_now / 60 * 2246822519u;                       // the clock shows minutes
+  h ^= (uint32_t)(_board->getBattMilliVolts() / 50) * 3266489917u;
+  h ^= (uint32_t)the_mesh.getNumContacts() * 668265263u;
+  h ^= (uint32_t)umc_chatlog.count() * 374761393u + (uint32_t)umc_chatlog.unread() * 31u;
+  h ^= (uint32_t)(the_mesh.getNetwork().isWifiConnected() ? 1 : 0) + (the_mesh.getNetwork().isApActive() ? 2 : 0) +
+       (isBluetoothEnabled() ? 4 : 0) + (hasConnection() ? 8 : 0);
+  h ^= (uint32_t)(_alert_expiry ? 1 : 0) * 2166136261u;
+  if (_tab == TAB_HOME || _tab == TAB_RADIO) {
+    h ^= (uint32_t)(_busy_pct + 1) * 16777619u;
+    h ^= (uint32_t)(radio_driver.getNoiseFloor() + 200) * 97u;
+    const UmcTraffic::Entry* last = umc_traffic.count() ? umc_traffic.get(0) : NULL;
+    h ^= last ? (uint32_t)(last->ms ^ (last->rssi * 7919)) : 0u;
+  }
+  if (_tab == TAB_INFO) {
+    h ^= (uint32_t)(millis() / 60000) * 40503u;             // uptime, to the minute
+    h ^= (uint32_t)(ESP.getFreeHeap() / 4096) * 12289u;
+  }
+  double lat, lon;
+  h ^= selfLocation(lat, lon) ? (uint32_t)(lat * 1000) ^ (uint32_t)(lon * 1000) : 0u;
+  return h;
 }
 
 // ---------------------------------------------------------------- drawing
@@ -948,7 +986,8 @@ void UITask::handleTouch(const TouchEvent& ev) {
     return;
   }
 
-  // Info tab
+  if (_tab != TAB_INFO) return;   // the buttons below belong to the Info tab only
+
   const int by = SCR_H - TAB_H - 30;
   if (hit(ev, 2, by, 74, 26)) { showAlert(the_mesh.advert() ? "Advert sent" : "Busy - try again", 1500); return; }
   if (hit(ev, 80, by, 74, 26)) {

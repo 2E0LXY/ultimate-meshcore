@@ -59,9 +59,21 @@ public:
   // Polled at a human rate: the main loop runs thousands of times a second, and asking the
   // keyboard every time floods the I2C bus the touch panel shares.
   char readKey() {
-    if (!_kbd || millis() - _last_key_poll < kKeyPollMs) return 0;
+    if (millis() - _last_key_poll < kKeyPollMs) return 0;
     _last_key_poll = millis();
-    if (Wire.requestFrom((uint8_t)TDECK_KEYBOARD_ADDR, (uint8_t)1) != 1) return 0;
+    if (!_kbd) {
+      if (millis() - _last_kbd_probe < 2000) return 0;
+      _last_kbd_probe = millis();
+      _kbd = probe(TDECK_KEYBOARD_ADDR);
+      if (!_kbd) return 0;
+    }
+    if (Wire.requestFrom((uint8_t)TDECK_KEYBOARD_ADDR, (uint8_t)1) != 1) {
+      while (Wire.available()) Wire.read();
+      _kbd_misses++;
+      if (_kbd_misses > 50) { _kbd = false; _kbd_misses = 0; }   // gone: look for it again
+      return 0;
+    }
+    _kbd_misses = 0;
     int c = Wire.read();
     return c > 0 ? (char)c : 0;
   }
@@ -73,6 +85,11 @@ public:
     const uint8_t now = trackballBits();
     const uint8_t changed = now ^ _tb_state;
     _tb_state = now;
+    if (changed) {
+      _last_ball_pulse = millis();
+    } else if (millis() - _last_ball_pulse > 400) {
+      for (int k = 0; k < 4; k++) _tb_pulses[k] = 0;   // the ball stopped: start counting afresh
+    }
     for (int i = 0; i < 4; i++) {
       if (changed & (1 << i)) _tb_pulses[i]++;
     }
@@ -147,8 +164,13 @@ private:
     Wire.beginTransmission(_addr);
     Wire.write((uint8_t)(reg >> 8));
     Wire.write((uint8_t)(reg & 0xFF));
-    if (Wire.endTransmission(false) != 0) return false;
-    if (Wire.requestFrom(_addr, (uint8_t)len) != len) return false;
+    // A full stop, not a repeated start: a repeated start left hanging by a failed read
+    // wedges the bus, and the keyboard is on the same one.
+    if (Wire.endTransmission(true) != 0) return false;
+    if (Wire.requestFrom(_addr, (uint8_t)len) != len) {
+      while (Wire.available()) Wire.read();
+      return false;
+    }
     for (size_t i = 0; i < len; i++) dest[i] = Wire.read();
     return true;
   }
@@ -183,12 +205,14 @@ private:
            (digitalRead(TDECK_TB_LEFT) ? 4 : 0) | (digitalRead(TDECK_TB_RIGHT) ? 8 : 0);
   }
 
-  static const unsigned long kKeyPollMs = 30;
+  static const unsigned long kKeyPollMs = 20;
   static const unsigned long kTouchPollMs = 25;
   static const unsigned long kBallStepMs = 70;
   static const uint8_t kBallPulsesPerStep = 2;
 
   unsigned long _last_key_poll = 0, _last_touch_poll = 0, _last_ball_step = 0, _last_probe = 0;
+  unsigned long _last_kbd_probe = 0, _last_ball_pulse = 0;
+  uint16_t _kbd_misses = 0;
   uint8_t _tb_pulses[4] = {0, 0, 0, 0};
   uint8_t _addr = 0;
   bool _kbd = false;

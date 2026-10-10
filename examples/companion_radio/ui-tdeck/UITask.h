@@ -53,6 +53,7 @@ private:
   void sampleRadio();
   void drawCompose();
   void drawAlert();
+  uint32_t screenSignature();
 
   void handleTouch(const TouchEvent& ev);
   void handleKey(char c);
@@ -72,6 +73,7 @@ private:
   bool _dirty = true;
   unsigned long _last_draw = 0;
   unsigned long _tiles_retry = 0;
+  uint32_t _last_sig = 0;
   static const unsigned long kMinRedrawMs = 400;
   unsigned long _next_refresh = 0;
   unsigned long _alert_expiry = 0;

@@ -54,6 +54,9 @@ def flash_app(port, data, baud=460800):
     except Exception as err:
         raise RuntimeError(f"{err}: {out.getvalue()[-400:]}")
     finally:
-        os.unlink(path)
-        os.unlink(blank)
+        for f in (path, blank):
+            try:
+                os.unlink(f)
+            except OSError:
+                pass   # Windows can still hold the handle briefly; the temp file is harmless
     return out.getvalue()
