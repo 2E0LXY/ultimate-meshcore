@@ -235,8 +235,8 @@ private:
 
   static const unsigned long kKeyPollMs = 20;
   static const unsigned long kTouchPollMs = 25;
-  static const unsigned long kBallStepMs = 70;
-  static const uint8_t kBallPulsesPerStep = 2;
+  static const unsigned long kBallStepMs = 130;
+  static const uint8_t kBallPulsesPerStep = 4;
 
   unsigned long _last_key_poll = 0, _last_touch_poll = 0, _last_ball_step = 0, _last_probe = 0;
   unsigned long _last_kbd_probe = 0, _last_ball_pulse = 0;

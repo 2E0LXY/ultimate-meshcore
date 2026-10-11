@@ -7,6 +7,7 @@
 #include "UmcSplash.h"
 #include "target.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <time.h>
 
@@ -168,12 +169,16 @@ void UITask::setBrightness(uint8_t pct) {
 
 void UITask::showAlert(const char* t, int duration_millis) {
   size_t n = 0;
+  int readable = 0;
   for (; t != NULL && t[n] != 0 && n < sizeof(_alert) - 1; n++) {
     const char c = t[n];
     _alert[n] = (c >= 32 && c < 127) ? c : ' ';   // anything else would draw as nonsense
+    if (isalnum((unsigned char)_alert[n])) readable++;
   }
   _alert[n] = 0;
-  if (n == 0) { _alert_expiry = 0; return; }      // nothing to say: don't cover the screen
+  // Nothing worth reading (empty, or only punctuation left after cleaning): say nothing
+  // rather than leave an empty box on the screen.
+  if (readable < 2) { _alert_expiry = 0; return; }
   if (duration_millis < 300) duration_millis = 300;
   if (duration_millis > 5000) duration_millis = 5000;
   _alert_expiry = millis() + duration_millis;
@@ -217,10 +222,30 @@ void UITask::loop() {
 
   char tb = _input.readTrackball();
   if (tb) {
-    if (tb == 'U') { _msg_scroll++; _contact_scroll = max(0, _contact_scroll - 1); }
-    if (tb == 'D') { _msg_scroll = max(0, _msg_scroll - 1); _contact_scroll++; }
+    // left/right change tab everywhere; up/down scroll or move the selection on the tab
+    // you are on, and move the map.
     if (tb == 'L') _tab = (Tab)((_tab + TAB_COUNT - 1) % TAB_COUNT);
-    if (tb == 'R') _tab = (Tab)((_tab + 1) % TAB_COUNT);
+    else if (tb == 'R') _tab = (Tab)((_tab + 1) % TAB_COUNT);
+    else if (_tab == TAB_MSGS) {
+      _msg_scroll = tb == 'U' ? _msg_scroll + 1 : max(0, _msg_scroll - 1);
+    } else if (_tab == TAB_CONTACTS) {
+      const int total = the_mesh.getNumContacts();
+      if (total > 0) {
+        if (_contact_sel < 0) _contact_sel = 0;
+        else _contact_sel = constrain(_contact_sel + (tb == 'U' ? -1 : 1), 0, total - 1);
+        if (_contact_sel < _contact_scroll) _contact_scroll = _contact_sel;
+        if (_contact_sel > _contact_scroll + 6) _contact_scroll = _contact_sel - 6;
+      }
+    } else if (_tab == TAB_MAP) {
+      const double step = 40.0;   // pixels
+      const double scale = UMC_TILE_PX * (1 << _zoom);
+      const double cy = UmcTiles::latToWorldY(_centre_lat, _zoom) + (tb == 'U' ? -step : step);
+      _centre_lat = UmcTiles::worldYToLat(cy, _zoom);
+      _follow_self = false;
+      (void)scale;
+    } else if (_tab == TAB_HOME || _tab == TAB_INFO || _tab == TAB_RADIO) {
+      _tab = tb == 'U' ? TAB_HOME : TAB_INFO;   // quick jump between the summary screens
+    }
     _dirty = true;
   }
 
@@ -269,17 +294,18 @@ uint32_t UITask::screenSignature() {
   uint32_t h = (uint32_t)_tab * 2654435761u;
   const uint32_t clock_now = rtc_clock.getCurrentTime();
   h ^= clock_now / 60 * 2246822519u;                       // the clock shows minutes
-  h ^= (uint32_t)(_board->getBattMilliVolts() / 50) * 3266489917u;
+  h ^= (uint32_t)(_board->getBattMilliVolts() / 100) * 3266489917u;   // coarse: it wanders
   h ^= (uint32_t)the_mesh.getNumContacts() * 668265263u;
   h ^= (uint32_t)umc_chatlog.count() * 374761393u + (uint32_t)umc_chatlog.unread() * 31u;
   h ^= (uint32_t)(the_mesh.getNetwork().isWifiConnected() ? 1 : 0) + (the_mesh.getNetwork().isApActive() ? 2 : 0) +
        (isBluetoothEnabled() ? 4 : 0) + (hasConnection() ? 8 : 0);
   h ^= (uint32_t)(_alert_expiry ? 1 : 0) * 2166136261u;
   if (_tab == TAB_HOME || _tab == TAB_RADIO) {
-    h ^= (uint32_t)(_busy_pct + 1) * 16777619u;
-    h ^= (uint32_t)(radio_driver.getNoiseFloor() + 200) * 97u;
-    const UmcTraffic::Entry* last = umc_traffic.count() ? umc_traffic.get(0) : NULL;
-    h ^= last ? (uint32_t)(last->ms ^ (last->rssi * 7919)) : 0u;
+    // Only things that really change: the noise floor and RSSI wander by a dB constantly,
+    // and redrawing for that flickers the screen about once a second.
+    h ^= (uint32_t)(_busy_pct / 5 + 1) * 16777619u;
+    h ^= (uint32_t)umc_traffic.rxTotal() * 2654435761u;
+    h ^= (uint32_t)umc_traffic.txTotal() * 40503u;
   }
   if (_tab == TAB_INFO) {
     h ^= (uint32_t)(millis() / 60000) * 40503u;             // uptime, to the minute
