@@ -368,11 +368,39 @@ void loop() {
   board.updateFanControl();
 #endif
 
+#ifdef UMC_BOOT_TRACE
+  {
+    static unsigned long worst_mesh = 0, worst_ifc = 0, worst_sens = 0, worst_ui = 0, next_report = 0;
+    unsigned long t0 = millis();
+    the_mesh.loop();
+    unsigned long t1 = millis();
+    interface_manager.loop();
+    unsigned long t2 = millis();
+    sensors.loop();
+    unsigned long t3 = millis();
+#ifdef DISPLAY_CLASS
+    ui_task.loop();
+#endif
+    unsigned long t4 = millis();
+    if (t1 - t0 > worst_mesh) worst_mesh = t1 - t0;
+    if (t2 - t1 > worst_ifc) worst_ifc = t2 - t1;
+    if (t3 - t2 > worst_sens) worst_sens = t3 - t2;
+    if (t4 - t3 > worst_ui) worst_ui = t4 - t3;
+    if (millis() > next_report) {
+      next_report = millis() + 3000;
+      Serial.printf("[UMC] slowest ms: mesh=%lu ifc=%lu sensors=%lu ui=%lu\r\n",
+                    worst_mesh, worst_ifc, worst_sens, worst_ui);
+      Serial.flush();
+      worst_mesh = worst_ifc = worst_sens = worst_ui = 0;
+    }
+  }
+#else
   the_mesh.loop();
   interface_manager.loop();
   sensors.loop();
 #ifdef DISPLAY_CLASS
   ui_task.loop();
+#endif
 #endif
   rtc_clock.tick();
 #ifdef HAS_EXTERNAL_WATCHDOG

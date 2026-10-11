@@ -12,6 +12,9 @@
 
 void SerialNimBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code) {
   _pin_code = pin_code;
+  if (recv_queue == NULL) {   // not in the constructor: the system isn't up that early
+    recv_queue = xQueueCreate(NIMBLE_FRAME_QUEUE_SIZE, sizeof(Frame));
+  }
 
   if (strcmp(name, "@@MAC") == 0) {
     uint8_t addr[8];
@@ -106,6 +109,7 @@ void SerialNimBLEInterface::onWrite(NimBLECharacteristic* characteristic) {
   NimBLEAttValue value = characteristic->getValue();
   size_t len = value.length();
   if (len == 0 || len > MAX_FRAME_SIZE) return;
+  if (recv_queue == NULL) return;
   Frame frame = {};
   frame.len = static_cast<uint8_t>(len);
   memcpy(frame.buf, value.data(), len);
@@ -115,7 +119,7 @@ void SerialNimBLEInterface::onWrite(NimBLECharacteristic* characteristic) {
 // ---------- public methods
 
 void SerialNimBLEInterface::clearBuffers() {
-  xQueueReset(recv_queue);
+  if (recv_queue != NULL) xQueueReset(recv_queue);
   send_queue_len = 0;
 }
 
@@ -174,7 +178,7 @@ size_t SerialNimBLEInterface::checkRecvFrame(uint8_t dest[]) {
   }
 
   Frame frame;
-  if (xQueueReceive(recv_queue, &frame, 0) == pdTRUE) {
+  if (recv_queue != NULL && xQueueReceive(recv_queue, &frame, 0) == pdTRUE) {
     memcpy(dest, frame.buf, frame.len);
     return frame.len;
   }

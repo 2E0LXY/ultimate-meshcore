@@ -668,9 +668,7 @@ Regional meshes ask clients to **scope** their flood traffic so it doesn't cross
 
 ### 21.8 T-Deck and T-Deck Plus: touch screen and maps
 
-The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x240 screen, using the keyboard, trackball and touch panel. It is the same client firmware, so USB, WiFi apps, the web interface and updates all work as on any other board.
-
-> **Bluetooth is switched off by default on the T-Deck.** With Bluetooth running, this board restarts about every 50 seconds (the restart shows as `watchdog` on the Info tab). Everything else — USB, WiFi, the screen, the radio — is unaffected. `set ble on` turns it on if you want to try it on your unit; `set ble off` turns it back off. The cause is still being tracked down.
+The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x240 screen, using the keyboard, trackball and touch panel. It is the same client firmware, so Bluetooth, USB, WiFi apps, the web interface and updates all work as on any other board.
 
 **Tabs along the bottom**
 

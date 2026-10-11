@@ -56,6 +56,7 @@ class CompanionBackend:
         self.me = {}
         self.bridge = False
         self._bridge_checked = 0.0
+        self._bridge_tries = 0
         self.sync_pending = False
         self.closed = False
         self.worker = None
@@ -318,8 +319,12 @@ class CompanionBackend:
     async def ensure_bridge(self):
         """Ultimate MeshCore firmware answers the desktop bridge; a radio busy with its own
         start-up may miss the first ask, so keep checking now and then."""
-        if self.bridge or time.monotonic() - self._bridge_checked < 20:
+        # Until it has answered once, keep asking: a radio busy with its own start-up often
+        # misses the first few.
+        wait = 3 if self._bridge_tries < 6 else 60
+        if self.bridge or time.monotonic() - self._bridge_checked < wait:
             return
+        self._bridge_tries += 1
         self._bridge_checked = time.monotonic()
         for _ in range(3):
             try:

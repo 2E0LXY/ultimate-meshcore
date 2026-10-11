@@ -6,7 +6,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ## Done in 0.1.1
 
-- ✅ T-Deck / T-Deck Plus touch client: Home dashboard (clock, sunrise/sunset, channel busy, tap-through cards) and Radio tab (airtime per packet, NOW / FLOOR / PEAK / MARGIN meters, live RSSI spectrum)
+- ✅ T-Deck / T-Deck Plus touch client (on hardware): Home dashboard (clock, sunrise/sunset, channel busy, tap-through cards) and Radio tab (airtime per packet, NOW / FLOOR / PEAK / MARGIN meters, live RSSI spectrum)
 
 ## Done in 0.1.0
 
@@ -31,7 +31,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 | 1.2 | **Ultimate MeshCore Client** (companion) with USB + BLE + WiFi TCP (5000) + browser messenger at the same time, web UI, internet OTA | meshcomod, upstream companion, UMC | ✅ (WebSocket 8765 📋) |
 | 1.3 | Room server firmware with the UMC web UI | upstream | 📋 |
 | 1.4 | LilyGo T-TWR + SX1262 variant (after hardware identification) | new | 📋 |
-| 1.6 | **T-Deck / T-Deck Plus touch client**: home dashboard, on-screen messenger, contacts, offline SD maps, radio meters and spectrum, GPS auto-detect | new | ✅ build (hardware test pending) |
+| 1.6 | **T-Deck / T-Deck Plus touch client**: home dashboard, on-screen messenger, contacts, offline SD maps, radio meters and spectrum, GPS auto-detect | new | ✅ running on hardware |
 | 1.5 | Dual-boot MeshCore/Meshtastic package (separate download) | mesh-loader | 💡 |
 
 ## 2. Upstream MeshCore `dev` (77 commits newer than our base)

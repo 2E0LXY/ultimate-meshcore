@@ -65,7 +65,7 @@ public:
     _last_write = 0;
     last_conn_handle = 0;
     _pin_code = 0;
-    recv_queue = xQueueCreateStatic(NIMBLE_FRAME_QUEUE_SIZE, sizeof(Frame), recv_queue_storage, &recv_queue_state);
+    recv_queue = NULL;   // created in begin(), once the system is up
     send_queue_len = 0;
     _dev_name[0] = 0;
     _suspended = false;
