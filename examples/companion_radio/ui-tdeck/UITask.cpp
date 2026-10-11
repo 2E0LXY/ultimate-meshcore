@@ -1,6 +1,9 @@
 #include "UITask.h"
 
 #include <Adafruit_ST7789.h>
+#include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSansBold12pt7b.h>
+#include <Fonts/FreeSansBold24pt7b.h>
 #include <helpers/ui/ST7789LCDDisplay.h>
 
 #include "../MyMesh.h"
@@ -41,11 +44,56 @@ static Adafruit_ST7789* gfx() { return display.gfx(); }
 
 static void fill(int x, int y, int w, int h, uint16_t c) { gfx()->fillRect(x, y, w, h, c); }
 
+// The built-in font is a 5x7 grid, so anything larger than size 1 looks like building
+// blocks. These are properly drawn letter shapes; they are used for everything except the
+// very dense lists, where the small fixed font still fits best.
+static const GFXfont* const F_SMALL = &FreeSans9pt7b;
+static const GFXfont* const F_MED = &FreeSansBold12pt7b;
+static const GFXfont* const F_BIG = &FreeSansBold24pt7b;
+
 static void text(int x, int y, const char* s, uint16_t c, int size = 1) {
   gfx()->setTextSize(size);
   gfx()->setTextColor(c);
   gfx()->setCursor(x, y);
   gfx()->print(s);
+}
+
+// Same idea as text(), but with a shaped font. x, y stay the top-left corner: these fonts
+// position from the baseline, so the height is measured and added.
+static void textF(int x, int y, const char* s, uint16_t c, const GFXfont* font) {
+  if (s == NULL || s[0] == 0) return;
+  int16_t bx, by;
+  uint16_t bw, bh;
+  gfx()->setFont(font);
+  gfx()->setTextSize(1);
+  gfx()->getTextBounds(s, 0, 0, &bx, &by, &bw, &bh);
+  gfx()->setTextColor(c);
+  gfx()->setCursor(x - bx, y - by);
+  gfx()->print(s);
+  gfx()->setFont(NULL);
+}
+
+// Width of a string in a shaped font, for centring.
+static int textFWidth(const char* s, const GFXfont* font) {
+  int16_t bx, by;
+  uint16_t bw, bh;
+  gfx()->setFont(font);
+  gfx()->getTextBounds(s == NULL ? "" : s, 0, 0, &bx, &by, &bw, &bh);
+  gfx()->setFont(NULL);
+  return bw;
+}
+
+// Shaped text, cut to fit the width given.
+static void textFClip(int x, int y, int max_w, const char* s, uint16_t c, const GFXfont* font) {
+  if (s == NULL || s[0] == 0) return;
+  char buf[72];
+  StrHelper::strncpy(buf, s, sizeof(buf));
+  int len = strlen(buf);
+  while (len > 1 && textFWidth(buf, font) > max_w) {
+    buf[--len] = 0;
+    if (len > 1) buf[len - 1] = '~';
+  }
+  textF(x, y, buf, c, font);
 }
 
 // Prints at most max_w pixels, adding "…" when the text is cut.
@@ -304,6 +352,10 @@ void UITask::loop() {
 // nothing to redraw, and a full redraw flickers.
 uint32_t UITask::screenSignature() {
   uint32_t h = (uint32_t)_tab * 2654435761u;
+  if (_tab == TAB_GPS) {     // satellites come and go
+    return h ^ (uint32_t)(umc_gps_sky.count() * 131 + umc_gps_sky.tracked() * 7919 +
+                          (uint32_t)sensors.getLocationProvider()->satellitesCount() * 31 + (millis() / 5000) * 3);
+  }
   if (_tab == TAB_SETUP) {   // values here change as you set them
     return h ^ (uint32_t)(_setup_page * 65537 + _setup_sel * 131 + _setup_scroll * 17 +
                           (_editing ? 7919 : 0) + _edit_len * 31 + (_setup_confirm + 2) * 13 +
@@ -343,6 +395,7 @@ void UITask::draw() {
     case TAB_MSGS: drawMessages(); break;
     case TAB_CONTACTS: drawContacts(); break;
     case TAB_MAP: drawMap(); break;
+    case TAB_GPS: drawGps(); break;
     case TAB_RADIO: drawRadio(); break;
     case TAB_SETUP: drawSetup(); break;
     default: drawInfo(); break;
@@ -373,7 +426,7 @@ void UITask::drawHeader() {
 }
 
 void UITask::drawTabs() {
-  static const char* names[TAB_COUNT] = {"Home", "Msgs", "People", "Map", "Radio", "Setup", "Info"};
+  static const char* names[TAB_COUNT] = {"Home", "Msgs", "Who", "Map", "GPS", "Radio", "Set", "Info"};
   const int w = SCR_W / TAB_COUNT;
   for (int i = 0; i < TAB_COUNT; i++) {
     const bool on = (int)_tab == i;
@@ -608,12 +661,12 @@ void UITask::drawInfo() {
   const int top = BODY_Y + 4;
   char buf[80];
   int y = top;
-  const int lh = 13;
+  const int lh = 14;   // the shaped font is taller than the old blocky one
 
-  text(4, y, "Node", C_DIM); textClip(60, y, 250, the_mesh.getNodeName(), C_TXT); y += lh;
+  textF(4, y, "Node", C_DIM, F_SMALL); textFClip(60, y, 250, the_mesh.getNodeName(), C_TXT, F_SMALL); y += lh;
 
   NetworkService& net = the_mesh.getNetwork();
-  text(4, y, "WiFi", C_DIM);
+  textF(4, y, "WiFi", C_DIM, F_SMALL);
   if (net.isWifiConnected()) {
     snprintf(buf, sizeof(buf), "%s  %s", net.getWifiSSID(), net.getStaIp().c_str());
   } else if (net.isApActive()) {
@@ -621,23 +674,23 @@ void UITask::drawInfo() {
   } else {
     snprintf(buf, sizeof(buf), "not connected");
   }
-  textClip(60, y, 250, buf, net.isWifiConnected() || net.isApActive() ? C_TXT : C_DIM); y += lh;
+  textFClip(60, y, 250, buf, net.isWifiConnected() || net.isApActive() ? C_TXT : C_DIM, F_SMALL); y += lh;
 
-  text(4, y, "Web", C_DIM);
+  textF(4, y, "Web", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%s.local", net.getHostname());
-  textClip(60, y, 250, buf, C_TXT); y += lh;
+  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
 
-  text(4, y, "Bluetooth", C_DIM);
+  textF(4, y, "Bluetooth", C_DIM, F_SMALL);
   if (!isBluetoothEnabled()) snprintf(buf, sizeof(buf), "off");
   else if (hasConnection()) snprintf(buf, sizeof(buf), "app connected");
   else snprintf(buf, sizeof(buf), "pairing PIN %lu", (unsigned long)the_mesh.getBLEPin());
-  textClip(60, y, 250, buf, isBluetoothEnabled() ? C_TXT : C_DIM); y += lh;
+  textFClip(60, y, 250, buf, isBluetoothEnabled() ? C_TXT : C_DIM, F_SMALL); y += lh;
 
-  text(4, y, "Radio", C_DIM);
+  textF(4, y, "Radio", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%.3f MHz  SF%d  BW%.1f  %ddBm", _prefs->freq, _prefs->sf, _prefs->bw, _prefs->tx_power_dbm);
-  textClip(60, y, 250, buf, C_TXT); y += lh;
+  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
 
-  text(4, y, "GPS", C_DIM);
+  textF(4, y, "GPS", C_DIM, F_SMALL);
   double lat, lon;
   char fixtxt[32];
   if (selfLocation(lat, lon)) snprintf(fixtxt, sizeof(fixtxt), "%.4f, %.4f", lat, lon);
@@ -646,30 +699,30 @@ void UITask::drawInfo() {
   const char* grx = gbaud == 38400 ? "u-blox 38400" : gbaud == 9600 ? "L76K 9600"
                     : gbaud ? "found" : "none found";
   snprintf(buf, sizeof(buf), "%s  (%s)", fixtxt, grx);
-  textClip(60, y, 250, buf, C_TXT); y += lh;
+  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
 
-  text(4, y, "Input", C_DIM);
+  textF(4, y, "Input", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%s  keyboard %s  touch %s", _input.busOk() ? "I2C ok" : "I2C BUS JAMMED",
            _input.hasKeyboard() ? "yes" : "no", _input.hasTouch() ? "yes" : "no");
-  textClip(60, y, 250, buf, _input.busOk() && _input.hasKeyboard() && _input.hasTouch() ? C_TXT : C_WARN); y += lh;
+  textFClip(60, y, 250, buf, _input.busOk() && _input.hasKeyboard() && _input.hasTouch() ? C_TXT : C_WARN, F_SMALL); y += lh;
 
-  text(4, y, "Maps", C_DIM); textClip(60, y, 250, _tiles.status(), _tiles.available() ? C_TXT : C_DIM); y += lh;
+  textF(4, y, "Maps", C_DIM, F_SMALL); textFClip(60, y, 250, _tiles.status(), _tiles.available() ? C_TXT : C_DIM, F_SMALL); y += lh;
 
-  text(4, y, "Contacts", C_DIM);
+  textF(4, y, "Contacts", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%d contacts, %d messages kept", the_mesh.getNumContacts(), umc_chatlog.count());
-  textClip(60, y, 250, buf, C_TXT); y += lh;
+  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
 
-  text(4, y, "Memory", C_DIM);
+  textF(4, y, "Memory", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%u KB free, PSRAM %u KB", (unsigned)(ESP.getFreeHeap() / 1024), (unsigned)(ESP.getFreePsram() / 1024));
-  textClip(60, y, 250, buf, C_TXT); y += lh;
+  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
 
   // Uptime and why it last restarted: an unexpected restart shows up here.
-  text(4, y, "Running", C_DIM);
+  textF(4, y, "Running", C_DIM, F_SMALL);
   const unsigned long up = millis() / 1000;
   const char* died = UmcService::lastBootStage();
   snprintf(buf, sizeof(buf), "%luh %lum %lus  ·  last restart: %s%s%s", up / 3600, (up % 3600) / 60, up % 60,
            UmcService::lastResetReason(), died[0] ? " while starting: " : "", died);
-  textClip(60, y, 250, buf, C_TXT); y += lh;
+  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
 
   const int by = SCR_H - TAB_H - 30;
   button(2, by, 74, 26, "Advert");
@@ -735,13 +788,13 @@ void UITask::drawHome() {
   } else {
     snprintf(buf, sizeof(buf), "--:--");
   }
-  text(8, top + 6, buf, C_TXT, 5);
+  textF(8, top + 4, buf, C_TXT, F_BIG);
   if (clock_ok) {
     snprintf(buf, sizeof(buf), "%s %02d %s %04d", wd[weekdayOf(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday)],
              lt.tm_mday, mon[lt.tm_mon], lt.tm_year + 1900);
-    text(8, top + 52, buf, C_DIM, 2);
+    textF(8, top + 50, buf, C_DIM, F_MED);
   } else {
-    text(8, top + 52, "clock not set", C_WARN, 2);
+    textF(8, top + 50, "clock not set", C_WARN, F_MED);
   }
 
   // ---- sunrise / sunset from the node's position ----
@@ -762,7 +815,7 @@ void UITask::drawHome() {
   if (_busy_pct >= 0) {
     snprintf(buf, sizeof(buf), "%d%%", _busy_pct);
     meter(176, top + 22, 140, 10, _busy_pct / 100.0f, _busy_pct > 60 ? C_BAD : (_busy_pct > 25 ? C_WARN : C_OK));
-    text(176, top + 36, buf, C_TXT, 2);
+    textF(176, top + 34, buf, C_TXT, F_MED);
   } else {
     text(176, top + 24, "measuring...", C_DIM);
   }
@@ -831,7 +884,7 @@ void UITask::drawHome() {
     fill(x, y, w, h, C_CARD);
     gfx()->drawRect(x, y, w, h, C_LINE);
     text(x + 4, y + 4, cards[i].title, C_DIM);
-    text(x + 4, y + 16, cards[i].val, cards[i].col, 2);
+    textF(x + 4, y + 14, cards[i].val, cards[i].col, F_MED);
     textClip(x + 4, y + 34, w - 8, cards[i].sub, C_DIM);
   }
 }
@@ -909,6 +962,92 @@ void UITask::drawRadio() {
            (unsigned long)the_mesh.getNumSentDirect(), (unsigned long)the_mesh.getNumRecvFlood(),
            (unsigned long)the_mesh.getNumRecvDirect());
   textClip(4, y, 312, buf, C_DIM);
+}
+
+
+// ---------------------------------------------------------------- GPS screen
+
+// Satellites drawn where they are in the sky: the circle edge is the horizon, the middle
+// is straight up, north at the top. Filled dots are being received.
+void UITask::drawGps() {
+  const int top = BODY_Y;
+  char buf[64];
+  fill(0, top, SCR_W, BODY_H, C_BG);
+
+  const int cx = SCR_W - 76, cy = top + 78, r = 68;
+  gfx()->drawCircle(cx, cy, r, C_LINE);
+  gfx()->drawCircle(cx, cy, r * 2 / 3, C_LINE);      // 30 degrees up
+  gfx()->drawCircle(cx, cy, r / 3, C_LINE);          // 60 degrees up
+  gfx()->drawFastHLine(cx - r, cy, r * 2, C_LINE);
+  gfx()->drawFastVLine(cx, cy - r, r * 2, C_LINE);
+  textF(cx - 3, cy - r - 9, "N", C_DIM, F_SMALL);
+  textF(cx + r + 2, cy - 3, "E", C_DIM, F_SMALL);
+  textF(cx - 3, cy + r + 3, "S", C_DIM, F_SMALL);
+  textF(cx - r - 8, cy - 3, "W", C_DIM, F_SMALL);
+
+  int drawn = 0, strongest = 0;
+  for (int i = 0; i < umc_gps_sky.count(); i++) {
+    const UmcGpsSky::Sat& s = umc_gps_sky.get(i);
+    if (s.elevation < 0 || s.elevation > 90) continue;
+    const double az = s.azimuth * M_PI / 180.0;
+    const double rr = r * (90 - s.elevation) / 90.0;
+    const int x = cx + (int)lround(sin(az) * rr);
+    const int y = cy - (int)lround(cos(az) * rr);
+    const uint16_t col = s.snr >= 35 ? C_OK : s.snr >= 20 ? C_WARN : s.snr > 0 ? C_ACC : C_DIM;
+    if (s.snr > 0) {
+      gfx()->fillCircle(x, y, 4, col);
+    } else {
+      gfx()->drawCircle(x, y, 4, col);
+    }
+    if (s.snr > strongest) strongest = s.snr;
+    drawn++;
+  }
+
+  // ---- the numbers, down the left
+  int y = top + 6;
+  const int lh = 15;
+  double lat, lon;
+  const bool fix = selfLocation(lat, lon);
+
+  textF(4, y, "Fix", C_DIM, F_SMALL);
+  snprintf(buf, sizeof(buf), "%s", fix ? "yes" : (drawn ? "searching" : "no signal"));
+  textF(54, y, buf, fix ? C_OK : C_WARN, F_SMALL); y += lh;
+
+  textF(4, y, "Satellites", C_DIM, F_SMALL);
+  snprintf(buf, sizeof(buf), "%d used / %d seen", (int)sensors.getLocationProvider()->satellitesCount(), drawn);
+  textF(54, y, buf, C_TXT, F_SMALL); y += lh;
+
+  textF(4, y, "Best", C_DIM, F_SMALL);
+  snprintf(buf, sizeof(buf), "%d dB", strongest);
+  textF(54, y, buf, strongest >= 35 ? C_OK : C_TXT, F_SMALL); y += lh;
+
+  textF(4, y, "Position", C_DIM, F_SMALL); y += lh;
+  if (fix) {
+    snprintf(buf, sizeof(buf), "%.5f", lat);
+    textF(10, y, buf, C_TXT, F_SMALL); y += lh;
+    snprintf(buf, sizeof(buf), "%.5f", lon);
+    textF(10, y, buf, C_TXT, F_SMALL); y += lh;
+  } else {
+    textF(10, y, "not known yet", C_DIM, F_SMALL); y += lh * 2;
+  }
+
+  textF(4, y, "Altitude", C_DIM, F_SMALL);
+  snprintf(buf, sizeof(buf), "%ld m", sensors.getLocationProvider()->getAltitude() / 1000);
+  textF(54, y, buf, C_TXT, F_SMALL); y += lh;
+
+  textF(4, y, "Receiver", C_DIM, F_SMALL);
+  const uint32_t baud = sensors.gpsBaudDetected();
+  snprintf(buf, sizeof(buf), "%s", baud == 38400 ? "u-blox" : baud == 9600 ? "L76K" : baud ? "found" : "none");
+  textF(54, y, buf, baud ? C_TXT : C_WARN, F_SMALL); y += lh;
+
+  textF(4, y, "GPS power", C_DIM, F_SMALL);
+  textF(54, y, the_mesh.getNodePrefs()->gps_enabled ? "on" : "off",
+       the_mesh.getNodePrefs()->gps_enabled ? C_OK : C_DIM, F_SMALL); y += lh;
+
+  // buttons
+  const int by = SCR_H - TAB_H - 26;
+  button(4, by, 96, 22, the_mesh.getNodePrefs()->gps_enabled ? "GPS off" : "GPS on");
+  button(104, by, 108, 22, "Use as my location");
 }
 
 // ---------------------------------------------------------------- setup tab
@@ -1107,7 +1246,7 @@ void UITask::drawSetup() {
   if (_editing) {   // typing line
     fill(0, top, SCR_W, BODY_H, C_BG);
     static const char* what[] = {"", "Node name", "WiFi network", "WiFi password", "Bluetooth PIN", "Region name"};
-    text(8, top + 12, what[_edit_what], C_DIM);
+    textF(8, top + 12, what[_edit_what], C_DIM, F_SMALL);
     fill(6, top + 32, SCR_W - 12, 28, C_CARD);
     gfx()->drawRect(6, top + 32, SCR_W - 12, 28, C_ACC);
     char shown[sizeof(_edit_buf)];
@@ -1119,16 +1258,16 @@ void UITask::drawSetup() {
       StrHelper::strncpy(shown, _edit_buf, sizeof(shown));
     }
     strncat(shown, "_", sizeof(shown) - strlen(shown) - 1);
-    textClip(12, top + 42, SCR_W - 24, shown, C_TXT);
-    text(8, top + 72, "Enter saves   Esc cancels   Backspace deletes", C_DIM);
+    textFClip(12, top + 42, SCR_W - 24, shown, C_TXT, F_SMALL);
+    textF(8, top + 72, "Enter saves   Esc cancels   Backspace deletes", C_DIM, F_SMALL);
     return;
   }
 
   static const char* titles[] = {"Setup", "Device", "Radio band", "WiFi", "Choose a network",
                                  "Bluetooth", "Region scope", "GPS", "Firmware"};
   fill(0, top, SCR_W, 16, C_CARD);
-  text(6, top + 4, titles[_setup_page], C_ACC);
-  if (_setup_page != SP_ROOT) text(SCR_W - 76, top + 4, "Back: left", C_DIM);
+  textF(6, top + 4, titles[_setup_page], C_ACC, F_SMALL);
+  if (_setup_page != SP_ROOT) textF(SCR_W - 76, top + 4, "Back: left", C_DIM, F_SMALL);
 
   const int count = setupRowCount();
   if (_setup_sel >= count) _setup_sel = count - 1;
@@ -1145,16 +1284,16 @@ void UITask::drawSetup() {
     if (on) fill(0, y, SCR_W, row_h, C_CARD);
     setupRow(row, label, sizeof(label), value, sizeof(value));
     const bool danger = _setup_page == SP_DEVICE && row == 2 && _setup_confirm == row;
-    text(6, y + 6, label, on ? C_TXT : C_DIM);
-    textClip(150, y + 6, SCR_W - 156, value, danger ? C_BAD : (on ? C_TXT : C_DIM));
+    textF(6, y + 6, label, on ? C_TXT : C_DIM, F_SMALL);
+    textFClip(150, y + 6, SCR_W - 156, value, danger ? C_BAD : (on ? C_TXT : C_DIM), F_SMALL);
   }
 
   if (count > rows_visible) {   // a hint that the list goes on
     char pos[24];
     snprintf(pos, sizeof(pos), "%d/%d", _setup_sel + 1, count);
-    text(SCR_W - 42, SCR_H - TAB_H - 12, pos, C_DIM);
+    textF(SCR_W - 42, SCR_H - TAB_H - 12, pos, C_DIM, F_SMALL);
   }
-  if (_setup_status[0]) textClip(6, SCR_H - TAB_H - 12, SCR_W - 50, _setup_status, C_OK);
+  if (_setup_status[0]) textFClip(6, SCR_H - TAB_H - 12, SCR_W - 50, _setup_status, C_OK, F_SMALL);
 }
 
 void UITask::setupAction(int row) {
@@ -1438,6 +1577,28 @@ void UITask::handleTouch(const TouchEvent& ev) {
       _centre_lat = UmcTiles::worldYToLat(cy, _zoom);
       _follow_self = false;
       _dirty = true;
+    }
+    return;
+  }
+
+  if (_tab == TAB_GPS) {
+    const int by = SCR_H - TAB_H - 26;
+    if (hit(ev, 4, by, 96, 22)) {
+      showAlert(umcCli(the_mesh.getNodePrefs()->gps_enabled ? "gps off" : "gps on"), 1500);
+      return;
+    }
+    if (hit(ev, 104, by, 108, 22)) {
+      double lat, lon;
+      if (selfLocation(lat, lon)) {
+        char cmd[48];
+        snprintf(cmd, sizeof(cmd), "set lat %.5f", lat);
+        umcCli(cmd);
+        snprintf(cmd, sizeof(cmd), "set lon %.5f", lon);
+        showAlert(umcCli(cmd), 1500);
+      } else {
+        showAlert("No fix yet", 1500);
+      }
+      return;
     }
     return;
   }

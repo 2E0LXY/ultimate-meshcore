@@ -677,7 +677,8 @@ The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x2
 | **Home** | Clock and date, sunrise and sunset (needs a position fix and a set clock), channel-busy percentage and noise floor, and six cards: battery, GPS, nodes, messages, last signal and links. Tap a card to jump to the matching tab. |
 | **Msgs** | The conversation log. **To:** at the top picks the channel or contact (tap **change** to cycle). Type on the keyboard and press **Enter** (or tap **Send**). Drag the list to scroll back. |
 | **People** | Contacts with type, path and how long ago they were heard. Tap one, then **Message**, **Show map**, **Share** (zero-hop) or **Reset path**. |
-| **Map** | Offline map with your position and every contact that shares a location. Drag to pan, **+**/**−** to zoom, **me** to recentre. |
+| **Map** | Offline map with your position and every contact that shares a location. Drag to pan, **+**/**−** to zoom, **me** to recentre. Without map tiles it plots contacts by range and bearing with distance rings, and the Info tab's **Maps** line says what it found on the card. |
+| **GPS** | Fix state, satellites used and seen, best signal, position, altitude, which receiver answered and whether GPS is powered — beside a **sky view**: the circle edge is the horizon, the middle is straight up, north at the top. Filled dots are satellites being received, coloured by signal (green strong, amber fair, blue weak); hollow dots are known about but not received. Buttons turn GPS on/off and store the fix as this node's location. |
 | **Radio** | Frequency, spreading factor, bandwidth, coding rate and power; airtime for 32, 100 and 200 byte packets at the live settings; **NOW**, **FLOOR**, **PEAK** and **MARGIN** meters; a live two-minute RSSI spectrum (one bar a second); channel-busy percentage and packet counters. **MARGIN** is the last received packet's RSSI above the noise floor. |
 | **Setup** | Sets the radio up without a computer, in sections: **Device** (name, restart, factory reset), **Radio** (nine bands to pick from — EU/UK 869 narrow/medium/long, EU 433, Switzerland, Czech, Portugal, USA/Canada, Australia/NZ — and TX power from 2 to 22 dBm), **WiFi** (scan for networks and pick one, or type the name, then the password, then Connect), **Bluetooth** (on/off and the pairing PIN), **Region** scope, **GPS**, and **Firmware** (version and update check). Move with the trackball or tap a row; **Enter** or a tap opens it. The band in use and the chosen region are marked *in use*. Text rows open a typing line — **Enter** saves, **Esc** cancels, Backspace deletes. Trackball left, the title bar, or **< Back** returns to the section list. |
 | **Info** | Node name, WiFi and web address, Bluetooth PIN, radio settings, GPS fix and which receiver was found (u-blox 38400 or L76K 9600), map card status, contacts, memory, how long it has been running and why it last restarted, and buttons for **Advert**, **Flood advert**, **Bluetooth on/off** and **Reboot**. |
@@ -695,7 +696,14 @@ The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x2
    ```
 
    `--bbox` is `lat1,lon1,lat2,lon2`. Each zoom level roughly quadruples the number of tiles, so start small: a county at zoom 10–13 is a few hundred tiles (tens of MB). Tiles are stored as `/maps/<zoom>/<x>/<y>.bin` (raw RGB565), which the radio can draw without decoding images.
-3. Put the card back and open the **Map** tab. **Info → Maps** shows what was found, e.g. `SD maps, zoom 10-13`.
+3. Put the card back and open the **Map** tab. **Info → Maps** shows exactly what was found:
+
+   | Maps line | What it means |
+   |---|---|
+   | `SD maps, zoom 10-13` | Tiles found and in use |
+   | `no SD card` | The card wasn't readable — reseat it, or try another card |
+   | `card has no /maps folder` | The folder must be named `maps`, at the top of the card |
+   | `/maps: 12 files, 0 folders - need /maps/<zoom>/<x>/<y>.bin` | Something is in `/maps`, but not the folder-per-zoom layout. Image files (`.png`, `.jpg`) are not read: the tool converts them to raw `.bin` tiles the radio can draw straight to the screen. |
 
 Without a card (or outside the tiles you copied) the Map tab still works: it plots every contact by **distance and bearing** from your position, with range rings, which is often all you need in the field.
 

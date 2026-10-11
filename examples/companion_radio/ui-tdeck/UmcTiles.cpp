@@ -39,7 +39,16 @@ bool UmcTiles::begin(int cache_tiles) {
   }
   scanZooms();
   if (_max_zoom < 0) {
-    strncpy(_status, "/maps has no zoom folders", sizeof(_status) - 1);
+    // Say what is actually there: the usual mistake is image files, or tiles one folder
+    // deeper, instead of /maps/<zoom>/<x>/<y>.bin
+    int files = 0, dirs = 0;
+    File dir = SD.open("/maps");
+    for (File f = dir.openNextFile(); f && files + dirs < 200; f = dir.openNextFile()) {
+      if (f.isDirectory()) dirs++; else files++;
+      f.close();
+    }
+    dir.close();
+    snprintf(_status, sizeof(_status), "/maps: %d files, %d folders - need /maps/<zoom>/<x>/<y>.bin", files, dirs);
     return false;
   }
   snprintf(_status, sizeof(_status), "SD maps, zoom %d-%d", _min_zoom, _max_zoom);

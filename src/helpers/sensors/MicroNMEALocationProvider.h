@@ -37,6 +37,10 @@
     #endif
 #endif
 
+#ifdef UMC_BUILD
+  #include <helpers/umc/UmcGpsSky.h>
+#endif
+
 class MicroNMEALocationProvider : public LocationProvider {
     char _nmeaBuffer[100];
     MicroNMEA nmea;
@@ -122,6 +126,12 @@ public :
         return alt;
     }
     long satellitesCount() override { return nmea.getNumSatellites(); }
+
+    // Read-only extras for the on-screen GPS page.
+    int hdopTenths() const { return nmea.getHDOP(); }
+    long speedThousandthKnots() const { return nmea.getSpeed(); }
+    long courseThousandthDeg() const { return nmea.getCourse(); }
+    char navSystem() const { return nmea.getNavSystem(); }
     bool isValid() override { return nmea.isValid(); }
 
     long getTimestamp() override { 
@@ -141,6 +151,9 @@ public :
             Serial.print(c);
             #endif
             nmea.process(c);
+#ifdef UMC_BUILD
+            umc_gps_sky.feed(c);   // the satellites the receiver can see, for the GPS screen
+#endif
         }
 
         if (!isValid()) time_valid = 0;

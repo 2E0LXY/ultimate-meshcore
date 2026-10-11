@@ -5,6 +5,7 @@
 #include <helpers/SensorManager.h>
 #include <helpers/ui/DisplayDriver.h>
 #include <helpers/umc/UmcChatLog.h>
+#include <helpers/umc/UmcGpsSky.h>
 #include <helpers/umc/UmcTraffic.h>
 
 #include "../AbstractUITask.h"
@@ -39,7 +40,7 @@ public:
   const char* mapStatus() { return _tiles.status(); }
 
 private:
-  enum Tab { TAB_HOME = 0, TAB_MSGS, TAB_CONTACTS, TAB_MAP, TAB_RADIO, TAB_SETUP, TAB_INFO, TAB_COUNT };
+  enum Tab { TAB_HOME = 0, TAB_MSGS, TAB_CONTACTS, TAB_MAP, TAB_GPS, TAB_RADIO, TAB_SETUP, TAB_INFO, TAB_COUNT };
 
   void draw();
   void drawHeader();
@@ -50,6 +51,7 @@ private:
   void drawInfo();
   void drawHome();
   void drawRadio();
+  void drawGps();
   void drawSetup();
   void setupAction(int row);
   void setupEditDone();
