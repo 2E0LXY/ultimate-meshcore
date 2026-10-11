@@ -148,8 +148,32 @@ static void button(int x, int y, int w, int h, const char* label, bool on = fals
 // The contact store keeps a few reserved slots at the front for anonymous requests, and
 // getNumContacts() doesn't count them - so the screen must skip them too, or every list
 // starts with blank entries.
-static bool contactAt(int i, ContactInfo& dest) {
-  return i >= 0 && the_mesh.getContactByIdx((uint32_t)(i + MAX_ANON_CONTACTS), dest);
+static bool contactAt(int want, ContactInfo& dest) {
+  if (want < 0) return false;
+  int seen = 0;
+  const int slots = the_mesh.getTotalContactSlots();
+  for (int i = 0; i < slots; i++) {
+    ContactInfo c;
+    if (!the_mesh.getContactByIdx((uint32_t)i, c)) break;
+    if (c.type == ADV_TYPE_NONE || c.name[0] == 0) continue;   // a reserved slot, not a contact
+    if (seen++ == want) {
+      dest = c;
+      return true;
+    }
+  }
+  return false;
+}
+
+// How many real contacts there are, counted the same way the list shows them.
+static int contactCount() {
+  int n = 0;
+  ContactInfo c;
+  const int slots = the_mesh.getTotalContactSlots();
+  for (int i = 0; i < slots; i++) {
+    if (!the_mesh.getContactByIdx((uint32_t)i, c)) break;
+    if (c.type != ADV_TYPE_NONE && c.name[0] != 0) n++;
+  }
+  return n;
 }
 
 static bool hit(const TouchEvent& ev, int x, int y, int w, int h) {
@@ -317,7 +341,7 @@ void UITask::loop() {
     else if (_tab == TAB_MSGS) {
       _msg_scroll = tb == 'U' ? _msg_scroll + 1 : max(0, _msg_scroll - 1);
     } else if (_tab == TAB_CONTACTS) {
-      const int total = the_mesh.getNumContacts();
+      const int total = contactCount();
       if (total > 0) {
         if (_contact_sel < 0) _contact_sel = 0;
         else _contact_sel = constrain(_contact_sel + (tb == 'U' ? -1 : 1), 0, total - 1);
@@ -396,7 +420,7 @@ uint32_t UITask::screenSignature() {
   const uint32_t clock_now = rtc_clock.getCurrentTime();
   h ^= clock_now / 60 * 2246822519u;                       // the clock shows minutes
   h ^= (uint32_t)(_board->getBattMilliVolts() / 100) * 3266489917u;   // coarse: it wanders
-  h ^= (uint32_t)the_mesh.getNumContacts() * 668265263u;
+  h ^= (uint32_t)contactCount() * 668265263u;
   h ^= (uint32_t)umc_chatlog.count() * 374761393u + (uint32_t)umc_chatlog.unread() * 31u;
   h ^= (uint32_t)(the_mesh.getNetwork().isWifiConnected() ? 1 : 0) + (the_mesh.getNetwork().isApActive() ? 2 : 0) +
        (isBluetoothEnabled() ? 4 : 0) + (hasConnection() ? 8 : 0);
@@ -610,7 +634,7 @@ void UITask::drawContacts() {
   const int top = BODY_Y + 2;
   const int row_h = 22;
   const int rows = (BODY_H - 30) / row_h;
-  const int total = the_mesh.getNumContacts();
+  const int total = contactCount();
   if (_contact_scroll > max(0, total - rows)) _contact_scroll = max(0, total - rows);
 
   char buf[48];
@@ -704,7 +728,7 @@ void UITask::drawMap() {
   }
 
   // markers
-  const int total = the_mesh.getNumContacts();
+  const int total = contactCount();
   double far_m = 1;
   for (int i = 0; i < total; i++) {
     ContactInfo c;
@@ -752,12 +776,13 @@ void UITask::drawMap() {
 }
 
 void UITask::drawInfo() {
+  const int VX = 108;   // where the values start: the labels need the room
   const int top = BODY_Y + 4;
   char buf[80];
   int y = top;
   const int lh = 14;   // the shaped font is taller than the old blocky one
 
-  textF(4, y, "Node", C_DIM, F_SMALL); textFClip(60, y, 250, the_mesh.getNodeName(), C_TXT, F_SMALL); y += lh;
+  textF(4, y, "Node", C_DIM, F_SMALL); textFClip(VX, y, SCR_W - VX - 6, the_mesh.getNodeName(), C_TXT, F_SMALL); y += lh;
 
   NetworkService& net = the_mesh.getNetwork();
   textF(4, y, "WiFi", C_DIM, F_SMALL);
@@ -768,21 +793,21 @@ void UITask::drawInfo() {
   } else {
     snprintf(buf, sizeof(buf), "not connected");
   }
-  textFClip(60, y, 250, buf, net.isWifiConnected() || net.isApActive() ? C_TXT : C_DIM, F_SMALL); y += lh;
+  textFClip(VX, y, SCR_W - VX - 6, buf, net.isWifiConnected() || net.isApActive() ? C_TXT : C_DIM, F_SMALL); y += lh;
 
   textF(4, y, "Web", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%s.local", net.getHostname());
-  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
+  textFClip(VX, y, SCR_W - VX - 6, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Bluetooth", C_DIM, F_SMALL);
   if (!isBluetoothEnabled()) snprintf(buf, sizeof(buf), "off");
   else if (hasConnection()) snprintf(buf, sizeof(buf), "app connected");
   else snprintf(buf, sizeof(buf), "pairing PIN %lu", (unsigned long)the_mesh.getBLEPin());
-  textFClip(60, y, 250, buf, isBluetoothEnabled() ? C_TXT : C_DIM, F_SMALL); y += lh;
+  textFClip(VX, y, SCR_W - VX - 6, buf, isBluetoothEnabled() ? C_TXT : C_DIM, F_SMALL); y += lh;
 
   textF(4, y, "Radio", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%.3f MHz  SF%d  BW%.1f  %ddBm", _prefs->freq, _prefs->sf, _prefs->bw, _prefs->tx_power_dbm);
-  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
+  textFClip(VX, y, SCR_W - VX - 6, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "GPS", C_DIM, F_SMALL);
   double lat, lon;
@@ -793,22 +818,22 @@ void UITask::drawInfo() {
   const char* grx = gbaud == 38400 ? "u-blox 38400" : gbaud == 9600 ? "L76K 9600"
                     : gbaud ? "found" : "none found";
   snprintf(buf, sizeof(buf), "%s  (%s)", fixtxt, grx);
-  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
+  textFClip(VX, y, SCR_W - VX - 6, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Input", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%s  keyboard %s  touch %s", _input.busOk() ? "I2C ok" : "I2C BUS JAMMED",
            _input.hasKeyboard() ? "yes" : "no", _input.hasTouch() ? "yes" : "no");
-  textFClip(60, y, 250, buf, _input.busOk() && _input.hasKeyboard() && _input.hasTouch() ? C_TXT : C_WARN, F_SMALL); y += lh;
+  textFClip(VX, y, SCR_W - VX - 6, buf, _input.busOk() && _input.hasKeyboard() && _input.hasTouch() ? C_TXT : C_WARN, F_SMALL); y += lh;
 
-  textF(4, y, "Maps", C_DIM, F_SMALL); textFClip(60, y, 250, _tiles.status(), _tiles.available() ? C_TXT : C_DIM, F_SMALL); y += lh;
+  textF(4, y, "Maps", C_DIM, F_SMALL); textFClip(VX, y, SCR_W - VX - 6, _tiles.status(), _tiles.available() ? C_TXT : C_DIM, F_SMALL); y += lh;
 
   textF(4, y, "Contacts", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%d contacts, %d messages kept", the_mesh.getNumContacts(), umc_chatlog.count());
-  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
+  textFClip(VX, y, SCR_W - VX - 6, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Memory", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%u KB free, PSRAM %u KB", (unsigned)(ESP.getFreeHeap() / 1024), (unsigned)(ESP.getFreePsram() / 1024));
-  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
+  textFClip(VX, y, SCR_W - VX - 6, buf, C_TXT, F_SMALL); y += lh;
 
   // Uptime and why it last restarted: an unexpected restart shows up here.
   textF(4, y, "Running", C_DIM, F_SMALL);
@@ -816,7 +841,7 @@ void UITask::drawInfo() {
   const char* died = UmcService::lastBootStage();
   snprintf(buf, sizeof(buf), "%luh %lum %lus  ·  last restart: %s%s%s", up / 3600, (up % 3600) / 60, up % 60,
            UmcService::lastResetReason(), died[0] ? " while starting: " : "", died);
-  textFClip(60, y, 250, buf, C_TXT, F_SMALL); y += lh;
+  textFClip(VX, y, SCR_W - VX - 6, buf, C_TXT, F_SMALL); y += lh;
 
   const int by = SCR_H - TAB_H - 30;
   button(2, by, 74, 26, "Advert");
@@ -886,9 +911,9 @@ void UITask::drawHome() {
   if (clock_ok) {
     snprintf(buf, sizeof(buf), "%s %02d %s %04d", wd[weekdayOf(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday)],
              lt.tm_mday, mon[lt.tm_mon], lt.tm_year + 1900);
-    textF(8, top + 50, buf, C_DIM, F_MED);
+    textF(8, top + 52, buf, C_DIM, F_SMALL);
   } else {
-    textF(8, top + 50, "clock not set", C_WARN, F_MED);
+    textF(8, top + 52, "clock not set", C_WARN, F_SMALL);
   }
 
   // ---- sunrise / sunset from the node's position ----
@@ -948,7 +973,7 @@ void UITask::drawHome() {
   cards[1].col = fix ? C_OK : C_DIM;
 
   cards[2].title = "NODES";
-  snprintf(cards[2].val, sizeof(cards[2].val), "%d", the_mesh.getNumContacts());
+  snprintf(cards[2].val, sizeof(cards[2].val), "%d", contactCount());
   snprintf(cards[2].sub, sizeof(cards[2].sub), "contacts");
   cards[2].col = C_TXT;
 
@@ -1105,15 +1130,15 @@ void UITask::drawGps() {
 
   textF(4, y, "Fix", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%s", fix ? "yes" : (drawn ? "searching" : "no signal"));
-  textF(54, y, buf, fix ? C_OK : C_WARN, F_SMALL); y += lh;
+  textFClip(86, y, 150 - 86, buf, fix ? C_OK : C_WARN, F_SMALL); y += lh;
 
   textF(4, y, "Satellites", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%d used / %d seen", (int)sensors.getLocationProvider()->satellitesCount(), drawn);
-  textF(54, y, buf, C_TXT, F_SMALL); y += lh;
+  textFClip(86, y, 150 - 86, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Best", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%d dB", strongest);
-  textF(54, y, buf, strongest >= 35 ? C_OK : C_TXT, F_SMALL); y += lh;
+  textFClip(86, y, 150 - 86, buf, strongest >= 35 ? C_OK : C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Position", C_DIM, F_SMALL); y += lh;
   if (fix) {
@@ -1127,16 +1152,16 @@ void UITask::drawGps() {
 
   textF(4, y, "Altitude", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%ld m", sensors.getLocationProvider()->getAltitude() / 1000);
-  textF(54, y, buf, C_TXT, F_SMALL); y += lh;
+  textFClip(86, y, 150 - 86, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Receiver", C_DIM, F_SMALL);
   const uint32_t baud = sensors.gpsBaudDetected();
   snprintf(buf, sizeof(buf), "%s", baud == 38400 ? "u-blox" : baud == 9600 ? "L76K" : baud ? "found" : "none");
-  textF(54, y, buf, baud ? C_TXT : C_WARN, F_SMALL); y += lh;
+  textFClip(86, y, 150 - 86, buf, baud ? C_TXT : C_WARN, F_SMALL); y += lh;
 
   textF(4, y, "GPS power", C_DIM, F_SMALL);
-  textF(54, y, the_mesh.getNodePrefs()->gps_enabled ? "on" : "off",
-       the_mesh.getNodePrefs()->gps_enabled ? C_OK : C_DIM, F_SMALL); y += lh;
+  textFClip(86, y, 150 - 86, the_mesh.getNodePrefs()->gps_enabled ? "on" : "off",
+            the_mesh.getNodePrefs()->gps_enabled ? C_OK : C_DIM, F_SMALL); y += lh;
 
   // buttons
   const int by = SCR_H - TAB_H - 26;
@@ -1873,14 +1898,14 @@ void UITask::handleTouch(const TouchEvent& ev) {
         if (next < MAX_GROUP_CHANNELS) {
           _to_channel_idx = next;
           StrHelper::strncpy(_to_name, ch.name, sizeof(_to_name));
-        } else if (the_mesh.getNumContacts() > 0) {
+        } else if (contactCount() > 0) {
           selectContact(0);
         }
       } else {
         // move to the next contact, then wrap back to channel 0
         int idx = -1;
         ContactInfo c;
-        for (int i = 0; i < the_mesh.getNumContacts(); i++) {
+        for (int i = 0; i < contactCount(); i++) {
           if (contactAt(i, c) && memcmp(c.id.pub_key, _to_key, 6) == 0) { idx = i; break; }
         }
         if (idx >= 0 && idx + 1 < the_mesh.getNumContacts()) {
@@ -1924,7 +1949,7 @@ void UITask::handleTouch(const TouchEvent& ev) {
   if (_tab == TAB_CONTACTS) {
     const int row_h = 22, top = BODY_Y + 14;
     const int by = SCR_H - TAB_H - 26;
-    const int total = the_mesh.getNumContacts();
+    const int total = contactCount();
     ContactInfo c;
     if (_contact_sel >= 0 && _contact_sel < total && contactAt(_contact_sel, c)) {
       if (hit(ev, 2, by, 74, 22)) { selectContact(_contact_sel); _tab = TAB_MSGS; _dirty = true; return; }

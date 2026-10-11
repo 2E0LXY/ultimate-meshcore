@@ -3006,6 +3006,25 @@ bool MyMesh::umcCli(const char* command, char* reply, size_t n) {
     snprintf(reply, n, "OK - flood sends scoped to %s (names are case-sensitive)", _prefs.default_scope_name);
     return true;
   }
+  if (strcmp(command, "contacts") == 0) {
+    size_t pos = 0;
+    reply[0] = 0;
+    ContactsIterator iter = startContactsIterator();
+    ContactInfo c;
+    int count = 0;
+    while (iter.hasNext(this, c) && pos + 48 < n) {
+      if (c.type == ADV_TYPE_NONE || c.name[0] == 0) continue;
+      const char* kind = c.type == ADV_TYPE_REPEATER ? "rpt" : c.type == ADV_TYPE_ROOM ? "room"
+                         : c.type == ADV_TYPE_SENSOR ? "sensor" : "chat";
+      char path[16];
+      if (c.out_path_len == 0xFF) strcpy(path, "flood");
+      else snprintf(path, sizeof(path), "%dhop", c.out_path_len & 63);
+      pos += snprintf(&reply[pos], n - pos, "%s%s (%s, %s)", count ? "\n" : "> ", c.name, kind, path);
+      count++;
+    }
+    if (count == 0) snprintf(reply, n, "> no contacts yet");
+    return true;
+  }
   if (strcmp(command, "get contacts.count") == 0) {
     int channels = 0;
     for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
