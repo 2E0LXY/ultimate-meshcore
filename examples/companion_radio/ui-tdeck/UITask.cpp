@@ -67,82 +67,280 @@ static Adafruit_ST7789* gfx() { return display.gfx(); }
 
 static void fill(int x, int y, int w, int h, uint16_t c) { gfx()->fillRect(x, y, w, h, c); }
 
-// The built-in font is a 5x7 grid, so anything larger than size 1 looks like building
-// blocks. These are properly drawn letter shapes; they are used for everything except the
-// very dense lists, where the small fixed font still fits best.
-static const GFXfont* const F_SMALL = &FreeSans9pt7b;
-static const GFXfont* const F_MED = &FreeSansBold12pt7b;
-static const GFXfont* const F_BIG = &FreeSansBold24pt7b;
+// ---------------------------------------------------------------------------------------
+// Typography. Every screen uses one family in three sizes, so nothing is drawn with the
+// blocky 5x7 built-in font any more.
+static const GFXfont* const F_SMALL = &FreeSans9pt7b;      // lists, labels, values, buttons
+static const GFXfont* const F_MED = &FreeSansBold12pt7b;   // the figure a card is about
+static const GFXfont* const F_BIG = &FreeSansBold24pt7b;   // the clock
+
+static const GFXfont* fontFor(int size) { return size >= 4 ? F_BIG : size >= 2 ? F_MED : F_SMALL; }
+
+// ---------------------------------------------------------------------------------------
+// Station names arrive as UTF-8 and often carry an emoji or an accented letter, neither of
+// which the fonts above hold - they stop at plain ASCII, so the raw bytes came out as a
+// run of nonsense. Names are folded first: letters lose their accents, and symbols become
+// one of these little 12x12 icons.
+enum {
+  IC_NONE = 0,
+  IC_DISH,
+  IC_TOWER,
+  IC_SUN,
+  IC_BOLT,
+  IC_HOUSE,
+  IC_PIN,
+  IC_STAR,
+  IC_HEART,
+  IC_RADIO,
+  IC_CAR,
+  IC_PLANE,
+  IC_GLOBE,
+  IC_PAW,
+  IC_FACE,
+  IC_CHECK,
+  IC_DEG,
+  IC_FLAG,
+  IC_DOT,
+  IC_COUNT
+};
+
+static const uint8_t kIconBits[IC_COUNT - 1][24] = {
+    { 0x0F, 0x00, 0x30, 0x80, 0x40, 0x40, 0x40, 0x40, 0x40, 0xC0, 0x21, 0x00, 0x1E, 0x00, 0x04, 0x00, 0x04, 0x00, 0x0E, 0x00, 0x1F, 0x00, 0x3F, 0x80 },   // DISH
+    { 0x06, 0x00, 0x06, 0x00, 0x09, 0x00, 0x0F, 0x00, 0x10, 0x80, 0x16, 0x80, 0x20, 0x40, 0x2F, 0x40, 0x40, 0x20, 0x4F, 0x20, 0x80, 0x10, 0xFF, 0xF0 },   // TOWER
+    { 0x06, 0x00, 0x46, 0x20, 0x20, 0x40, 0x0F, 0x00, 0x1F, 0x80, 0xDF, 0xB0, 0xDF, 0xB0, 0x1F, 0x80, 0x0F, 0x00, 0x20, 0x40, 0x46, 0x20, 0x06, 0x00 },   // SUN
+    { 0x00, 0x00, 0x07, 0x00, 0x0E, 0x00, 0x1C, 0x00, 0x3F, 0x00, 0x07, 0x00, 0x0E, 0x00, 0x1C, 0x00, 0x38, 0x00, 0x70, 0x00, 0x20, 0x00, 0x00, 0x00 },   // BOLT
+    { 0x06, 0x00, 0x0F, 0x00, 0x1F, 0x80, 0x3F, 0xC0, 0x7F, 0xE0, 0xFF, 0xF0, 0x30, 0xC0, 0x30, 0xC0, 0x36, 0xC0, 0x36, 0xC0, 0x3F, 0xC0, 0x00, 0x00 },   // HOUSE
+    { 0x1E, 0x00, 0x3F, 0x00, 0x61, 0x80, 0x6D, 0x80, 0x6D, 0x80, 0x61, 0x80, 0x3F, 0x00, 0x1E, 0x00, 0x0C, 0x00, 0x0C, 0x00, 0x04, 0x00, 0x04, 0x00 },   // PIN
+    { 0x06, 0x00, 0x06, 0x00, 0x0F, 0x00, 0xFF, 0xF0, 0x7F, 0xE0, 0x3F, 0xC0, 0x1F, 0x80, 0x39, 0xC0, 0x30, 0xC0, 0x60, 0x60, 0x40, 0x20, 0x00, 0x00 },   // STAR
+    { 0x00, 0x00, 0x60, 0x60, 0xF0, 0xF0, 0xFF, 0xF0, 0xFF, 0xF0, 0x7F, 0xE0, 0x3F, 0xC0, 0x1F, 0x80, 0x0F, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00 },   // HEART
+    { 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x3F, 0x80, 0x21, 0x80, 0x2D, 0x80, 0x2D, 0x80, 0x21, 0x80, 0x29, 0x80, 0x21, 0x80, 0x3F, 0x80, 0x00, 0x00 },   // RADIO
+    { 0x00, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x31, 0x80, 0x60, 0xC0, 0xFF, 0xF0, 0xFF, 0xF0, 0xFF, 0xF0, 0x60, 0xC0, 0x7B, 0xC0, 0x31, 0x80, 0x00, 0x00 },   // CAR
+    { 0x00, 0x00, 0x06, 0x00, 0x06, 0x00, 0x06, 0x00, 0xFF, 0xF0, 0xFF, 0xF0, 0x07, 0x00, 0x06, 0x00, 0x0F, 0x00, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00 },   // PLANE
+    { 0x00, 0x00, 0x1F, 0x80, 0x29, 0x40, 0x49, 0x20, 0xFF, 0xF0, 0x90, 0x90, 0x90, 0x90, 0xFF, 0xF0, 0x49, 0x20, 0x29, 0x40, 0x1F, 0x80, 0x00, 0x00 },   // GLOBE
+    { 0x30, 0xC0, 0x79, 0xE0, 0x79, 0xE0, 0x30, 0xC0, 0x00, 0x00, 0x1F, 0x80, 0x3F, 0xC0, 0x7F, 0xE0, 0x7F, 0xE0, 0x3F, 0xC0, 0x1F, 0x80, 0x00, 0x00 },   // PAW
+    { 0x00, 0x00, 0x1F, 0x80, 0x60, 0x60, 0x80, 0x10, 0x99, 0x90, 0x99, 0x90, 0x80, 0x10, 0xA0, 0x50, 0x9F, 0x90, 0x60, 0x60, 0x1F, 0x80, 0x00, 0x00 },   // FACE
+    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x00, 0xC0, 0x01, 0x80, 0x03, 0x00, 0x66, 0x00, 0x76, 0x00, 0x3C, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00 },   // CHECK
+    { 0x3C, 0x00, 0x66, 0x00, 0x42, 0x00, 0x66, 0x00, 0x3C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },   // DEG
+    { 0x60, 0x00, 0x7F, 0x80, 0x61, 0xC0, 0x60, 0xC0, 0x7F, 0x80, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x00, 0x00 },   // FLAG
+    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x0F, 0x00, 0x0F, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },   // DOT
+};
+
+// Scaled 1-bit blit, so the same art serves a list row and a headline.
+static void drawIcon(int x, int y, uint8_t id, uint16_t c, int px) {
+  if (id == IC_NONE || id >= IC_COUNT) return;
+  const uint8_t* bits = kIconBits[id - 1];
+  for (int row = 0; row < 12; row++) {
+    const int y0 = y + row * px / 12, y1 = y + (row + 1) * px / 12;
+    int col = 0;
+    while (col < 12) {
+      if (!(bits[row * 2 + (col >> 3)] & (0x80 >> (col & 7)))) { col++; continue; }
+      int run = col;                                   // one rectangle per run of pixels
+      while (run < 12 && (bits[row * 2 + (run >> 3)] & (0x80 >> (run & 7)))) run++;
+      const int x0 = x + col * px / 12, x1 = x + run * px / 12;
+      gfx()->fillRect(x0, y0, x1 - x0 > 0 ? x1 - x0 : 1, y1 - y0 > 0 ? y1 - y0 : 1, c);
+      col = run;
+    }
+  }
+}
+
+// The icon a symbol is drawn as. Related symbols share one, so a modest set of art covers
+// the names people actually give their nodes.
+static uint8_t iconForCodepoint(uint32_t cp) {
+  switch (cp) {
+    case 0x1F4E1: case 0x1F6F0: case 0x1F4F6: case 0x1F4FD: return IC_DISH;
+    case 0x1F5FC: case 0x1F3D7: case 0x1F3ED: case 0x26F0: return IC_TOWER;
+    case 0x2600: case 0x1F31E: case 0x2601: case 0x1F324: case 0x1F326:
+    case 0x1F506: return IC_SUN;
+    case 0x26A1: case 0x1F50B: case 0x1F50C: case 0x1F525: return IC_BOLT;
+    case 0x1F3E0: case 0x1F3E1: case 0x1F3E2: case 0x1F3DB: case 0x26FA: return IC_HOUSE;
+    case 0x1F4CD: case 0x1F4CC: case 0x1F3F4: case 0x1F6A9: return IC_PIN;
+    case 0x2B50: case 0x1F31F: case 0x2728: case 0x1F3C6: case 0x2605:
+    case 0x2606: return IC_STAR;
+    case 0x2764: case 0x1F49A: case 0x1F499: case 0x1F49C: case 0x1F9E1:
+    case 0x1F496: case 0x1F49B: return IC_HEART;
+    case 0x1F4FB: case 0x1F4F1: case 0x1F4DE: case 0x260E: case 0x1F50A:
+    case 0x1F3A7: case 0x1F4BB: return IC_RADIO;
+    case 0x1F697: case 0x1F699: case 0x1F690: case 0x1F69B: case 0x1F3CD:
+    case 0x1F6B2: case 0x1F69C: case 0x1F6FB: return IC_CAR;
+    case 0x2708: case 0x1F6E9: case 0x1F681: case 0x1F680: case 0x1F388:
+    case 0x26F5: case 0x1F6A2: case 0x26F4: return IC_PLANE;
+    case 0x1F30D: case 0x1F30E: case 0x1F30F: case 0x1F310: case 0x1F5FA: return IC_GLOBE;
+    case 0x2705: case 0x2714: case 0x2713: case 0x1F44D: case 0x1F197: return IC_CHECK;
+    case 0x00B0: case 0x2103: case 0x2109: return IC_DEG;
+  }
+  if (cp >= 0x1F400 && cp <= 0x1F43F) return IC_PAW;         // animals
+  if (cp >= 0x1F980 && cp <= 0x1F9AE) return IC_PAW;         // and the newer animals
+  if (cp >= 0x1F600 && cp <= 0x1F64F) return IC_FACE;        // faces
+  if (cp >= 0x1F466 && cp <= 0x1F487) return IC_FACE;        // people
+  if (cp >= 0x1F47A && cp <= 0x1F47F) return IC_FACE;        // ghosts, aliens and friends
+  if (cp >= 0x1F910 && cp <= 0x1F9FF) return IC_FACE;        // the rest of that block
+  if (cp >= 0x1F1E6 && cp <= 0x1F1FF) return IC_FLAG;        // the letters that make flags
+  return IC_DOT;
+}
+
+// Accented letters and typographic punctuation fold onto what the font does have.
+static const char* asciiForCodepoint(uint32_t cp) {
+  if (cp >= 0x00C0 && cp <= 0x00FF) {
+    static const char* const latin1[64] = {
+      "A", "A", "A", "A", "A", "A", "AE", "C", "E", "E", "E", "E", "I", "I", "I", "I",
+      "D", "N", "O", "O", "O", "O", "O", "x", "O", "U", "U", "U", "U", "Y", "T", "ss",
+      "a", "a", "a", "a", "a", "a", "ae", "c", "e", "e", "e", "e", "i", "i", "i", "i",
+      "d", "n", "o", "o", "o", "o", "o", "/", "o", "u", "u", "u", "u", "y", "t", "y"};
+    return latin1[cp - 0x00C0];
+  }
+  switch (cp) {
+    case 0x2018: case 0x2019: case 0x02BC: return "'";
+    case 0x201C: case 0x201D: case 0x00AB: case 0x00BB: return "\"";
+    case 0x2013: case 0x2014: case 0x2212: return "-";
+    case 0x2026: return "...";
+    case 0x00A0: case 0x2007: case 0x202F: return " ";
+    case 0x00B5: return "u";
+    case 0x00D7: return "x";
+    case 0x0100: case 0x0102: case 0x0104: return "A";
+    case 0x0101: case 0x0103: case 0x0105: return "a";
+    case 0x0106: case 0x0108: case 0x010C: return "C";
+    case 0x0107: case 0x0109: case 0x010D: return "c";
+    case 0x0112: case 0x0116: case 0x0118: return "E";
+    case 0x0113: case 0x0117: case 0x0119: return "e";
+    case 0x0141: return "L";
+    case 0x0142: return "l";
+    case 0x0143: case 0x0147: return "N";
+    case 0x0144: case 0x0148: return "n";
+    case 0x015A: case 0x015E: case 0x0160: return "S";
+    case 0x015B: case 0x015F: case 0x0161: return "s";
+    case 0x0179: case 0x017B: case 0x017D: return "Z";
+    case 0x017A: case 0x017C: case 0x017E: return "z";
+    case 0x014C: case 0x0150: return "O";
+    case 0x014D: case 0x0151: return "o";
+    case 0x016A: case 0x016E: case 0x0170: return "U";
+    case 0x016B: case 0x016F: case 0x0171: return "u";
+  }
+  return NULL;
+}
+
+// Rewrites a UTF-8 string so the drawing code only ever sees ASCII plus icon markers
+// (bytes 1..31, which are the icon ids).
+static void foldUtf8(const char* s, char* out, size_t out_n) {
+  size_t o = 0;
+  uint32_t prev = 0;
+  const uint8_t* p = (const uint8_t*)s;
+  while (*p != 0 && o + 4 < out_n) {
+    uint32_t cp = *p;
+    int len = 1;
+    if (cp >= 0xF0) { cp &= 0x07; len = 4; }
+    else if (cp >= 0xE0) { cp &= 0x0F; len = 3; }
+    else if (cp >= 0xC0) { cp &= 0x1F; len = 2; }
+    else if (cp >= 0x80) { cp = 0xFFFD; }               // a stray continuation byte
+    for (int i = 1; i < len; i++) {
+      if ((p[i] & 0xC0) != 0x80) { len = i; cp = 0xFFFD; break; }
+      cp = (cp << 6) | (p[i] & 0x3F);
+    }
+    p += len;
+
+    if (cp < 0x80) {
+      out[o++] = (cp >= 0x20 && cp < 0x7F) ? (char)cp : ' ';
+    } else if (cp == 0xFE0F || cp == 0xFE0E || cp == 0x200D || cp == 0x20E3 ||
+               (cp >= 0x1F3FB && cp <= 0x1F3FF) || (cp >= 0x0300 && cp <= 0x036F)) {
+      // emoji presentation selector, joiner, skin tone, combining accent: nothing to draw
+    } else if (cp >= 0x1F1E6 && cp <= 0x1F1FF) {
+      if (!(prev >= 0x1F1E6 && prev <= 0x1F1FF)) out[o++] = (char)IC_FLAG;   // one per pair
+    } else {
+      const char* a = asciiForCodepoint(cp);
+      if (a != NULL) {
+        while (*a != 0 && o + 2 < out_n) out[o++] = *a++;
+      } else {
+        out[o++] = (char)iconForCodepoint(cp);
+      }
+    }
+    prev = cp;
+  }
+  out[o] = 0;
+}
+
+// How far the pen moves for one character of a shaped font.
+static int charAdvance(const GFXfont* f, uint8_t ch) {
+  if (ch < f->first || ch > f->last) return f->yAdvance / 2;
+  return f->glyph[ch - f->first].xAdvance;
+}
+
+// The cap height, so every row sits on the same baseline whatever it says - measuring each
+// string on its own makes lines jump about depending on their letters.
+static int fontAscent(const GFXfont* f) {
+  if ('H' < f->first || 'H' > f->last) return f->yAdvance * 3 / 4;
+  return -(int)f->glyph['H' - f->first].yOffset;
+}
+
+// Draws (or just measures) folded text, icons included, stopping at max_w. x, y is the
+// top-left corner; the return is the width used.
+static int richDraw(int x, int y, const char* s, uint16_t c, const GFXfont* font, int max_w, bool draw) {
+  if (s == NULL || s[0] == 0) return 0;
+  char buf[160];
+  foldUtf8(s, buf, sizeof(buf));
+  const int asc = fontAscent(font);
+  const int ih = asc >= 28 ? 26 : asc >= 15 ? 16 : 12;     // icons match the letter height
+  const int base = y + asc;
+  const int limit = x + max_w;
+  int pen = x;
+  if (draw) {
+    gfx()->setFont(font);
+    gfx()->setTextSize(1);
+    gfx()->setTextColor(c);
+    gfx()->setTextWrap(false);
+  }
+  for (int i = 0; buf[i] != 0; i++) {
+    const uint8_t ch = (uint8_t)buf[i];
+    const bool is_icon = ch < 0x20;
+    const int adv = is_icon ? ih + 2 : charAdvance(font, ch);
+    if (pen + adv > limit) {                               // out of room: show it was cut
+      const int tw = charAdvance(font, '~');
+      if (draw) {
+        gfx()->setCursor(pen + tw > limit ? limit - tw : pen, base);
+        gfx()->write('~');
+      }
+      pen += tw;
+      break;
+    }
+    if (draw) {
+      if (is_icon) {
+        drawIcon(pen + 1, base - asc + (asc - ih) / 2, ch, c, ih);
+      } else {
+        gfx()->setCursor(pen, base);
+        gfx()->write(ch);
+      }
+    }
+    pen += adv;
+  }
+  if (draw) gfx()->setFont(NULL);
+  return pen - x;
+}
+
+static void textF(int x, int y, const char* s, uint16_t c, const GFXfont* font) {
+  richDraw(x, y, s, c, font, 4096, true);
+}
+
+static int textFWidth(const char* s, const GFXfont* font) { return richDraw(0, 0, s, 0, font, 4096, false); }
+
+static void textFClip(int x, int y, int max_w, const char* s, uint16_t c, const GFXfont* font) {
+  richDraw(x, y, s, c, font, max_w, true);
+}
 
 static void text(int x, int y, const char* s, uint16_t c, int size = 1) {
-  gfx()->setTextSize(size);
-  gfx()->setTextColor(c);
-  gfx()->setCursor(x, y);
-  gfx()->print(s);
+  richDraw(x, y, s, c, fontFor(size), 4096, true);
 }
 
-// Same idea as text(), but with a shaped font. x, y stay the top-left corner: these fonts
-// position from the baseline, so the height is measured and added.
-static void textF(int x, int y, const char* s, uint16_t c, const GFXfont* font) {
-  if (s == NULL || s[0] == 0) return;
-  int16_t bx, by;
-  uint16_t bw, bh;
-  gfx()->setFont(font);
-  gfx()->setTextSize(1);
-  gfx()->getTextBounds(s, 0, 0, &bx, &by, &bw, &bh);
-  gfx()->setTextColor(c);
-  gfx()->setCursor(x - bx, y - by);
-  gfx()->print(s);
-  gfx()->setFont(NULL);
-}
-
-// Width of a string in a shaped font, for centring.
-static int textFWidth(const char* s, const GFXfont* font) {
-  int16_t bx, by;
-  uint16_t bw, bh;
-  gfx()->setFont(font);
-  gfx()->getTextBounds(s == NULL ? "" : s, 0, 0, &bx, &by, &bw, &bh);
-  gfx()->setFont(NULL);
-  return bw;
-}
-
-// Shaped text, cut to fit the width given.
-static void textFClip(int x, int y, int max_w, const char* s, uint16_t c, const GFXfont* font) {
-  if (s == NULL || s[0] == 0) return;
-  char buf[72];
-  StrHelper::strncpy(buf, s, sizeof(buf));
-  int len = strlen(buf);
-  while (len > 1 && textFWidth(buf, font) > max_w) {
-    buf[--len] = 0;
-    if (len > 1) buf[len - 1] = '~';
-  }
-  textF(x, y, buf, c, font);
-}
-
-// Prints at most max_w pixels, adding "…" when the text is cut.
+// Prints at most max_w pixels, marking the cut with "~".
 static void textClip(int x, int y, int max_w, const char* s, uint16_t c, int size = 1) {
-  const int cw = 6 * size;
-  int chars = max_w / cw;
-  if (chars <= 0) return;
-  char buf[64];
-  int n = strlen(s);
-  if (n <= chars) {
-    strncpy(buf, s, sizeof(buf) - 1);
-    buf[sizeof(buf) - 1] = 0;
-  } else {
-    if (chars > (int)sizeof(buf) - 1) chars = sizeof(buf) - 1;
-    strncpy(buf, s, chars - 1);
-    buf[chars - 1] = '~';
-    buf[chars] = 0;
-  }
-  text(x, y, buf, c, size);
+  richDraw(x, y, s, c, fontFor(size), max_w, true);
 }
+
+// The width a string will actually occupy, for centring and column widths.
+static int textWidth(const char* s, int size = 1) { return richDraw(0, 0, s, 0, fontFor(size), 4096, false); }
 
 static void button(int x, int y, int w, int h, const char* label, bool on = false) {
   fill(x, y, w, h, on ? C_ACC : C_CARD);
   gfx()->drawRect(x, y, w, h, C_LINE);
-  const int tw = strlen(label) * 6;
-  text(x + (w - tw) / 2, y + (h - 8) / 2, label, on ? 0xFFFF : C_TXT);
+  const int tw = textWidth(label);
+  text(x + (w - tw) / 2, y + (h - 12) / 2, label, on ? 0xFFFF : C_TXT);
 }
 
 // The contact store keeps a few reserved slots at the front for anonymous requests, and
@@ -239,9 +437,9 @@ static bool sunTimes(double lat, double lon, int y, int m, int d, int tz_min, in
 // Home dashboard card slots: 3 columns x 2 rows under the clock.
 static void homeCard(int i, int& x, int& y, int& w, int& h) {
   w = 101;
-  h = 44;
+  h = 46;
   x = 4 + (i % 3) * (w + 3);
-  y = BODY_Y + 92 + (i / 3) * (h + 4);
+  y = BODY_Y + 90 + (i / 3) * (h + 3);
 }
 
 void UITask::begin(DisplayDriver* disp, SensorManager* sensors, NodePrefs* node_prefs) {
@@ -462,23 +660,23 @@ void UITask::draw() {
 
 void UITask::drawHeader() {
   fill(0, 0, SCR_W, HDR_H, C_CARD);
-  textClip(4, 6, 150, the_mesh.getNodeName(), C_TXT);
+  textClip(4, 3, 142, the_mesh.getNodeName(), C_TXT);
 
   char buf[40];
   uint32_t now = rtc_clock.getCurrentTime();
   DateTime dt(now);
   snprintf(buf, sizeof(buf), "%02d:%02d", dt.hour(), dt.minute());
-  text(SCR_W - 34, 6, buf, C_TXT);
+  text(SCR_W - 40, 3, buf, C_TXT);
 
   int x = SCR_W - 52;
   const uint16_t batt = _board->getBattMilliVolts();
   snprintf(buf, sizeof(buf), "%d.%02dV", batt / 1000, (batt % 1000) / 10);
-  text(x - 36, 6, buf, batt && batt < 3500 ? C_BAD : C_DIM);
+  text(x - 46, 3, buf, batt && batt < 3500 ? C_BAD : C_DIM);
 
   // link indicators
-  text(160, 6, the_mesh.getNetwork().isWifiConnected() ? "wifi" : (the_mesh.getNetwork().isApActive() ? "AP" : "----"),
+  text(150, 3, the_mesh.getNetwork().isWifiConnected() ? "wifi" : (the_mesh.getNetwork().isApActive() ? "AP" : "----"),
        the_mesh.getNetwork().isWifiConnected() ? C_OK : C_DIM);
-  text(192, 6, isBluetoothEnabled() ? (hasConnection() ? "BT+" : "BT") : "--", hasConnection() ? C_OK : C_DIM);
+  text(188, 3, isBluetoothEnabled() ? (hasConnection() ? "BT+" : "BT") : "--", hasConnection() ? C_OK : C_DIM);
 }
 
 void UITask::drawTabs() {
@@ -488,11 +686,21 @@ void UITask::drawTabs() {
     const bool on = (int)_tab == i;
     fill(i * w, SCR_H - TAB_H, w, TAB_H, on ? C_ACC : C_CARD);
     gfx()->drawFastVLine(i * w, SCR_H - TAB_H, TAB_H, C_LINE);
-    char label[16];
-    if (i == TAB_MSGS && umc_chatlog.unread() > 0 && !on) snprintf(label, sizeof(label), "Msgs(%d)", umc_chatlog.unread());
-    else snprintf(label, sizeof(label), "%s", names[i]);
-    const int tw = strlen(label) * 6;
-    text(i * w + (w - tw) / 2, SCR_H - TAB_H + 11, label, on ? 0xFFFF : C_TXT);
+    const char* label = names[i];
+    const int tw = textWidth(label);
+    const int lx = tw < w - 2 ? i * w + (w - tw) / 2 : i * w + 1;
+    textClip(lx, SCR_H - TAB_H + 9, w - 2, label, on ? 0xFFFF : C_TXT);
+    // the unread count rides in the corner, so the label keeps its room
+    if (i == TAB_MSGS && umc_chatlog.unread() > 0) {
+      gfx()->fillCircle(i * w + w - 8, SCR_H - TAB_H + 8, 6, C_WARN);
+      char n[4];
+      snprintf(n, sizeof(n), "%d", umc_chatlog.unread() > 9 ? 9 : umc_chatlog.unread());
+      gfx()->setFont(NULL);
+      gfx()->setTextSize(1);
+      gfx()->setTextColor(0);
+      gfx()->setCursor(i * w + w - 10, SCR_H - TAB_H + 5);
+      gfx()->print(n);           // the one place the tiny built-in font still earns its keep
+    }
   }
 }
 
@@ -501,7 +709,7 @@ void UITask::drawAlert() {
   const int w = 260, h = 34, x = (SCR_W - w) / 2, y = 90;
   fill(x, y, w, h, C_ACC);
   gfx()->drawRect(x, y, w, h, 0xFFFF);
-  textClip(x + 8, y + 13, w - 16, _alert, 0xFFFF);
+  textClip(x + 8, y + 10, w - 16, _alert, 0xFFFF);
 }
 
 void UITask::applyTheme() {
@@ -513,8 +721,8 @@ void UITask::applyTheme() {
 int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when) {
   const int max_w = SCR_W - 70;
   const int pad = 5;
-  const int line_h = 11;
-  const int cols = (max_w - pad * 2) / 6;
+  const int line_h = 15;
+  const int inner = max_w - pad * 2;
 
   // wrap on spaces
   char lines[5][48];
@@ -522,13 +730,16 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
   const char* p = body;
   while (*p && line_count < 5) {
     int take = strlen(p);
-    if (take > cols) {
-      take = cols;
-      int brk = take;
-      while (brk > 8 && p[brk] != ' ') brk--;
-      if (brk > 8) take = brk;
-    }
     if (take > (int)sizeof(lines[0]) - 1) take = sizeof(lines[0]) - 1;
+    char probe[sizeof(lines[0])];
+    memcpy(probe, p, take);
+    probe[take] = 0;
+    while (take > 1 && textWidth(probe) > inner) probe[--take] = 0;    // trim to the width
+    if (p[take] != 0) {
+      int brk = take;
+      while (brk > 6 && p[brk] != ' ') brk--;                          // back to a space
+      if (brk > 6) take = brk;
+    }
     memcpy(lines[line_count], p, take);
     lines[line_count][take] = 0;
     line_count++;
@@ -539,11 +750,20 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
 
   int widest = 0;
   for (int i = 0; i < line_count; i++) {
-    const int w = strlen(lines[i]) * 6;
+    const int w = textWidth(lines[i]);
     if (w > widest) widest = w;
   }
+  char foot_pre[40];
+  if (when) {
+    DateTime dt0(when);
+    snprintf(foot_pre, sizeof(foot_pre), "%s %02d:%02d", mine ? "" : who, dt0.hour(), dt0.minute());
+  } else {
+    snprintf(foot_pre, sizeof(foot_pre), "%s", mine ? "" : who);
+  }
+  const int fw = textWidth(foot_pre);          // the name and time can be wider than the body
+  if (fw > widest) widest = fw > inner ? inner : fw;
   const int bw = widest + pad * 2;
-  const int bh = line_count * line_h + pad * 2 + 9;      // room for the name/time line
+  const int bh = line_count * line_h + pad * 2 + 15;      // room for the name/time line
   const int bx = mine ? SCR_W - bw - 6 : 6;
   const int by = y_bottom - bh;
 
@@ -560,7 +780,7 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
   } else {
     snprintf(foot, sizeof(foot), "%s", mine ? "" : who);
   }
-  text(bx + pad, by + bh - 10, foot, mine ? tc : TH.dim);
+  textClip(bx + pad, by + bh - 17, bw - pad * 2, foot, mine ? tc : TH.dim);
   return by - 4;
 }
 
@@ -573,7 +793,7 @@ void UITask::drawMessages() {
   fill(0, top, SCR_W, 16, TH.card);
   char hdr[48];
   snprintf(hdr, sizeof(hdr), "To: %s%s", _to_channel ? "#" : "", _to_name);
-  textClip(4, top + 4, SCR_W - 60, hdr, TH.text);
+  textClip(4, top + 2, SCR_W - 60, hdr, TH.text);
   button(SCR_W - 52, top, 50, 16, "change");
 
   fill(0, top + 17, SCR_W, list_h, TH.bg);
@@ -599,9 +819,9 @@ void UITask::drawMessages() {
   }
   if (umc_chatlog.count() == 0) {
     text(8, top + 40, "No messages yet.", TH.dim);
-    text(8, top + 54, "Type below and press Enter to send.", TH.dim);
+    text(8, top + 58, "Type below and press Enter to send.", TH.dim);
   } else if (_msg_sel < 0) {
-    text(6, top + 17 + list_h - 10, "Tap a message to reply to it", TH.dim);
+    text(6, top + 17 + list_h - 15, "Tap a message to reply to it", TH.dim);
   }
   drawCompose();
 }
@@ -612,7 +832,7 @@ void UITask::drawCompose() {
     fill(0, ry, SCR_W, 12, TH.card);
     char line[52];
     snprintf(line, sizeof(line), "Reply to: %s", _reply_to);
-    textClip(4, ry + 2, SCR_W - 40, line, TH.accent);
+    textClip(4, ry - 1, SCR_W - 40, line, TH.accent);
     button(SCR_W - 34, ry, 32, 12, "x");
   }
   const int y = SCR_H - TAB_H - COMPOSE_H;
@@ -620,20 +840,16 @@ void UITask::drawCompose() {
   gfx()->drawFastHLine(0, y, SCR_W, C_LINE);
   const int max_w = SCR_W - 68;
   const char* shown = _compose;
-  const int cols = max_w / 6;
-  if (_compose_len > cols) shown = _compose + (_compose_len - cols);
-  text(4, y + 9, shown[0] ? shown : "type a message...", shown[0] ? C_TXT : C_DIM);
-  if (shown[0]) {
-    const int cx = 4 + strlen(shown) * 6;
-    fill(cx, y + 7, 6, 11, C_ACC);
-  }
+  while (shown[0] != 0 && textWidth(shown) > max_w) shown++;     // keep the end in view
+  text(4, y + 6, shown[0] ? shown : "type a message...", shown[0] ? C_TXT : C_DIM);
+  if (shown[0]) fill(5 + textWidth(shown), y + 5, 2, 15, C_ACC);
   button(SCR_W - 62, y + 3, 58, 20, "Send", _compose_len > 0);
 }
 
 void UITask::drawContacts() {
   const int top = BODY_Y + 2;
   const int row_h = 22;
-  const int rows = (BODY_H - 30) / row_h;
+  const int rows = (BODY_H - 46) / row_h;
   const int total = contactCount();
   if (_contact_scroll > max(0, total - rows)) _contact_scroll = max(0, total - rows);
 
@@ -642,7 +858,7 @@ void UITask::drawContacts() {
   text(4, top, buf, C_DIM);
 
   const uint32_t now = rtc_clock.getCurrentTime();
-  int y = top + 12;
+  int y = top + 17;
   for (int i = 0; i < rows; i++) {
     const int idx = _contact_scroll + i;
     if (idx >= total) break;
@@ -650,7 +866,10 @@ void UITask::drawContacts() {
     if (!contactAt(idx, c)) continue;
     const bool sel = idx == _contact_sel;
     fill(0, y, SCR_W, row_h - 2, sel ? C_ACC : C_CARD);
-    textClip(4, y + 3, 150, c.name[0] ? c.name : "(no name)", sel ? 0xFFFF : C_TXT);
+    const uint8_t kind_icon = c.type == ADV_TYPE_REPEATER ? IC_TOWER : c.type == ADV_TYPE_ROOM ? IC_HOUSE
+                              : c.type == ADV_TYPE_SENSOR ? IC_DISH : IC_FACE;
+    drawIcon(4, y + 4, kind_icon, sel ? 0xFFFF : C_ACC, 12);
+    textClip(21, y + 3, 133, c.name[0] ? c.name : "(no name)", sel ? 0xFFFF : C_TXT);
     const char* kind = c.type == ADV_TYPE_REPEATER ? "repeater" : c.type == ADV_TYPE_ROOM ? "room" : c.type == ADV_TYPE_SENSOR ? "sensor" : "chat";
     text(158, y + 3, kind, C_DIM);
     if (c.out_path_len == 0xFF) text(224, y + 3, "flood", C_DIM);
@@ -662,7 +881,7 @@ void UITask::drawContacts() {
     if (c.last_advert_timestamp && now > c.last_advert_timestamp) text(276, y + 3, shortAge(now - c.last_advert_timestamp, age, sizeof(age)), C_DIM);
     y += row_h;
   }
-  if (total == 0) text(8, top + 30, "Nothing heard yet. Send an advert from Info.", C_DIM);
+  if (total == 0) text(8, top + 36, "Nothing heard yet. Send an advert from Info.", C_DIM);
 
   // actions for the selected contact
   const int by = SCR_H - TAB_H - 26;
@@ -672,7 +891,7 @@ void UITask::drawContacts() {
     button(158, by, 74, 22, "Share");
     button(236, by, 80, 22, "Reset path");
   } else {
-    text(6, by + 7, "Tap a contact to select it", C_DIM);
+    text(6, by + 5, "Tap a contact to select it", C_DIM);
   }
 }
 
@@ -772,7 +991,7 @@ void UITask::drawMap() {
   button(SCR_W - 62, top + BODY_H - 28, 58, 24, "me", _follow_self);
   char z[24];
   snprintf(z, sizeof(z), "z%d", _zoom);
-  text(4, top + BODY_H - 12, z, C_DIM);
+  text(4, top + BODY_H - 16, z, C_DIM);
 }
 
 void UITask::drawInfo() {
@@ -936,7 +1155,7 @@ void UITask::drawHome() {
     meter(176, top + 22, 140, 10, _busy_pct / 100.0f, _busy_pct > 60 ? C_BAD : (_busy_pct > 25 ? C_WARN : C_OK));
     textF(176, top + 34, buf, C_TXT, F_MED);
   } else {
-    text(176, top + 24, "measuring...", C_DIM);
+    text(176, top + 22, "measuring...", C_DIM);
   }
   const int nf = radio_driver.getNoiseFloor();
   if (nf) {
@@ -1002,9 +1221,9 @@ void UITask::drawHome() {
     homeCard(i, x, y, w, h);
     fill(x, y, w, h, C_CARD);
     gfx()->drawRect(x, y, w, h, C_LINE);
-    text(x + 4, y + 4, cards[i].title, C_DIM);
-    textF(x + 4, y + 14, cards[i].val, cards[i].col, F_MED);
-    textClip(x + 4, y + 34, w - 8, cards[i].sub, C_DIM);
+    textClip(x + 4, y + 2, w - 8, cards[i].title, C_DIM);
+    textFClip(x + 4, y + 15, w - 8, cards[i].val, cards[i].col, F_MED);
+    textClip(x + 4, y + 32, w - 8, cards[i].sub, C_DIM);
   }
 }
 
@@ -1019,7 +1238,7 @@ void UITask::drawRadio() {
   // time on air for typical packet sizes at the live radio settings
   snprintf(buf, sizeof(buf), "Airtime  32B %lums  100B %lums  200B %lums", (unsigned long)radio_driver.getEstAirtimeFor(32),
            (unsigned long)radio_driver.getEstAirtimeFor(100), (unsigned long)radio_driver.getEstAirtimeFor(200));
-  textClip(4, top + 12, 312, buf, C_DIM);
+  textClip(4, top + 18, 312, buf, C_DIM);
 
   // history statistics
   int peak = -140, now_r = -140;
@@ -1039,16 +1258,16 @@ void UITask::drawRadio() {
       {"FLOOR", floor_db, C_DIM, true},
       {"PEAK", peak, C_WARN, _rssi_n > 0},
   };
-  int y = top + 30;
-  for (int i = 0; i < 3; i++, y += 15) {
-    text(4, y + 1, rows[i].label, C_DIM);
+  int y = top + 38;
+  for (int i = 0; i < 3; i++, y += 17) {
+    text(4, y - 2, rows[i].label, C_DIM);
     meter(52, y, 190, 10, rows[i].valid ? (rows[i].dbm + 130) / 90.0f : 0, rows[i].col);
     if (rows[i].valid) snprintf(buf, sizeof(buf), "%d dBm", rows[i].dbm);
     else snprintf(buf, sizeof(buf), "--");
-    text(248, y + 1, buf, C_TXT);
+    text(248, y - 2, buf, C_TXT);
   }
   // margin: how far the last received packet sat above the noise floor
-  text(4, y + 1, "MARGIN", C_DIM);
+  text(4, y - 2, "MARGIN", C_DIM);
   if (last_rssi != 0) {
     const int margin = (int)last_rssi - floor_db;
     meter(52, y, 190, 10, margin / 40.0f, margin > 10 ? C_OK : (margin > 3 ? C_WARN : C_BAD));
@@ -1057,11 +1276,11 @@ void UITask::drawRadio() {
     meter(52, y, 190, 10, 0, C_DIM);
     snprintf(buf, sizeof(buf), "--");
   }
-  text(248, y + 1, buf, C_TXT);
-  y += 18;
+  text(248, y - 2, buf, C_TXT);
+  y += 20;
 
   // live spectrum: the last two minutes of RSSI, one bar per second
-  const int sx = 4, sh = 40, sw = RSSI_HIST * 2;
+  const int sx = 4, sh = 46, sw = RSSI_HIST * 2;
   fill(sx, y, sw, sh, C_CARD);
   gfx()->drawRect(sx - 1, y - 1, sw + 2, sh + 2, C_LINE);
   for (int i = 0; i < _rssi_n; i++) {
@@ -1070,10 +1289,10 @@ void UITask::drawRadio() {
     fill(sx + (RSSI_HIST - _rssi_n + i) * 2, y + sh - bh, 2, bh, v > floor_db + 10 ? C_WARN : C_ACC);
   }
   text(sx + sw + 6, y, "-40", C_DIM);
-  text(sx + sw + 6, y + sh - 8, "-130", C_DIM);
+  text(sx + sw + 6, y + sh - 13, "-130", C_DIM);
   if (_busy_pct >= 0) {
     snprintf(buf, sizeof(buf), "busy %d%%", _busy_pct);
-    text(sx + sw + 6, y + 16, buf, C_TXT);
+    text(sx + sw + 6, y + 17, buf, C_TXT);
   }
   y += sh + 6;
 
@@ -1093,7 +1312,7 @@ void UITask::drawGps() {
   char buf[64];
   fill(0, top, SCR_W, BODY_H, C_BG);
 
-  const int cx = SCR_W - 76, cy = top + 78, r = 68;
+  const int cx = SCR_W - 70, cy = top + 76, r = 62;
   gfx()->drawCircle(cx, cy, r, C_LINE);
   gfx()->drawCircle(cx, cy, r * 2 / 3, C_LINE);      // 30 degrees up
   gfx()->drawCircle(cx, cy, r / 3, C_LINE);          // 60 degrees up
@@ -1124,21 +1343,22 @@ void UITask::drawGps() {
 
   // ---- the numbers, down the left
   int y = top + 6;
+  const int VCOL = 70, VW = SCR_W - 70 - 62 - VCOL - 6;   // stops short of the sky circle
   const int lh = 15;
   double lat, lon;
   const bool fix = selfLocation(lat, lon);
 
   textF(4, y, "Fix", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%s", fix ? "yes" : (drawn ? "searching" : "no signal"));
-  textFClip(86, y, 150 - 86, buf, fix ? C_OK : C_WARN, F_SMALL); y += lh;
+  textFClip(VCOL, y, VW, buf, fix ? C_OK : C_WARN, F_SMALL); y += lh;
 
-  textF(4, y, "Satellites", C_DIM, F_SMALL);
-  snprintf(buf, sizeof(buf), "%d used / %d seen", (int)sensors.getLocationProvider()->satellitesCount(), drawn);
-  textFClip(86, y, 150 - 86, buf, C_TXT, F_SMALL); y += lh;
+  textF(4, y, "Sats", C_DIM, F_SMALL);
+  snprintf(buf, sizeof(buf), "%d of %d", (int)sensors.getLocationProvider()->satellitesCount(), drawn);
+  textFClip(VCOL, y, VW, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Best", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%d dB", strongest);
-  textFClip(86, y, 150 - 86, buf, strongest >= 35 ? C_OK : C_TXT, F_SMALL); y += lh;
+  textFClip(VCOL, y, VW, buf, strongest >= 35 ? C_OK : C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Position", C_DIM, F_SMALL); y += lh;
   if (fix) {
@@ -1150,17 +1370,17 @@ void UITask::drawGps() {
     textF(10, y, "not known yet", C_DIM, F_SMALL); y += lh * 2;
   }
 
-  textF(4, y, "Altitude", C_DIM, F_SMALL);
+  textF(4, y, "Alt", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%ld m", sensors.getLocationProvider()->getAltitude() / 1000);
-  textFClip(86, y, 150 - 86, buf, C_TXT, F_SMALL); y += lh;
+  textFClip(VCOL, y, VW, buf, C_TXT, F_SMALL); y += lh;
 
-  textF(4, y, "Receiver", C_DIM, F_SMALL);
+  textF(4, y, "Rx", C_DIM, F_SMALL);
   const uint32_t baud = sensors.gpsBaudDetected();
   snprintf(buf, sizeof(buf), "%s", baud == 38400 ? "u-blox" : baud == 9600 ? "L76K" : baud ? "found" : "none");
-  textFClip(86, y, 150 - 86, buf, baud ? C_TXT : C_WARN, F_SMALL); y += lh;
+  textFClip(VCOL, y, VW, buf, baud ? C_TXT : C_WARN, F_SMALL); y += lh;
 
-  textF(4, y, "GPS power", C_DIM, F_SMALL);
-  textFClip(86, y, 150 - 86, the_mesh.getNodePrefs()->gps_enabled ? "on" : "off",
+  textF(4, y, "Power", C_DIM, F_SMALL);
+  textFClip(VCOL, y, VW, the_mesh.getNodePrefs()->gps_enabled ? "on" : "off",
             the_mesh.getNodePrefs()->gps_enabled ? C_OK : C_DIM, F_SMALL); y += lh;
 
   // buttons
