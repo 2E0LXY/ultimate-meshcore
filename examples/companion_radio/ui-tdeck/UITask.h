@@ -53,7 +53,11 @@ private:
   void drawSetup();
   void setupAction(int row);
   void setupEditDone();
+  void setupOpen(int page);
   int setupRowCount() const;
+  void setupRow(int row, char* label, size_t label_n, char* value, size_t value_n) const;
+  void wifiScanStart();
+  void wifiScanPoll();
   void sampleRadio();
   void drawCompose();
   void drawAlert();
@@ -79,17 +83,22 @@ private:
   unsigned long _tiles_retry = 0;
 
   // Setup tab: a list of settings, changed on the device itself
+  int _setup_page = 0;              // which Setup screen (SetupPage)
   int _setup_sel = 0;
   int _setup_scroll = 0;
   int _setup_confirm = -1;          // row waiting for a second tap to confirm
-  bool _editing = false;            // typing into _edit_buf for the row in _edit_row
+  bool _editing = false;            // typing into _edit_buf
   bool _edit_secret = false;
-  int _edit_row = -1;
-  char _edit_buf[64] = {0};
+  int _edit_what = -1;              // SetupEdit
+  char _edit_buf[72] = {0};
   int _edit_len = 0;
-  char _wifi_ssid[33] = {0};        // typed here, applied by "Join WiFi"
+  char _wifi_ssid[33] = {0};        // chosen or typed, applied by "Connect"
   char _wifi_pwd[65] = {0};
-  char _setup_status[48] = {0};
+  char _setup_status[64] = {0};
+  bool _ble_pending = false;        // Bluetooth setting waiting for a restart
+  int _wifi_scan_state = 0;         // 0 idle, 1 scanning, 2 done
+  int _wifi_found = 0;
+  unsigned long _wifi_scan_started = 0;
   uint32_t _last_sig = 0;
   static const unsigned long kMinRedrawMs = 400;
   unsigned long _next_refresh = 0;

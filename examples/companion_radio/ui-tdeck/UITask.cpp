@@ -7,9 +7,14 @@
 #include "UmcSplash.h"
 #include "target.h"
 
+#include <WiFi.h>
 #include <ctype.h>
 #include <math.h>
 #include <time.h>
+
+// Setup tab pages and the things you can type into
+enum SetupPage { SP_ROOT = 0, SP_DEVICE, SP_RADIO, SP_WIFI, SP_WIFI_PICK, SP_BLE, SP_REGION, SP_GPS, SP_FW };
+enum SetupEdit { SE_NONE = 0, SE_NAME, SE_SSID, SE_PASSWORD, SE_PIN, SE_REGION };
 
 // ---- layout (320 x 240 landscape) ----
 #define SCR_W 320
@@ -224,7 +229,11 @@ void UITask::loop() {
   if (tb) {
     // left/right change tab everywhere; up/down scroll or move the selection on the tab
     // you are on, and move the map.
-    if (tb == 'L') _tab = (Tab)((_tab + TAB_COUNT - 1) % TAB_COUNT);
+    if (_tab == TAB_SETUP && _editing) {
+      // typing: the ball does nothing
+    } else if (tb == 'L' && _tab == TAB_SETUP && _setup_page != SP_ROOT) {
+      setupOpen(SP_ROOT);
+    } else if (tb == 'L') _tab = (Tab)((_tab + TAB_COUNT - 1) % TAB_COUNT);
     else if (tb == 'R') _tab = (Tab)((_tab + 1) % TAB_COUNT);
     else if (_tab == TAB_MSGS) {
       _msg_scroll = tb == 'U' ? _msg_scroll + 1 : max(0, _msg_scroll - 1);
@@ -296,8 +305,9 @@ void UITask::loop() {
 uint32_t UITask::screenSignature() {
   uint32_t h = (uint32_t)_tab * 2654435761u;
   if (_tab == TAB_SETUP) {   // values here change as you set them
-    return h ^ (uint32_t)(_setup_sel * 131 + _setup_scroll * 17 + (_editing ? 7919 : 0) + _edit_len * 31 +
-                          (_setup_confirm + 2) * 13 + (uint32_t)strlen(_setup_status));
+    return h ^ (uint32_t)(_setup_page * 65537 + _setup_sel * 131 + _setup_scroll * 17 +
+                          (_editing ? 7919 : 0) + _edit_len * 31 + (_setup_confirm + 2) * 13 +
+                          _wifi_scan_state * 101 + _wifi_found * 7 + (uint32_t)strlen(_setup_status));
   }
   const uint32_t clock_now = rtc_clock.getCurrentTime();
   h ^= clock_now / 60 * 2246822519u;                       // the clock shows minutes
@@ -903,31 +913,31 @@ void UITask::drawRadio() {
 
 // ---------------------------------------------------------------- setup tab
 
-// Rows on the Setup tab. Everything is applied through the same command line the web
-// interface uses, so the device and the browser can't drift apart.
-enum SetupRow {
-  SR_NAME = 0, SR_PRESET, SR_TX, SR_BLE, SR_WIFI_SSID, SR_WIFI_PWD, SR_WIFI_JOIN,
-  SR_SCOPE, SR_GPS, SR_UPDATE, SR_REBOOT, SR_FACTORY, SR_COUNT
+// The Setup tab is a small menu: a list of sections, each with its own screen. Everything
+// is applied through the same command line the web interface uses, so the device and the
+// browser can never disagree.
+
+struct RadioBand { const char* name; float freq; float bw; uint8_t sf; uint8_t cr; };
+static const RadioBand kBands[] = {
+  {"EU/UK 869.6 narrow", 869.618f, 62.5f, 8, 5},
+  {"EU/UK 869.5 medium", 869.525f, 250.0f, 10, 5},
+  {"EU/UK 869.5 long", 869.525f, 250.0f, 11, 5},
+  {"EU 433.65 long", 433.65f, 250.0f, 11, 5},
+  {"Switzerland 869.6", 869.618f, 62.5f, 8, 5},
+  {"Czech 869.4", 869.432f, 62.5f, 7, 5},
+  {"Portugal 433.4", 433.375f, 62.5f, 9, 5},
+  {"USA/Canada 910.5", 910.525f, 62.5f, 7, 5},
+  {"Australia/NZ 915.8", 915.8f, 62.5f, 8, 5},
 };
+static const int kBandCount = sizeof(kBands) / sizeof(kBands[0]);
+static const int kTxSteps[] = {2, 5, 8, 11, 14, 17, 20, 22};
+static const int kTxCount = sizeof(kTxSteps) / sizeof(kTxSteps[0]);
+static const char* kScopes[] = {"-", "yorkshire", "northwest", "uk"};
+static const int kScopeCount = sizeof(kScopes) / sizeof(kScopes[0]);
 
-// name, frequency, bandwidth, spreading factor, coding rate
-struct RadioPreset { const char* name; const char* params; };
-static const RadioPreset kPresets[] = {
-  {"EU/UK Narrow", "869.618,62.5,8,5"},
-  {"EU/UK Medium", "869.525,250,10,5"},
-  {"EU/UK Long", "869.525,250,11,5"},
-  {"EU 433", "433.65,250,11,5"},
-  {"USA/Canada", "910.525,62.5,7,5"},
-};
-static const int kPresetCount = sizeof(kPresets) / sizeof(kPresets[0]);
-static const int kTxSteps[] = {14, 17, 20, 22};
-static const char* kScopes[] = {"-", "yorkshire", "northwest"};
-
-int UITask::setupRowCount() const { return SR_COUNT; }
-
-// Runs a command and returns its reply with the leading "> " removed.
+// Runs a command and returns the reply with any leading "> " removed.
 static const char* umcCli(const char* cmd) {
-  static char reply[160];
+  static char reply[192];
   reply[0] = 0;
   the_mesh.umcCommand(cmd, reply, sizeof(reply));
   const char* out = reply;
@@ -935,188 +945,374 @@ static const char* umcCli(const char* cmd) {
   return out;
 }
 
-void UITask::drawSetup() {
-  const int top = BODY_Y + 2;
-  const int row_h = 20;
-  const int rows_visible = (BODY_H - 24) / row_h;
-  char buf[96];
-
-  if (_editing) {   // full-screen edit line, typed on the keyboard
-    fill(0, top, SCR_W, BODY_H - 2, C_BG);
-    static const char* labels[SR_COUNT] = {"Node name", "", "", "", "WiFi network", "WiFi password", "", "", "", "", "", ""};
-    text(8, top + 10, labels[_edit_row] ? labels[_edit_row] : "Value", C_DIM);
-    fill(6, top + 30, SCR_W - 12, 26, C_CARD);
-    gfx()->drawRect(6, top + 30, SCR_W - 12, 26, C_ACC);
-    if (_edit_secret) {
-      char stars[sizeof(_edit_buf)];
-      int n = _edit_len < (int)sizeof(stars) - 1 ? _edit_len : (int)sizeof(stars) - 1;
-      for (int i = 0; i < n; i++) stars[i] = '*';
-      stars[n] = 0;
-      textClip(12, top + 39, SCR_W - 24, stars, C_TXT);
-    } else {
-      textClip(12, top + 39, SCR_W - 24, _edit_buf, C_TXT);
-    }
-    text(8, top + 66, "Type on the keyboard. Enter = save, Esc = cancel.", C_DIM);
-    return;
+// Which band the radio is on now, or -1. Compared as numbers: the radio reports its
+// frequency in full precision (869.6179809), so text matching would never agree.
+static int currentBand() {
+  float f = 0, bw = 0;
+  int sf = 0, cr = 0;
+  if (sscanf(umcCli("get radio"), "%f,%f,%d,%d", &f, &bw, &sf, &cr) != 4) return -1;
+  for (int i = 0; i < kBandCount; i++) {
+    if (fabsf(kBands[i].freq - f) < 0.01f && fabsf(kBands[i].bw - bw) < 0.1f && kBands[i].sf == sf) return i;
   }
+  return -1;
+}
 
-  if (_setup_sel < _setup_scroll) _setup_scroll = _setup_sel;
-  if (_setup_sel >= _setup_scroll + rows_visible) _setup_scroll = _setup_sel - rows_visible + 1;
+void UITask::setupOpen(int page) {
+  _setup_page = page;
+  _setup_sel = 0;
+  _setup_scroll = 0;
+  _setup_confirm = -1;
+  _dirty = true;
+}
 
-  for (int i = 0; i < rows_visible; i++) {
-    const int row = _setup_scroll + i;
-    if (row >= SR_COUNT) break;
-    const int y = top + i * row_h;
-    const bool on = row == _setup_sel;
-    if (on) fill(0, y, SCR_W, row_h, C_CARD);
+void UITask::wifiScanStart() {
+  _wifi_scan_state = 1;
+  _wifi_found = 0;
+  _wifi_scan_started = millis();
+  WiFi.scanDelete();
+  WiFi.scanNetworks(true, false);   // asynchronous: the screen stays alive
+  StrHelper::strncpy(_setup_status, "Scanning...", sizeof(_setup_status));
+}
 
-    const char* label = "";
-    buf[0] = 0;
-    switch (row) {
-      case SR_NAME: label = "Name"; snprintf(buf, sizeof(buf), "%s", the_mesh.getNodeName()); break;
-      case SR_PRESET: {
-        label = "Radio";
-        const char* r = umcCli("get radio");
-        const char* nice = r;
-        for (int p = 0; p < kPresetCount; p++) {
-          if (strncmp(r, kPresets[p].params, strlen(kPresets[p].params)) == 0) { nice = kPresets[p].name; break; }
-        }
-        snprintf(buf, sizeof(buf), "%s", nice);
-        break;
-      }
-      case SR_TX: label = "TX power"; snprintf(buf, sizeof(buf), "%s dBm", umcCli("get tx")); break;
-      case SR_BLE: {
-        label = "Bluetooth";
-        snprintf(buf, sizeof(buf), "%s  PIN %lu", isBluetoothEnabled() ? "on" : "off",
-                 (unsigned long)the_mesh.getBLEPin());
-        break;
-      }
-      case SR_WIFI_SSID: {
-        label = "WiFi network";
-        const char* live = umcCli("get wifi.ssid");
-        snprintf(buf, sizeof(buf), "%s", _wifi_ssid[0] ? _wifi_ssid : (live[0] && live[0] != '-' ? live : "not set"));
-        break;
-      }
-      case SR_WIFI_PWD: label = "WiFi password"; snprintf(buf, sizeof(buf), "%s", _wifi_pwd[0] ? "********" : "not set"); break;
-      case SR_WIFI_JOIN: {
-        label = "Join WiFi";
-        NetworkService& net = the_mesh.getNetwork();
-        snprintf(buf, sizeof(buf), "%s", net.isWifiConnected() ? net.getStaIp().c_str() : "tap to connect");
-        break;
-      }
-      case SR_SCOPE: label = "Region"; snprintf(buf, sizeof(buf), "%s", umcCli("get scope")); break;
-      case SR_GPS: label = "GPS"; snprintf(buf, sizeof(buf), "%s", umcCli("gps")); break;
-      case SR_UPDATE: label = "Firmware"; snprintf(buf, sizeof(buf), "v%s - tap to check", UMC_VERSION); break;
-      case SR_REBOOT: label = "Restart"; snprintf(buf, sizeof(buf), "%s", _setup_confirm == row ? "tap again" : "tap"); break;
-      case SR_FACTORY: label = "Factory reset"; snprintf(buf, sizeof(buf), "%s", _setup_confirm == row ? "tap again to erase" : "tap"); break;
-      default: break;
-    }
-    text(6, y + 6, label, on ? C_TXT : C_DIM);
-    textClip(132, y + 6, SCR_W - 140, buf, row == SR_FACTORY && _setup_confirm == row ? C_BAD : C_TXT);
-  }
-
-  if (_setup_status[0]) {
-    fill(0, SCR_H - TAB_H - 14, SCR_W, 14, C_CARD);
-    textClip(6, SCR_H - TAB_H - 11, SCR_W - 12, _setup_status, C_OK);
+void UITask::wifiScanPoll() {
+  if (_wifi_scan_state != 1) return;
+  const int n = WiFi.scanComplete();
+  if (n >= 0) {
+    _wifi_found = n > 24 ? 24 : n;
+    _wifi_scan_state = 2;
+    snprintf(_setup_status, sizeof(_setup_status), "%d network%s found", _wifi_found, _wifi_found == 1 ? "" : "s");
+    _dirty = true;
+  } else if (millis() - _wifi_scan_started > 15000) {
+    _wifi_scan_state = 2;
+    _wifi_found = 0;
+    StrHelper::strncpy(_setup_status, "Scan failed", sizeof(_setup_status));
+    _dirty = true;
   }
 }
 
-void UITask::setupAction(int row) {
-  char cmd[96];
-  _setup_status[0] = 0;
-  if (row != SR_REBOOT && row != SR_FACTORY) _setup_confirm = -1;
+int UITask::setupRowCount() const {
+  switch (_setup_page) {
+    case SP_ROOT: return 7;                    // the sections
+    case SP_DEVICE: return 4;                  // name, restart, factory reset, back
+    case SP_RADIO: return kBandCount + 2;      // bands, TX power, back
+    case SP_WIFI: return 5;                    // scan, network, password, connect, back
+    case SP_WIFI_PICK: return _wifi_found + 1; // networks, back
+    case SP_BLE: return 3;                     // on/off, PIN, back
+    case SP_REGION: return kScopeCount + 1;
+    case SP_GPS: return 2;
+    case SP_FW: return 3;                      // version, check, back
+    default: return 1;
+  }
+}
 
-  switch (row) {
-    case SR_NAME:
-      _editing = true; _edit_row = row; _edit_secret = false;
-      StrHelper::strncpy(_edit_buf, the_mesh.getNodeName(), sizeof(_edit_buf));
-      _edit_len = strlen(_edit_buf);
-      break;
-    case SR_WIFI_SSID:
-      _editing = true; _edit_row = row; _edit_secret = false;
-      StrHelper::strncpy(_edit_buf, _wifi_ssid, sizeof(_edit_buf));
-      _edit_len = strlen(_edit_buf);
-      break;
-    case SR_WIFI_PWD:
-      _editing = true; _edit_row = row; _edit_secret = true;
-      _edit_buf[0] = 0; _edit_len = 0;
-      break;
-    case SR_PRESET: {
-      const char* now = umcCli("get radio");
-      int next = 0;
-      for (int p = 0; p < kPresetCount; p++) {
-        if (strncmp(now, kPresets[p].params, strlen(kPresets[p].params)) == 0) { next = (p + 1) % kPresetCount; break; }
+// One row's label and value. Keeping this in one place means the screen and the taps can
+// never disagree about what row 4 is.
+void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t value_n) const {
+  label[0] = 0;
+  value[0] = 0;
+  NetworkService& net = the_mesh.getNetwork();
+  switch (_setup_page) {
+    case SP_ROOT: {
+      static const char* sections[7] = {"Device", "Radio", "WiFi", "Bluetooth", "Region", "GPS", "Firmware"};
+      snprintf(label, label_n, "%s", sections[row]);
+      switch (row) {
+        case 0: snprintf(value, value_n, "%s", the_mesh.getNodeName()); break;
+        case 1: {
+          const int b = currentBand();
+          snprintf(value, value_n, "%s", b >= 0 ? kBands[b].name : umcCli("get radio"));
+          break;
+        }
+        case 2: snprintf(value, value_n, "%s", net.isWifiConnected() ? net.getStaIp().c_str()
+                                                                     : (net.isApActive() ? "hotspot" : "not connected")); break;
+        case 3: snprintf(value, value_n, "%s", isBluetoothEnabled() ? "on" : "off"); break;
+        case 4: snprintf(value, value_n, "%s", umcCli("get scope")); break;
+        case 5: snprintf(value, value_n, "%s", umcCli("gps")); break;
+        case 6: snprintf(value, value_n, "v%s", UMC_VERSION); break;
       }
-      snprintf(cmd, sizeof(cmd), "set radio %s", kPresets[next].params);
-      StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
       break;
     }
-    case SR_TX: {
-      const int now = atoi(umcCli("get tx"));
-      int next = kTxSteps[0];
-      for (unsigned i = 0; i < sizeof(kTxSteps) / sizeof(kTxSteps[0]); i++) {
-        if (kTxSteps[i] == now) { next = kTxSteps[(i + 1) % (sizeof(kTxSteps) / sizeof(kTxSteps[0]))]; break; }
+    case SP_DEVICE:
+      if (row == 0) { snprintf(label, label_n, "Name"); snprintf(value, value_n, "%s", the_mesh.getNodeName()); }
+      else if (row == 1) { snprintf(label, label_n, "Restart"); snprintf(value, value_n, "%s", _setup_confirm == row ? "tap again" : "tap"); }
+      else if (row == 2) { snprintf(label, label_n, "Factory reset"); snprintf(value, value_n, "%s", _setup_confirm == row ? "tap again to erase" : "tap"); }
+      else snprintf(label, label_n, "< Back");
+      break;
+    case SP_RADIO:
+      if (row < kBandCount) {
+        snprintf(label, label_n, "%s", kBands[row].name);
+        snprintf(value, value_n, "%s", currentBand() == row ? "in use" : "");
+      } else if (row == kBandCount) {
+        snprintf(label, label_n, "TX power");
+        snprintf(value, value_n, "%s dBm", umcCli("get tx"));
+      } else {
+        snprintf(label, label_n, "< Back");
       }
-      snprintf(cmd, sizeof(cmd), "set tx %d", next);
-      StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
       break;
-    }
-    case SR_BLE:
-      StrHelper::strncpy(_setup_status, umcCli(isBluetoothEnabled() ? "set ble off" : "set ble on"), sizeof(_setup_status));
+    case SP_WIFI:
+      if (row == 0) { snprintf(label, label_n, "Scan for networks"); snprintf(value, value_n, "%s", _wifi_scan_state == 1 ? "scanning" : "tap"); }
+      else if (row == 1) { snprintf(label, label_n, "Network"); snprintf(value, value_n, "%s", _wifi_ssid[0] ? _wifi_ssid : umcCli("get wifi.ssid")); }
+      else if (row == 2) { snprintf(label, label_n, "Password"); snprintf(value, value_n, "%s", _wifi_pwd[0] ? "********" : "not set"); }
+      else if (row == 3) { snprintf(label, label_n, "Connect"); snprintf(value, value_n, "%s", net.isWifiConnected() ? net.getStaIp().c_str() : "tap"); }
+      else snprintf(label, label_n, "< Back");
       break;
-    case SR_WIFI_JOIN: {
-      if (_wifi_ssid[0] == 0) { StrHelper::strncpy(_setup_status, "Enter the network name first", sizeof(_setup_status)); break; }
-      snprintf(cmd, sizeof(cmd), "set wifi.ssid %s", _wifi_ssid);
-      umcCli(cmd);
-      snprintf(cmd, sizeof(cmd), "set wifi.pwd %s", _wifi_pwd);
-      umcCli(cmd);
-      StrHelper::strncpy(_setup_status, umcCli("wifi reconnect"), sizeof(_setup_status));
-      break;
-    }
-    case SR_SCOPE: {
-      const char* now = umcCli("get scope");
-      int next = 0;
-      for (unsigned i = 0; i < sizeof(kScopes) / sizeof(kScopes[0]); i++) {
-        if (strcmp(now, kScopes[i]) == 0) { next = (i + 1) % (sizeof(kScopes) / sizeof(kScopes[0])); break; }
+    case SP_WIFI_PICK:
+      if (row < _wifi_found) {
+        snprintf(label, label_n, "%s", WiFi.SSID(row).c_str());
+        snprintf(value, value_n, "%d dBm%s", (int)WiFi.RSSI(row), WiFi.encryptionType(row) == WIFI_AUTH_OPEN ? "  open" : "");
+      } else {
+        snprintf(label, label_n, "< Back");
       }
-      snprintf(cmd, sizeof(cmd), "set scope %s", kScopes[next]);
-      StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
       break;
+    case SP_BLE:
+      if (row == 0) {
+        snprintf(label, label_n, "Bluetooth");
+        snprintf(value, value_n, "%s%s", isBluetoothEnabled() ? "on" : "off", _ble_pending ? " (restart to apply)" : "");
+      } else if (row == 1) {
+        snprintf(label, label_n, "Pairing PIN");
+        snprintf(value, value_n, "%lu", (unsigned long)the_mesh.getBLEPin());
+      } else {
+        snprintf(label, label_n, "< Back");
+      }
+      break;
+    case SP_REGION:
+      if (row < kScopeCount) {
+        snprintf(label, label_n, "%s", strcmp(kScopes[row], "-") == 0 ? "No region (whole mesh)" : kScopes[row]);
+        snprintf(value, value_n, "%s", strcmp(umcCli("get scope"), kScopes[row]) == 0 ? "in use" : "");
+      } else {
+        snprintf(label, label_n, "< Back");
+      }
+      break;
+    case SP_GPS:
+      if (row == 0) { snprintf(label, label_n, "GPS"); snprintf(value, value_n, "%s", umcCli("gps")); }
+      else snprintf(label, label_n, "< Back");
+      break;
+    case SP_FW:
+      if (row == 0) { snprintf(label, label_n, "Version"); snprintf(value, value_n, "%s (MeshCore %s)", UMC_VERSION, FIRMWARE_VERSION); }
+      else if (row == 1) { snprintf(label, label_n, "Check for update"); snprintf(value, value_n, "%s", umcCli("get update.status")); }
+      else snprintf(label, label_n, "< Back");
+      break;
+    default: snprintf(label, label_n, "< Back"); break;
+  }
+}
+
+void UITask::drawSetup() {
+  const int top = BODY_Y;
+  const int row_h = 20;
+  const int list_top = top + 18;
+  const int rows_visible = (BODY_H - 18 - 14) / row_h;
+  char label[64], value[80];
+
+  wifiScanPoll();
+
+  if (_editing) {   // typing line
+    fill(0, top, SCR_W, BODY_H, C_BG);
+    static const char* what[] = {"", "Node name", "WiFi network", "WiFi password", "Bluetooth PIN", "Region name"};
+    text(8, top + 12, what[_edit_what], C_DIM);
+    fill(6, top + 32, SCR_W - 12, 28, C_CARD);
+    gfx()->drawRect(6, top + 32, SCR_W - 12, 28, C_ACC);
+    char shown[sizeof(_edit_buf)];
+    if (_edit_secret) {
+      int n = _edit_len < (int)sizeof(shown) - 2 ? _edit_len : (int)sizeof(shown) - 2;
+      for (int i = 0; i < n; i++) shown[i] = '*';
+      shown[n] = 0;
+    } else {
+      StrHelper::strncpy(shown, _edit_buf, sizeof(shown));
     }
-    case SR_GPS:
-      StrHelper::strncpy(_setup_status, umcCli(strcmp(umcCli("gps"), "on") == 0 ? "gps off" : "gps on"), sizeof(_setup_status));
+    strncat(shown, "_", sizeof(shown) - strlen(shown) - 1);
+    textClip(12, top + 42, SCR_W - 24, shown, C_TXT);
+    text(8, top + 72, "Enter saves   Esc cancels   Backspace deletes", C_DIM);
+    return;
+  }
+
+  static const char* titles[] = {"Setup", "Device", "Radio band", "WiFi", "Choose a network",
+                                 "Bluetooth", "Region scope", "GPS", "Firmware"};
+  fill(0, top, SCR_W, 16, C_CARD);
+  text(6, top + 4, titles[_setup_page], C_ACC);
+  if (_setup_page != SP_ROOT) text(SCR_W - 76, top + 4, "Back: left", C_DIM);
+
+  const int count = setupRowCount();
+  if (_setup_sel >= count) _setup_sel = count - 1;
+  if (_setup_sel < 0) _setup_sel = 0;
+  if (_setup_sel < _setup_scroll) _setup_scroll = _setup_sel;
+  if (_setup_sel >= _setup_scroll + rows_visible) _setup_scroll = _setup_sel - rows_visible + 1;
+
+  fill(0, list_top, SCR_W, BODY_H - 18 - 14, C_BG);
+  for (int i = 0; i < rows_visible; i++) {
+    const int row = _setup_scroll + i;
+    if (row >= count) break;
+    const int y = list_top + i * row_h;
+    const bool on = row == _setup_sel;
+    if (on) fill(0, y, SCR_W, row_h, C_CARD);
+    setupRow(row, label, sizeof(label), value, sizeof(value));
+    const bool danger = _setup_page == SP_DEVICE && row == 2 && _setup_confirm == row;
+    text(6, y + 6, label, on ? C_TXT : C_DIM);
+    textClip(150, y + 6, SCR_W - 156, value, danger ? C_BAD : (on ? C_TXT : C_DIM));
+  }
+
+  if (count > rows_visible) {   // a hint that the list goes on
+    char pos[24];
+    snprintf(pos, sizeof(pos), "%d/%d", _setup_sel + 1, count);
+    text(SCR_W - 42, SCR_H - TAB_H - 12, pos, C_DIM);
+  }
+  if (_setup_status[0]) textClip(6, SCR_H - TAB_H - 12, SCR_W - 50, _setup_status, C_OK);
+}
+
+void UITask::setupAction(int row) {
+  char cmd[128];
+  const int page = _setup_page;
+  if (!(page == SP_DEVICE && (row == 1 || row == 2))) _setup_confirm = -1;
+
+  switch (page) {
+    case SP_ROOT:
+      setupOpen(row == 0 ? SP_DEVICE : row == 1 ? SP_RADIO : row == 2 ? SP_WIFI : row == 3 ? SP_BLE
+                : row == 4 ? SP_REGION : row == 5 ? SP_GPS : SP_FW);
+      return;
+
+    case SP_DEVICE:
+      if (row == 0) {
+        _editing = true; _edit_what = SE_NAME; _edit_secret = false;
+        StrHelper::strncpy(_edit_buf, the_mesh.getNodeName(), sizeof(_edit_buf));
+        _edit_len = strlen(_edit_buf);
+      } else if (row == 1) {
+        if (_setup_confirm != row) { _setup_confirm = row; break; }
+        showAlert("Restarting...", 1200);
+        draw();
+        delay(600);
+        the_mesh.getUmc().scheduleReboot(200);
+      } else if (row == 2) {
+        if (_setup_confirm != row) { _setup_confirm = row; break; }
+        StrHelper::strncpy(_setup_status, umcCli("factory reset confirm"), sizeof(_setup_status));
+      } else {
+        setupOpen(SP_ROOT);
+        return;
+      }
       break;
-    case SR_UPDATE:
-      StrHelper::strncpy(_setup_status, umcCli("update check"), sizeof(_setup_status));
+
+    case SP_RADIO:
+      if (row < kBandCount) {
+        snprintf(cmd, sizeof(cmd), "set radio %.3f,%.1f,%u,%u", kBands[row].freq, kBands[row].bw,
+                 (unsigned)kBands[row].sf, (unsigned)kBands[row].cr);
+        StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      } else if (row == kBandCount) {
+        const int now = atoi(umcCli("get tx"));
+        int next = kTxSteps[0];
+        for (int i = 0; i < kTxCount; i++) {
+          if (kTxSteps[i] == now) { next = kTxSteps[(i + 1) % kTxCount]; break; }
+        }
+        snprintf(cmd, sizeof(cmd), "set tx %d", next);
+        StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      } else {
+        setupOpen(SP_ROOT);
+        return;
+      }
       break;
-    case SR_REBOOT:
-      if (_setup_confirm != row) { _setup_confirm = row; break; }
-      showAlert("Restarting...", 1200);
-      draw();
-      delay(600);
-      the_mesh.getUmc().scheduleReboot(200);
+
+    case SP_WIFI:
+      if (row == 0) { wifiScanStart(); setupOpen(SP_WIFI_PICK); return; }
+      if (row == 1) {
+        _editing = true; _edit_what = SE_SSID; _edit_secret = false;
+        StrHelper::strncpy(_edit_buf, _wifi_ssid, sizeof(_edit_buf));
+        _edit_len = strlen(_edit_buf);
+      } else if (row == 2) {
+        _editing = true; _edit_what = SE_PASSWORD; _edit_secret = true;
+        _edit_buf[0] = 0; _edit_len = 0;
+      } else if (row == 3) {
+        if (_wifi_ssid[0] == 0) { StrHelper::strncpy(_setup_status, "Choose a network first", sizeof(_setup_status)); break; }
+        snprintf(cmd, sizeof(cmd), "set wifi.ssid %s", _wifi_ssid);
+        umcCli(cmd);
+        snprintf(cmd, sizeof(cmd), "set wifi.pwd %s", _wifi_pwd);
+        umcCli(cmd);
+        StrHelper::strncpy(_setup_status, umcCli("wifi reconnect"), sizeof(_setup_status));
+      } else {
+        setupOpen(SP_ROOT);
+        return;
+      }
       break;
-    case SR_FACTORY:
-      if (_setup_confirm != row) { _setup_confirm = row; break; }
-      StrHelper::strncpy(_setup_status, umcCli("factory reset confirm"), sizeof(_setup_status));
+
+    case SP_WIFI_PICK:
+      if (row < _wifi_found) {
+        StrHelper::strncpy(_wifi_ssid, WiFi.SSID(row).c_str(), sizeof(_wifi_ssid));
+        snprintf(_setup_status, sizeof(_setup_status), "Chosen: %s", _wifi_ssid);
+        setupOpen(SP_WIFI);
+        _setup_sel = 2;      // straight to the password
+        return;
+      }
+      setupOpen(SP_WIFI);
+      return;
+
+    case SP_BLE:
+      if (row == 0) {
+        StrHelper::strncpy(_setup_status, umcCli(isBluetoothEnabled() ? "set ble off" : "set ble on"), sizeof(_setup_status));
+        _ble_pending = true;
+      } else if (row == 1) {
+        _editing = true; _edit_what = SE_PIN; _edit_secret = false;
+        snprintf(_edit_buf, sizeof(_edit_buf), "%lu", (unsigned long)the_mesh.getBLEPin());
+        _edit_len = strlen(_edit_buf);
+      } else {
+        setupOpen(SP_ROOT);
+        return;
+      }
       break;
-    default: break;
+
+    case SP_REGION:
+      if (row < kScopeCount) {
+        snprintf(cmd, sizeof(cmd), "set scope %s", kScopes[row]);
+        StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      } else {
+        setupOpen(SP_ROOT);
+        return;
+      }
+      break;
+
+    case SP_GPS:
+      if (row == 0) {
+        StrHelper::strncpy(_setup_status, umcCli(strcmp(umcCli("gps"), "on") == 0 ? "gps off" : "gps on"), sizeof(_setup_status));
+      } else {
+        setupOpen(SP_ROOT);
+        return;
+      }
+      break;
+
+    case SP_FW:
+      if (row == 1) {
+        StrHelper::strncpy(_setup_status, umcCli("update check"), sizeof(_setup_status));
+      } else if (row == 2) {
+        setupOpen(SP_ROOT);
+        return;
+      }
+      break;
+
+    default:
+      setupOpen(SP_ROOT);
+      return;
   }
   _dirty = true;
 }
 
 void UITask::setupEditDone() {
-  char cmd[128];
-  if (_edit_row == SR_NAME && _edit_len > 0) {
-    snprintf(cmd, sizeof(cmd), "set name %s", _edit_buf);
-    StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
-  } else if (_edit_row == SR_WIFI_SSID) {
-    StrHelper::strncpy(_wifi_ssid, _edit_buf, sizeof(_wifi_ssid));
-  } else if (_edit_row == SR_WIFI_PWD) {
-    StrHelper::strncpy(_wifi_pwd, _edit_buf, sizeof(_wifi_pwd));
+  char cmd[160];
+  switch (_edit_what) {
+    case SE_NAME:
+      if (_edit_len > 0) {
+        snprintf(cmd, sizeof(cmd), "set name %s", _edit_buf);
+        StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      }
+      break;
+    case SE_SSID:
+      StrHelper::strncpy(_wifi_ssid, _edit_buf, sizeof(_wifi_ssid));
+      break;
+    case SE_PASSWORD:
+      StrHelper::strncpy(_wifi_pwd, _edit_buf, sizeof(_wifi_pwd));
+      break;
+    case SE_PIN:
+      snprintf(cmd, sizeof(cmd), "set ble.pin %s", _edit_buf);
+      StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      _ble_pending = true;
+      break;
+    default: break;
   }
   _editing = false;
-  _edit_row = -1;
+  _edit_what = SE_NONE;
   _edit_buf[0] = 0;
   _edit_len = 0;
   _dirty = true;
@@ -1248,9 +1444,13 @@ void UITask::handleTouch(const TouchEvent& ev) {
 
   if (_tab == TAB_SETUP) {
     if (_editing) return;            // the keyboard does the talking while editing
-    const int row_h = 20, top = BODY_Y + 2;
-    if (ev.released && ev.y >= top && ev.y < SCR_H - TAB_H) {
-      const int row = _setup_scroll + (ev.y - top) / row_h;
+    const int row_h = 20, list_top = BODY_Y + 18;
+    if (ev.released && ev.y >= BODY_Y && ev.y < list_top) {   // the title bar goes back
+      if (_setup_page != SP_ROOT) setupOpen(SP_ROOT);
+      return;
+    }
+    if (ev.released && ev.y >= list_top && ev.y < SCR_H - TAB_H) {
+      const int row = _setup_scroll + (ev.y - list_top) / row_h;
       if (row >= 0 && row < setupRowCount()) {
         _setup_sel = row;
         setupAction(row);
@@ -1290,7 +1490,7 @@ void UITask::handleKey(char c) {
       } else if (c == 13 || c == 10) {            // enter saves
         setupEditDone();
       } else if (c == 27) {                       // escape cancels
-        _editing = false; _edit_row = -1; _edit_len = 0; _edit_buf[0] = 0;
+        _editing = false; _edit_what = SE_NONE; _edit_len = 0; _edit_buf[0] = 0;
       } else if (c >= 32 && c < 127 && _edit_len < (int)sizeof(_edit_buf) - 1) {
         _edit_buf[_edit_len++] = c;
         _edit_buf[_edit_len] = 0;

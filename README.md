@@ -256,7 +256,7 @@ The messenger also works on a phone browser:
 - **Offline maps from the SD card**, with your position and contacts plotted. `scripts/umc_make_map_tiles.py` builds the tiles.
 - Without tiles, contacts are plotted by range and bearing, with distance rings.
 - **GPS auto-detection** for both receivers used on the T-Deck Plus (u-blox at 38400 baud, L76K at 9600). The Info tab names the one that answered.
-- **Setup tab**: set the radio up on the device itself — name, radio preset, TX power, Bluetooth, WiFi network and password, region scope, GPS, firmware update check, restart and factory reset. No computer or phone needed.
+- **Setup tab**: sets the radio up on the device itself, in sections — **Device** (name, restart, factory reset), **Radio** (nine bands and TX power 2–22 dBm), **WiFi** (scan for networks, pick one, type the password, connect), **Bluetooth** (on/off, pairing PIN), **Region** scope, **GPS**, and **Firmware** (version, update check). No computer or phone needed.
 - **Info tab** also shows how long it has been running and why it last restarted.
 - **Start screen** with the Ultimate MeshCore artwork.
 - The same Bluetooth, USB and WiFi app links, web interface and updates as the other client builds.
