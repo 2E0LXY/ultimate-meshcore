@@ -145,6 +145,13 @@ static void button(int x, int y, int w, int h, const char* label, bool on = fals
   text(x + (w - tw) / 2, y + (h - 8) / 2, label, on ? 0xFFFF : C_TXT);
 }
 
+// The contact store keeps a few reserved slots at the front for anonymous requests, and
+// getNumContacts() doesn't count them - so the screen must skip them too, or every list
+// starts with blank entries.
+static bool contactAt(int i, ContactInfo& dest) {
+  return i >= 0 && the_mesh.getContactByIdx((uint32_t)(i + MAX_ANON_CONTACTS), dest);
+}
+
 static bool hit(const TouchEvent& ev, int x, int y, int w, int h) {
   return ev.released && ev.x >= x && ev.x < x + w && ev.y >= y && ev.y < y + h &&
          abs(ev.x - ev.start_x) < 20 && abs(ev.y - ev.start_y) < 20;
@@ -616,7 +623,7 @@ void UITask::drawContacts() {
     const int idx = _contact_scroll + i;
     if (idx >= total) break;
     ContactInfo c;
-    if (!the_mesh.getContactByIdx(idx, c)) continue;
+    if (!contactAt(idx, c)) continue;
     const bool sel = idx == _contact_sel;
     fill(0, y, SCR_W, row_h - 2, sel ? C_ACC : C_CARD);
     textClip(4, y + 3, 150, c.name[0] ? c.name : "(no name)", sel ? 0xFFFF : C_TXT);
@@ -701,7 +708,7 @@ void UITask::drawMap() {
   double far_m = 1;
   for (int i = 0; i < total; i++) {
     ContactInfo c;
-    if (!the_mesh.getContactByIdx(i, c)) continue;
+    if (!contactAt(i, c)) continue;
     if (c.gps_lat == 0 && c.gps_lon == 0) continue;
     const double lat = c.gps_lat / 1e6, lon = c.gps_lon / 1e6;
     int px, py;
@@ -1874,7 +1881,7 @@ void UITask::handleTouch(const TouchEvent& ev) {
         int idx = -1;
         ContactInfo c;
         for (int i = 0; i < the_mesh.getNumContacts(); i++) {
-          if (the_mesh.getContactByIdx(i, c) && memcmp(c.id.pub_key, _to_key, 6) == 0) { idx = i; break; }
+          if (contactAt(i, c) && memcmp(c.id.pub_key, _to_key, 6) == 0) { idx = i; break; }
         }
         if (idx >= 0 && idx + 1 < the_mesh.getNumContacts()) {
           selectContact(idx + 1);
@@ -1919,7 +1926,7 @@ void UITask::handleTouch(const TouchEvent& ev) {
     const int by = SCR_H - TAB_H - 26;
     const int total = the_mesh.getNumContacts();
     ContactInfo c;
-    if (_contact_sel >= 0 && _contact_sel < total && the_mesh.getContactByIdx(_contact_sel, c)) {
+    if (_contact_sel >= 0 && _contact_sel < total && contactAt(_contact_sel, c)) {
       if (hit(ev, 2, by, 74, 22)) { selectContact(_contact_sel); _tab = TAB_MSGS; _dirty = true; return; }
       if (hit(ev, 80, by, 74, 22)) {
         if (c.gps_lat || c.gps_lon) {
@@ -2063,7 +2070,7 @@ void UITask::handleKey(char c) {
 
 void UITask::selectContact(int idx) {
   ContactInfo c;
-  if (!the_mesh.getContactByIdx(idx, c)) return;
+  if (!contactAt(idx, c)) return;
   _to_channel = false;
   memcpy(_to_key, c.id.pub_key, 6);
   StrHelper::strncpy(_to_name, c.name[0] ? c.name : "contact", sizeof(_to_name));
