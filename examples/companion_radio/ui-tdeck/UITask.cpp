@@ -16,8 +16,9 @@
 #include <time.h>
 
 // Setup tab pages and the things you can type into
-enum SetupPage { SP_ROOT = 0, SP_DEVICE, SP_RADIO, SP_WIFI, SP_WIFI_PICK, SP_BLE, SP_REGION, SP_GPS, SP_FW };
-enum SetupEdit { SE_NONE = 0, SE_NAME, SE_SSID, SE_PASSWORD, SE_PIN, SE_REGION };
+enum SetupPage { SP_ROOT = 0, SP_DEVICE, SP_RADIO, SP_WIFI, SP_WIFI_PICK, SP_BLE, SP_REGION, SP_GPS, SP_FW,
+                 SP_CHANNELS, SP_MESSAGING, SP_CONTACTS_CFG, SP_TELEMETRY, SP_CONSOLE, SP_DISPLAY };
+enum SetupEdit { SE_NONE = 0, SE_NAME, SE_SSID, SE_PASSWORD, SE_PIN, SE_REGION, SE_CHANNEL, SE_COMMAND };
 
 // ---- layout (320 x 240 landscape) ----
 #define SCR_W 320
@@ -27,6 +28,28 @@ enum SetupEdit { SE_NONE = 0, SE_NAME, SE_SSID, SE_PASSWORD, SE_PIN, SE_REGION }
 #define BODY_Y HDR_H
 #define BODY_H (SCR_H - HDR_H - TAB_H)
 #define COMPOSE_H 26
+
+// ---- colour themes ----
+// Nine schemes, like a phone messenger: the page colour, the two bubble colours and the
+// text on them. Chosen in Setup > Display and kept in the device's settings.
+struct UiTheme {
+  const char* name;
+  uint16_t bg, card, line, text, dim, accent, mine, mine_text, theirs, theirs_text;
+};
+static const UiTheme kThemes[] = {
+  {"Green",   0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x0568, 0x0568, 0xFFFF, 0x2104, 0xE73C},
+  {"Blue",    0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x1C9F, 0x1C9F, 0xFFFF, 0x2104, 0xE73C},
+  {"Teal",    0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x045F, 0x045F, 0xFFFF, 0x2104, 0xE73C},
+  {"Purple",  0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x7819, 0x7819, 0xFFFF, 0x2104, 0xE73C},
+  {"Olive",   0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x5B2A, 0x5B2A, 0xFFFF, 0x2104, 0xE73C},
+  {"Orange",  0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0xC9A0, 0xC9A0, 0xFFFF, 0x2104, 0xE73C},
+  {"Rose",    0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0xB2CC, 0xB2CC, 0xFFFF, 0x2104, 0xE73C},
+  {"Magenta", 0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0xC80E, 0xC80E, 0xFFFF, 0x2104, 0xE73C},
+  {"Grey",    0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x8410, 0x8410, 0xFFFF, 0x2104, 0xE73C},
+};
+static const int kThemeCount = sizeof(kThemes) / sizeof(kThemes[0]);
+static int g_theme = 0;
+#define TH (kThemes[g_theme])
 
 // ---- colours (RGB565) ----
 #define C_BG 0x0861
@@ -209,6 +232,7 @@ void UITask::begin(DisplayDriver* disp, SensorManager* sensors, NodePrefs* node_
   if (the_mesh.getChannel(0, ch) && ch.name[0]) {
     StrHelper::strncpy(_to_name, ch.name, sizeof(_to_name));
   }
+  applyTheme();
   _dirty = true;
 }
 
@@ -359,7 +383,8 @@ uint32_t UITask::screenSignature() {
   if (_tab == TAB_SETUP) {   // values here change as you set them
     return h ^ (uint32_t)(_setup_page * 65537 + _setup_sel * 131 + _setup_scroll * 17 +
                           (_editing ? 7919 : 0) + _edit_len * 31 + (_setup_confirm + 2) * 13 +
-                          _wifi_scan_state * 101 + _wifi_found * 7 + (uint32_t)strlen(_setup_status));
+                          _wifi_scan_state * 101 + _wifi_found * 7 + (uint32_t)strlen(_setup_status) +
+                          (uint32_t)strlen(_console_out) * 3);
   }
   const uint32_t clock_now = rtc_clock.getCurrentTime();
   h ^= clock_now / 60 * 2246822519u;                       // the clock shows minutes
@@ -448,55 +473,117 @@ void UITask::drawAlert() {
   textClip(x + 8, y + 13, w - 16, _alert, 0xFFFF);
 }
 
+void UITask::applyTheme() {
+  const int want = the_mesh.getUmc().prefs().theme;
+  g_theme = want >= 0 && want < kThemeCount ? want : 0;
+}
+
+// One message bubble, drawn upwards from y_bottom. Returns the new bottom for the next one.
+int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when) {
+  const int max_w = SCR_W - 70;
+  const int pad = 5;
+  const int line_h = 11;
+  const int cols = (max_w - pad * 2) / 6;
+
+  // wrap on spaces
+  char lines[5][48];
+  int line_count = 0;
+  const char* p = body;
+  while (*p && line_count < 5) {
+    int take = strlen(p);
+    if (take > cols) {
+      take = cols;
+      int brk = take;
+      while (brk > 8 && p[brk] != ' ') brk--;
+      if (brk > 8) take = brk;
+    }
+    if (take > (int)sizeof(lines[0]) - 1) take = sizeof(lines[0]) - 1;
+    memcpy(lines[line_count], p, take);
+    lines[line_count][take] = 0;
+    line_count++;
+    p += take;
+    while (*p == ' ') p++;
+  }
+  if (line_count == 0) return y_bottom;
+
+  int widest = 0;
+  for (int i = 0; i < line_count; i++) {
+    const int w = strlen(lines[i]) * 6;
+    if (w > widest) widest = w;
+  }
+  const int bw = widest + pad * 2;
+  const int bh = line_count * line_h + pad * 2 + 9;      // room for the name/time line
+  const int bx = mine ? SCR_W - bw - 6 : 6;
+  const int by = y_bottom - bh;
+
+  gfx()->fillRoundRect(bx, by, bw, bh, 7, mine ? TH.mine : TH.theirs);
+  if (selected) gfx()->drawRoundRect(bx - 1, by - 1, bw + 2, bh + 2, 8, TH.accent == TH.mine ? 0xFFFF : TH.accent);
+
+  const uint16_t tc = mine ? TH.mine_text : TH.theirs_text;
+  for (int i = 0; i < line_count; i++) text(bx + pad, by + pad + i * line_h, lines[i], tc);
+
+  char foot[40];
+  if (when) {
+    DateTime dt(when);
+    snprintf(foot, sizeof(foot), "%s %02d:%02d", mine ? "" : who, dt.hour(), dt.minute());
+  } else {
+    snprintf(foot, sizeof(foot), "%s", mine ? "" : who);
+  }
+  text(bx + pad, by + bh - 10, foot, mine ? tc : TH.dim);
+  return by - 4;
+}
+
 void UITask::drawMessages() {
+  applyTheme();
   const int top = BODY_Y + 2;
   const int list_h = BODY_H - COMPOSE_H - 4;
 
-  // conversation being written to
-  fill(0, top, SCR_W, 16, C_CARD);
+  // who we are writing to
+  fill(0, top, SCR_W, 16, TH.card);
   char hdr[48];
   snprintf(hdr, sizeof(hdr), "To: %s%s", _to_channel ? "#" : "", _to_name);
-  textClip(4, top + 4, SCR_W - 60, hdr, C_TXT);
+  textClip(4, top + 4, SCR_W - 60, hdr, TH.text);
   button(SCR_W - 52, top, 50, 16, "change");
 
-  // messages, newest at the bottom
-  int y = top + 18 + list_h - 12;
+  fill(0, top + 17, SCR_W, list_h, TH.bg);
+
+  // newest at the bottom, working upwards
+  int y = top + 17 + list_h;
   const int first = umc_chatlog.count() - 1 - _msg_scroll;
-  for (int i = first; i >= 0 && y > top + 18; i--) {
+  _msg_rows = 0;
+  for (int i = first; i >= 0 && y > top + 28; i--) {
     const UmcChatLog::Entry* e = umc_chatlog.get(i);
     if (e == nullptr) continue;
     char who[40];
-    if (e->outgoing) snprintf(who, sizeof(who), "me%s", e->channel != 0xFF ? " >" : " >");
-    else if (e->from[0]) snprintf(who, sizeof(who), "%s", e->from);
+    if (e->from[0]) snprintf(who, sizeof(who), "%s", e->from);
     else snprintf(who, sizeof(who), "%02x%02x%02x", e->key[0], e->key[1], e->key[2]);
-
-    // wrap the text to two lines at most
-    const int cols = 48;
-    char line1[64] = {0}, line2[64] = {0};
-    strncpy(line1, e->text, cols);
-    if ((int)strlen(e->text) > cols) strncpy(line2, e->text + cols, cols);
-    const int lines = line2[0] ? 2 : 1;
-    y -= (lines - 1) * 10;
-    if (y <= top + 18) break;
-
-    const uint16_t col = e->outgoing ? C_ME : (e->cli ? C_WARN : C_TXT);
-    char tag[24];
-    if (e->channel != 0xFF) snprintf(tag, sizeof(tag), "#%d %s:", e->channel, who);
-    else snprintf(tag, sizeof(tag), "%s:", who);
-    text(4, y, tag, C_DIM);
-    const int indent = 4 + strlen(tag) * 6 + 4;
-    textClip(indent, y, SCR_W - indent - 4, line1, col);
-    if (line2[0]) textClip(4, y + 10, SCR_W - 8, line2, col);
-    y -= 12;
+    const int bottom_before = y;
+    y = drawBubble(y, who, e->text, e->outgoing, _msg_sel == i, e->epoch);
+    if (_msg_rows < (int)(sizeof(_msg_row_y) / sizeof(_msg_row_y[0]))) {
+      _msg_row_y[_msg_rows] = y;            // top of this bubble
+      _msg_row_bottom[_msg_rows] = bottom_before;
+      _msg_row_idx[_msg_rows] = i;
+      _msg_rows++;
+    }
   }
   if (umc_chatlog.count() == 0) {
-    text(8, top + 40, "No messages yet.", C_DIM);
-    text(8, top + 54, "Type below and press Enter to send.", C_DIM);
+    text(8, top + 40, "No messages yet.", TH.dim);
+    text(8, top + 54, "Type below and press Enter to send.", TH.dim);
+  } else if (_msg_sel < 0) {
+    text(6, top + 17 + list_h - 10, "Tap a message to reply to it", TH.dim);
   }
   drawCompose();
 }
 
 void UITask::drawCompose() {
+  if (_reply_to[0]) {
+    const int ry = SCR_H - TAB_H - COMPOSE_H - 12;
+    fill(0, ry, SCR_W, 12, TH.card);
+    char line[52];
+    snprintf(line, sizeof(line), "Reply to: %s", _reply_to);
+    textClip(4, ry + 2, SCR_W - 40, line, TH.accent);
+    button(SCR_W - 34, ry, 32, 12, "x");
+  }
   const int y = SCR_H - TAB_H - COMPOSE_H;
   fill(0, y, SCR_W, COMPOSE_H, C_CARD);
   gfx()->drawFastHLine(0, y, SCR_W, C_LINE);
@@ -1131,7 +1218,7 @@ void UITask::wifiScanPoll() {
 
 int UITask::setupRowCount() const {
   switch (_setup_page) {
-    case SP_ROOT: return 7;                    // the sections
+    case SP_ROOT: return 13;                   // the sections
     case SP_DEVICE: return 4;                  // name, restart, factory reset, back
     case SP_RADIO: return kBandCount + 2;      // bands, TX power, back
     case SP_WIFI: return 5;                    // scan, network, password, connect, back
@@ -1139,7 +1226,13 @@ int UITask::setupRowCount() const {
     case SP_BLE: return 3;                     // on/off, PIN, back
     case SP_REGION: return kScopeCount + 1;
     case SP_GPS: return 2;
-    case SP_FW: return 3;                      // version, check, back
+    case SP_FW: return 4;                      // version, check, install, back
+    case SP_CHANNELS: return MAX_GROUP_CHANNELS > 12 ? 14 : MAX_GROUP_CHANNELS + 2;   // channels, add, back
+    case SP_MESSAGING: return 7;
+    case SP_CONTACTS_CFG: return 8;
+    case SP_TELEMETRY: return 4;
+    case SP_CONSOLE: return 2;
+    case SP_DISPLAY: return kThemeCount + 3;   // themes, touch orientation, brightness, back
     default: return 1;
   }
 }
@@ -1152,7 +1245,9 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
   NetworkService& net = the_mesh.getNetwork();
   switch (_setup_page) {
     case SP_ROOT: {
-      static const char* sections[7] = {"Device", "Radio", "WiFi", "Bluetooth", "Region", "GPS", "Firmware"};
+      static const char* sections[13] = {"Device", "Radio", "WiFi", "Bluetooth", "Region", "GPS", "Firmware",
+                                         "Channels", "Messaging", "New contacts", "Telemetry", "Command line",
+                                         "Display & touch"};
       snprintf(label, label_n, "%s", sections[row]);
       switch (row) {
         case 0: snprintf(value, value_n, "%s", the_mesh.getNodeName()); break;
@@ -1167,6 +1262,20 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
         case 4: snprintf(value, value_n, "%s", umcCli("get scope")); break;
         case 5: snprintf(value, value_n, "%s", umcCli("gps")); break;
         case 6: snprintf(value, value_n, "v%s", UMC_VERSION); break;
+        case 7: {
+          int n = 0;
+          ChannelDetails ch;
+          for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+            if (the_mesh.getChannel(i, ch) && ch.name[0]) n++;
+          }
+          snprintf(value, value_n, "%d set up", n);
+          break;
+        }
+        case 8: snprintf(value, value_n, "acks, paths, repeat"); break;
+        case 9: snprintf(value, value_n, "%s", strcmp(umcCli("get contacts.manual"), "on") == 0 ? "manual" : "automatic"); break;
+        case 10: snprintf(value, value_n, "%s", umcCli("get telemetry.base")); break;
+        case 11: snprintf(value, value_n, "run any command"); break;
+        case 12: snprintf(value, value_n, "%s", kThemes[g_theme].name); break;
       }
       break;
     }
@@ -1228,7 +1337,79 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
     case SP_FW:
       if (row == 0) { snprintf(label, label_n, "Version"); snprintf(value, value_n, "%s (MeshCore %s)", UMC_VERSION, FIRMWARE_VERSION); }
       else if (row == 1) { snprintf(label, label_n, "Check for update"); snprintf(value, value_n, "%s", umcCli("get update.status")); }
+      else if (row == 2) { snprintf(label, label_n, "Install update"); snprintf(value, value_n, "%s", _setup_confirm == row ? "tap again" : "needs WiFi"); }
       else snprintf(label, label_n, "< Back");
+      break;
+
+    case SP_CHANNELS: {
+      const int slots = setupRowCount() - 2;
+      if (row < slots) {
+        ChannelDetails ch;
+        if (the_mesh.getChannel(row, ch) && ch.name[0]) {
+          snprintf(label, label_n, "%d  %s", row, ch.name);
+          snprintf(value, value_n, "%s", _setup_confirm == row ? "tap again to remove" : "");
+        } else {
+          snprintf(label, label_n, "%d  (empty)", row);
+        }
+      } else if (row == slots) {
+        snprintf(label, label_n, "Add a #channel");
+        snprintf(value, value_n, "type its name");
+      } else {
+        snprintf(label, label_n, "< Back");
+      }
+      break;
+    }
+
+    case SP_MESSAGING:
+      switch (row) {
+        case 0: snprintf(label, label_n, "Extra ACKs"); snprintf(value, value_n, "%s", strcmp(umcCli("get multi.acks"), "1") == 0 ? "on" : "off"); break;
+        case 1: snprintf(label, label_n, "Path hash size"); snprintf(value, value_n, "%s byte(s)", umcCli("get path.hash.mode")); break;
+        case 2: snprintf(label, label_n, "Share my location"); snprintf(value, value_n, "%s", umcCli("get advert.loc")); break;
+        case 3: snprintf(label, label_n, "Relay for others"); snprintf(value, value_n, "%s", umcCli("get repeat")); break;
+        case 4: snprintf(label, label_n, "Airtime factor"); snprintf(value, value_n, "%s", umcCli("get af")); break;
+        case 5: snprintf(label, label_n, "RX delay"); snprintf(value, value_n, "%s", umcCli("get rxdelay")); break;
+        default: snprintf(label, label_n, "< Back"); break;
+      }
+      break;
+
+    case SP_CONTACTS_CFG:
+      switch (row) {
+        case 0: snprintf(label, label_n, "Add new contacts"); snprintf(value, value_n, "%s", strcmp(umcCli("get contacts.manual"), "on") == 0 ? "only the types below" : "automatically"); break;
+        case 1: snprintf(label, label_n, "Chat nodes"); snprintf(value, value_n, "%s", umcCli("get autoadd.chat")); break;
+        case 2: snprintf(label, label_n, "Repeaters"); snprintf(value, value_n, "%s", umcCli("get autoadd.repeater")); break;
+        case 3: snprintf(label, label_n, "Room servers"); snprintf(value, value_n, "%s", umcCli("get autoadd.room")); break;
+        case 4: snprintf(label, label_n, "Sensors"); snprintf(value, value_n, "%s", umcCli("get autoadd.sensor")); break;
+        case 5: snprintf(label, label_n, "Replace oldest"); snprintf(value, value_n, "%s", umcCli("get autoadd.overwrite")); break;
+        case 6: snprintf(label, label_n, "Max hops"); snprintf(value, value_n, "%s", umcCli("get autoadd.maxhops")); break;
+        default: snprintf(label, label_n, "< Back"); break;
+      }
+      break;
+
+    case SP_TELEMETRY:
+      if (row == 0) { snprintf(label, label_n, "Battery & basic"); snprintf(value, value_n, "%s", umcCli("get telemetry.base")); }
+      else if (row == 1) { snprintf(label, label_n, "Location"); snprintf(value, value_n, "%s", umcCli("get telemetry.loc")); }
+      else if (row == 2) { snprintf(label, label_n, "Sensors"); snprintf(value, value_n, "%s", umcCli("get telemetry.env")); }
+      else snprintf(label, label_n, "< Back");
+      break;
+
+    case SP_CONSOLE:
+      if (row == 0) { snprintf(label, label_n, "Command"); snprintf(value, value_n, "%s", _console_cmd[0] ? _console_cmd : "tap to type"); }
+      else snprintf(label, label_n, "< Back");
+      break;
+
+    case SP_DISPLAY:
+      if (row < kThemeCount) {
+        snprintf(label, label_n, "Theme: %s", kThemes[row].name);
+        snprintf(value, value_n, "%s", g_theme == row ? "in use" : "");
+      } else if (row == kThemeCount) {
+        snprintf(label, label_n, "Touch orientation");
+        snprintf(value, value_n, "%s  (tap to change)", umcCli("get touch.map"));
+      } else if (row == kThemeCount + 1) {
+        snprintf(label, label_n, "Backlight");
+        snprintf(value, value_n, "%d%%", (int)brightness());
+      } else {
+        snprintf(label, label_n, "< Back");
+      }
       break;
     default: snprintf(label, label_n, "< Back"); break;
   }
@@ -1245,7 +1426,8 @@ void UITask::drawSetup() {
 
   if (_editing) {   // typing line
     fill(0, top, SCR_W, BODY_H, C_BG);
-    static const char* what[] = {"", "Node name", "WiFi network", "WiFi password", "Bluetooth PIN", "Region name"};
+    static const char* what[] = {"", "Node name", "WiFi network", "WiFi password", "Bluetooth PIN", "Region name",
+                                 "Channel name (without the #)", "Command"};
     textF(8, top + 12, what[_edit_what], C_DIM, F_SMALL);
     fill(6, top + 32, SCR_W - 12, 28, C_CARD);
     gfx()->drawRect(6, top + 32, SCR_W - 12, 28, C_ACC);
@@ -1264,7 +1446,8 @@ void UITask::drawSetup() {
   }
 
   static const char* titles[] = {"Setup", "Device", "Radio band", "WiFi", "Choose a network",
-                                 "Bluetooth", "Region scope", "GPS", "Firmware"};
+                                 "Bluetooth", "Region scope", "GPS", "Firmware", "Channels", "Messaging",
+                                 "New contacts", "Telemetry sharing", "Command line", "Display & touch"};
   fill(0, top, SCR_W, 16, C_CARD);
   textF(6, top + 4, titles[_setup_page], C_ACC, F_SMALL);
   if (_setup_page != SP_ROOT) textF(SCR_W - 76, top + 4, "Back: left", C_DIM, F_SMALL);
@@ -1293,6 +1476,22 @@ void UITask::drawSetup() {
     snprintf(pos, sizeof(pos), "%d/%d", _setup_sel + 1, count);
     textF(SCR_W - 42, SCR_H - TAB_H - 12, pos, C_DIM, F_SMALL);
   }
+  if (_setup_page == SP_CONSOLE && _console_out[0]) {
+    // the reply, wrapped over the rest of the screen
+    int y = list_top + 2 * 20 + 4;
+    const char* p = _console_out;
+    char line[46];
+    while (*p && y < SCR_H - TAB_H - 12) {
+      size_t n = 0;
+      while (p[n] && p[n] != '\n' && n < sizeof(line) - 1) n++;
+      memcpy(line, p, n);
+      line[n] = 0;
+      text(6, y, line, C_TXT);
+      y += 11;
+      p += n;
+      while (*p == '\n') p++;
+    }
+  }
   if (_setup_status[0]) textFClip(6, SCR_H - TAB_H - 12, SCR_W - 50, _setup_status, C_OK, F_SMALL);
 }
 
@@ -1302,10 +1501,13 @@ void UITask::setupAction(int row) {
   if (!(page == SP_DEVICE && (row == 1 || row == 2))) _setup_confirm = -1;
 
   switch (page) {
-    case SP_ROOT:
-      setupOpen(row == 0 ? SP_DEVICE : row == 1 ? SP_RADIO : row == 2 ? SP_WIFI : row == 3 ? SP_BLE
-                : row == 4 ? SP_REGION : row == 5 ? SP_GPS : SP_FW);
+    case SP_ROOT: {
+      static const int pages[13] = {SP_DEVICE, SP_RADIO, SP_WIFI, SP_BLE, SP_REGION, SP_GPS, SP_FW,
+                                    SP_CHANNELS, SP_MESSAGING, SP_CONTACTS_CFG, SP_TELEMETRY, SP_CONSOLE,
+                                    SP_DISPLAY};
+      setupOpen(pages[row < 13 ? row : 0]);
       return;
+    }
 
     case SP_DEVICE:
       if (row == 0) {
@@ -1416,6 +1618,129 @@ void UITask::setupAction(int row) {
       if (row == 1) {
         StrHelper::strncpy(_setup_status, umcCli("update check"), sizeof(_setup_status));
       } else if (row == 2) {
+        if (_setup_confirm != row) { _setup_confirm = row; break; }
+        StrHelper::strncpy(_setup_status, umcCli("update install"), sizeof(_setup_status));
+      } else if (row == 3) {
+        setupOpen(SP_ROOT);
+        return;
+      }
+      break;
+
+    case SP_CHANNELS: {
+      const int slots = setupRowCount() - 2;
+      if (row < slots) {
+        ChannelDetails ch;
+        if (the_mesh.getChannel(row, ch) && ch.name[0]) {
+          if (_setup_confirm != row) { _setup_confirm = row; break; }
+          ChannelDetails blank;
+          memset(&blank, 0, sizeof(blank));
+          the_mesh.setChannel(row, blank);
+          the_mesh.saveChannels();
+          StrHelper::strncpy(_setup_status, "Channel removed", sizeof(_setup_status));
+          _setup_confirm = -1;
+        }
+      } else if (row == slots) {
+        _editing = true; _edit_what = SE_CHANNEL; _edit_secret = false;
+        _edit_buf[0] = 0; _edit_len = 0;
+      } else {
+        setupOpen(SP_ROOT);
+        return;
+      }
+      break;
+    }
+
+    case SP_MESSAGING:
+      switch (row) {
+        case 0: StrHelper::strncpy(_setup_status, umcCli(strcmp(umcCli("get multi.acks"), "1") == 0 ? "set multi.acks 0" : "set multi.acks 1"), sizeof(_setup_status)); break;
+        case 1: {
+          const int now = atoi(umcCli("get path.hash.mode"));
+          snprintf(cmd, sizeof(cmd), "set path.hash.mode %d", (now + 1) % 3);
+          StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+          break;
+        }
+        case 2: StrHelper::strncpy(_setup_status, umcCli(strcmp(umcCli("get advert.loc"), "share") == 0 ? "set advert.loc none" : "set advert.loc share"), sizeof(_setup_status)); break;
+        case 3: StrHelper::strncpy(_setup_status, umcCli(strcmp(umcCli("get repeat"), "on") == 0 ? "set repeat off" : "set repeat on"), sizeof(_setup_status)); break;
+        case 4: {
+          const float now = atof(umcCli("get af"));
+          snprintf(cmd, sizeof(cmd), "set af %.1f", now >= 2.0f ? 0.0f : now + 0.5f);
+          StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+          break;
+        }
+        case 5: {
+          const float now = atof(umcCli("get rxdelay"));
+          snprintf(cmd, sizeof(cmd), "set rxdelay %.1f", now >= 10.0f ? 0.0f : now + 2.5f);
+          StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+          break;
+        }
+        default: setupOpen(SP_ROOT); return;
+      }
+      break;
+
+    case SP_CONTACTS_CFG: {
+      static const char* keys[7] = {"contacts.manual", "autoadd.chat", "autoadd.repeater", "autoadd.room",
+                                    "autoadd.sensor", "autoadd.overwrite", "autoadd.maxhops"};
+      if (row >= 0 && row < 6) {
+        snprintf(cmd, sizeof(cmd), "get %s", keys[row]);
+        const bool on = strcmp(umcCli(cmd), "on") == 0;
+        snprintf(cmd, sizeof(cmd), "set %s %s", keys[row], on ? "off" : "on");
+        StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      } else if (row == 6) {
+        const int now = atoi(umcCli("get autoadd.maxhops"));
+        snprintf(cmd, sizeof(cmd), "set autoadd.maxhops %d", now >= 6 ? 0 : now + 1);
+        StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      } else {
+        setupOpen(SP_ROOT);
+        return;
+      }
+      break;
+    }
+
+    case SP_TELEMETRY: {
+      static const char* tkeys[3] = {"telemetry.base", "telemetry.loc", "telemetry.env"};
+      static const char* tvals[3] = {"deny", "contacts", "all"};
+      if (row >= 0 && row < 3) {
+        snprintf(cmd, sizeof(cmd), "get %s", tkeys[row]);
+        const char* now = umcCli(cmd);
+        int next = 0;
+        for (int i = 0; i < 3; i++) {
+          if (strcmp(now, tvals[i]) == 0) { next = (i + 1) % 3; break; }
+        }
+        snprintf(cmd, sizeof(cmd), "set %s %s", tkeys[row], tvals[next]);
+        StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      } else {
+        setupOpen(SP_ROOT);
+        return;
+      }
+      break;
+    }
+
+    case SP_DISPLAY: {
+      char cmd2[48];
+      if (row < kThemeCount) {
+        snprintf(cmd2, sizeof(cmd2), "set theme %d", row);
+        StrHelper::strncpy(_setup_status, umcCli(cmd2), sizeof(_setup_status));
+        applyTheme();
+      } else if (row == kThemeCount) {
+        const int now = atoi(umcCli("get touch.map"));
+        snprintf(cmd2, sizeof(cmd2), "set touch.map %d", (now + 1) % 8);
+        StrHelper::strncpy(_setup_status, umcCli(cmd2), sizeof(_setup_status));
+        _input.setTouchMap((now + 1) % 8);
+      } else if (row == kThemeCount + 1) {
+        setBrightness(brightness() >= 100 ? 20 : brightness() + 20);
+        snprintf(_setup_status, sizeof(_setup_status), "Backlight %d%%", (int)brightness());
+      } else {
+        setupOpen(SP_ROOT);
+        return;
+      }
+      break;
+    }
+
+    case SP_CONSOLE:
+      if (row == 0) {
+        _editing = true; _edit_what = SE_COMMAND; _edit_secret = false;
+        StrHelper::strncpy(_edit_buf, _console_cmd, sizeof(_edit_buf));
+        _edit_len = strlen(_edit_buf);
+      } else {
         setupOpen(SP_ROOT);
         return;
       }
@@ -1426,6 +1751,14 @@ void UITask::setupAction(int row) {
       return;
   }
   _dirty = true;
+}
+
+// Runs one command and keeps the reply for the screen.
+void UITask::consoleRun(const char* cmd) {
+  _console_out[0] = 0;
+  if (cmd == NULL || cmd[0] == 0) return;
+  the_mesh.umcCommand(cmd, _console_out, sizeof(_console_out));
+  if (_console_out[0] == 0) StrHelper::strncpy(_console_out, "(no reply)", sizeof(_console_out));
 }
 
 void UITask::setupEditDone() {
@@ -1447,6 +1780,38 @@ void UITask::setupEditDone() {
       snprintf(cmd, sizeof(cmd), "set ble.pin %s", _edit_buf);
       StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
       _ble_pending = true;
+      break;
+    case SE_CHANNEL:
+      if (_edit_len > 0) {
+        // a hashtag channel: its key is worked out from the name, the same way the apps do
+        ChannelDetails ch;
+        memset(&ch, 0, sizeof(ch));
+        char hashed[40];
+        snprintf(hashed, sizeof(hashed), "#%s", _edit_buf[0] == '#' ? _edit_buf + 1 : _edit_buf);
+        StrHelper::strncpy(ch.name, hashed, sizeof(ch.name));
+        TransportKeyStore temp;
+        TransportKey key;
+        temp.getAutoKeyFor(0, hashed, key);
+        memset(ch.channel.secret, 0, sizeof(ch.channel.secret));
+        memcpy(ch.channel.secret, key.key, 16);   // 128-bit, as the apps use
+        int slot = -1;
+        ChannelDetails existing;
+        for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+          if (!the_mesh.getChannel(i, existing) || existing.name[0] == 0) { slot = i; break; }
+        }
+        if (slot < 0) {
+          StrHelper::strncpy(_setup_status, "No free channel slots", sizeof(_setup_status));
+        } else if (the_mesh.setChannel(slot, ch)) {
+          the_mesh.saveChannels();
+          snprintf(_setup_status, sizeof(_setup_status), "Added %s", hashed);
+        } else {
+          StrHelper::strncpy(_setup_status, "Could not add that channel", sizeof(_setup_status));
+        }
+      }
+      break;
+    case SE_COMMAND:
+      StrHelper::strncpy(_console_cmd, _edit_buf, sizeof(_console_cmd));
+      consoleRun(_console_cmd);
       break;
     default: break;
   }
@@ -1523,6 +1888,25 @@ void UITask::handleTouch(const TouchEvent& ev) {
       return;
     }
     if (hit(ev, SCR_W - 62, SCR_H - TAB_H - COMPOSE_H + 3, 58, 20)) { sendCompose(); return; }
+    if (_reply_to[0] && hit(ev, SCR_W - 34, SCR_H - TAB_H - COMPOSE_H - 12, 32, 12)) {
+      _reply_to[0] = 0;              // stop replying
+      _msg_sel = -1;
+      _dirty = true;
+      return;
+    }
+    if (ev.released) {               // tap a message to reply to it
+      for (int i = 0; i < _msg_rows; i++) {
+        if (ev.y >= _msg_row_y[i] && ev.y < _msg_row_bottom[i]) {
+          const UmcChatLog::Entry* e = umc_chatlog.get(_msg_row_idx[i]);
+          if (e != NULL) {
+            _msg_sel = _msg_row_idx[i];
+            StrHelper::strncpy(_reply_to, e->text, sizeof(_reply_to));
+            _dirty = true;
+          }
+          return;
+        }
+      }
+    }
     if (ev.down && ev.dy) {                    // drag the message list
       _msg_scroll = max(0, _msg_scroll + (ev.dy > 0 ? 1 : -1));
       _dirty = true;
@@ -1689,6 +2073,16 @@ void UITask::selectContact(int idx) {
 
 void UITask::sendCompose() {
   if (_compose_len == 0) return;
+  if (_reply_to[0]) {   // put a short quote of what is being answered on the front
+    char quoted[sizeof(_compose)];
+    char head[28];
+    StrHelper::strncpy(head, _reply_to, sizeof(head));
+    snprintf(quoted, sizeof(quoted), "> %s\n%s", head, _compose);
+    StrHelper::strncpy(_compose, quoted, sizeof(_compose));
+    _compose_len = strlen(_compose);
+    _reply_to[0] = 0;
+    _msg_sel = -1;
+  }
   const uint32_t ts = rtc_clock.getCurrentTimeUnique();
   if (_to_channel) {
     ChannelDetails ch;

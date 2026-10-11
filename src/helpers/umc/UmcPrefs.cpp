@@ -39,6 +39,7 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.group_hops_max = 64;
   p.app_tcp = true;
   p.app_tcp_port = 5000;
+  p.theme = 0;
   p.touch_map = 0;
   strcpy(p.admin_pw, "password");
 }

@@ -778,6 +778,21 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
   }
 
   // ---- per-type flood hop caps (Low-Power firmware compatible names) ----
+  if (strcmp(command, "get theme") == 0) {
+    snprintf(reply, reply_size, "> %u", (unsigned)_prefs.theme);
+    return true;
+  }
+  if (startsWith(command, "set theme ")) {
+    const int v = atoi(command + 10);
+    if (v < 0 || v > 15) {
+      snprintf(reply, reply_size, "Err - 0 to 15");
+      return true;
+    }
+    _prefs.theme = (uint8_t)v;
+    UmcPrefsStore::save(_prefs);
+    snprintf(reply, reply_size, "OK");
+    return true;
+  }
   if (strcmp(command, "get touch.map") == 0) {
     snprintf(reply, reply_size, "> %u", _prefs.touch_map);
     return true;

@@ -136,6 +136,7 @@ public:
   void umcBegin(FILESYSTEM* fs, BaseSerialInterface* ble);
   UmcService& getUmc() { return umc; }
   bool umcSerialIsManager() const { return _serial == _umc_all_serial; }
+  void saveChannels() { _store->saveChannels(this); }
   unsigned long umcFramesRead() const { return _umc_frames_read; }
   NetworkService& getNetwork() { return network; }
   UmcAppLink& getAppLink() { return app_link; }
@@ -272,7 +273,7 @@ private:
 #endif
 
   // helpers, short-cuts
-  void saveChannels() { _store->saveChannels(this); }
+
   void saveContacts();
 
   DataStore* _store;

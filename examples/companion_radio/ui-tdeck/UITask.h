@@ -56,12 +56,15 @@ private:
   void setupAction(int row);
   void setupEditDone();
   void setupOpen(int page);
+  void consoleRun(const char* cmd);
   int setupRowCount() const;
   void setupRow(int row, char* label, size_t label_n, char* value, size_t value_n) const;
   void wifiScanStart();
   void wifiScanPoll();
   void sampleRadio();
   void drawCompose();
+  void applyTheme();
+  int drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when);
   void drawAlert();
   uint32_t screenSignature();
 
@@ -97,6 +100,14 @@ private:
   char _wifi_ssid[33] = {0};        // chosen or typed, applied by "Connect"
   char _wifi_pwd[65] = {0};
   char _setup_status[64] = {0};
+  int _msg_sel = -1;                // message tapped, to reply to
+  int _msg_rows = 0;                // where each bubble ended up, so a tap finds it
+  int _msg_row_y[12] = {0};
+  int _msg_row_bottom[12] = {0};
+  int _msg_row_idx[12] = {0};
+  char _reply_to[48] = {0};         // what that message said, quoted in the reply
+  char _console_cmd[80] = {0};      // last command typed on the console page
+  char _console_out[320] = {0};     // and what it said
   bool _ble_pending = false;        // Bluetooth setting waiting for a restart
   int _wifi_scan_state = 0;         // 0 idle, 1 scanning, 2 done
   int _wifi_found = 0;
