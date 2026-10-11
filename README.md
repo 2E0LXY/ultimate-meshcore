@@ -250,7 +250,8 @@ The messenger also works on a phone browser:
 
 ## T-Deck / T-Deck Plus touch client
 
-- **Touch interface** on the 320x240 screen, with the keyboard and trackball. Tabs for home, messages, contacts, map, radio and info.
+- **Touch interface** on the 320x240 screen, with the keyboard and trackball. Tabs for home, messages, contacts, map, **GPS**, radio, **setup** and info.
+- **GPS screen**: fix, satellites used and seen, position, altitude and the receiver found, with a **sky view** plotting each satellite where it is in the sky, coloured by signal strength.
 - **Home dashboard**: clock and date, sunrise and sunset from your position, channel-busy, and cards for battery, GPS, nodes, messages, last signal and links. Tap a card to open its tab.
 - **Radio tab**: live radio settings, airtime per packet, NOW / FLOOR / PEAK / MARGIN meters and a two-minute RSSI spectrum.
 - **Offline maps from the SD card**, with your position and contacts plotted. `scripts/umc_make_map_tiles.py` builds the tiles.
