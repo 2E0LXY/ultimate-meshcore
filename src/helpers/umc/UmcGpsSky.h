@@ -22,6 +22,8 @@ public:
 
   // One character of the GPS's output.
   void feed(char c) {
+    _bytes++;                       // counted even when nothing parses, to prove it is alive
+    _byte_ms = millis();
     if (c == '$') {
       _len = 0;
       _in_sentence = true;
@@ -30,6 +32,11 @@ public:
     if (!_in_sentence) return;
     if (c == '\r' || c == '\n') {
       _buf[_len] = 0;
+      if (_len > 0) {
+        _sentences++;
+        strncpy(_last, _buf, sizeof(_last) - 1);
+        _last[sizeof(_last) - 1] = 0;
+      }
       if (_len > 6) parse();
       _in_sentence = false;
       _len = 0;
@@ -49,6 +56,12 @@ public:
     }
     return n;
   }
+  // Diagnostics: has the receiver sent anything, and what did it last say?
+  uint32_t bytes() const { return _bytes; }
+  uint32_t sentences() const { return _sentences; }
+  const char* lastSentence() const { return _last; }
+  uint32_t sinceByteMs() const { return _byte_ms == 0 ? 0 : millis() - _byte_ms; }
+
   bool fresh(uint32_t within_ms = 30000) const { return _count > 0 && millis() - _newest_ms < within_ms; }
 
   void clear() {
@@ -116,6 +129,10 @@ private:
   int _in_view = 0;
   char _first_system = 0;
   uint32_t _newest_ms = 0;
+  uint32_t _bytes = 0;
+  uint32_t _sentences = 0;
+  uint32_t _byte_ms = 0;
+  char _last[96] = {0};
 };
 
 extern UmcGpsSky umc_gps_sky;

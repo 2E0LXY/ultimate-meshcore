@@ -1,4 +1,5 @@
 #include "MyMesh.h"
+#include <helpers/umc/UmcGpsSky.h>
 
 #include <Arduino.h> // needed for PlatformIO
 #include <Mesh.h>
@@ -3062,6 +3063,28 @@ bool MyMesh::umcCli(const char* command, char* reply, size_t n) {
   // ---------------------------------------------------------------- GPS
 #if ENV_INCLUDE_GPS == 1
   if (strcmp(command, "gps") == 0) { snprintf(reply, n, "> %s", umcOnOff(_prefs.gps_enabled)); return true; }
+  if (strcmp(command, "gps info") == 0) {
+    LocationProvider* loc = sensors.getLocationProvider();
+    const uint32_t baud = sensors.gpsBaudDetected();
+    char last[72], found[32];
+    StrHelper::strncpy(last, umc_gps_sky.lastSentence(), sizeof(last));
+    if (baud) snprintf(found, sizeof(found), "%lu baud", (unsigned long)baud);
+    else snprintf(found, sizeof(found), "none (build default)");
+    snprintf(reply, n,
+             "> setting:%s detected:%s bytes:%lu sentences:%lu quiet:%lums\n"
+             "sats:%ld sky:%d tracked:%d fix:%s lat:%.5f lon:%.5f alt:%ldm\n"
+             "last:%s",
+             umcOnOff(_prefs.gps_enabled),
+             found,
+             (unsigned long)umc_gps_sky.bytes(), (unsigned long)umc_gps_sky.sentences(),
+             (unsigned long)umc_gps_sky.sinceByteMs(),
+             loc ? loc->satellitesCount() : -1, umc_gps_sky.count(), umc_gps_sky.tracked(),
+             loc && loc->isValid() ? "yes" : "no",
+             loc ? loc->getLatitude() / 1e6 : 0.0, loc ? loc->getLongitude() / 1e6 : 0.0,
+             loc ? loc->getAltitude() / 1000 : 0L,
+             last[0] ? last : "(nothing yet)");
+    return true;
+  }
   if (strcmp(command, "gps on") == 0 || strcmp(command, "gps off") == 0) {
     _prefs.gps_enabled = command[5] == 'n';
     applyGpsPrefs();
