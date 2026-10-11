@@ -243,6 +243,9 @@ void UITask::loop() {
       _centre_lat = UmcTiles::worldYToLat(cy, _zoom);
       _follow_self = false;
       (void)scale;
+    } else if (_tab == TAB_SETUP && !_editing) {
+      _setup_sel = constrain(_setup_sel + (tb == 'U' ? -1 : 1), 0, setupRowCount() - 1);
+      _setup_confirm = -1;
     } else if (_tab == TAB_HOME || _tab == TAB_INFO || _tab == TAB_RADIO) {
       _tab = tb == 'U' ? TAB_HOME : TAB_INFO;   // quick jump between the summary screens
     }
@@ -292,6 +295,10 @@ void UITask::loop() {
 // nothing to redraw, and a full redraw flickers.
 uint32_t UITask::screenSignature() {
   uint32_t h = (uint32_t)_tab * 2654435761u;
+  if (_tab == TAB_SETUP) {   // values here change as you set them
+    return h ^ (uint32_t)(_setup_sel * 131 + _setup_scroll * 17 + (_editing ? 7919 : 0) + _edit_len * 31 +
+                          (_setup_confirm + 2) * 13 + (uint32_t)strlen(_setup_status));
+  }
   const uint32_t clock_now = rtc_clock.getCurrentTime();
   h ^= clock_now / 60 * 2246822519u;                       // the clock shows minutes
   h ^= (uint32_t)(_board->getBattMilliVolts() / 100) * 3266489917u;   // coarse: it wanders
@@ -327,6 +334,7 @@ void UITask::draw() {
     case TAB_CONTACTS: drawContacts(); break;
     case TAB_MAP: drawMap(); break;
     case TAB_RADIO: drawRadio(); break;
+    case TAB_SETUP: drawSetup(); break;
     default: drawInfo(); break;
   }
   drawTabs();
@@ -355,7 +363,7 @@ void UITask::drawHeader() {
 }
 
 void UITask::drawTabs() {
-  static const char* names[TAB_COUNT] = {"Home", "Msgs", "People", "Map", "Radio", "Info"};
+  static const char* names[TAB_COUNT] = {"Home", "Msgs", "People", "Map", "Radio", "Setup", "Info"};
   const int w = SCR_W / TAB_COUNT;
   for (int i = 0; i < TAB_COUNT; i++) {
     const bool on = (int)_tab == i;
@@ -893,6 +901,227 @@ void UITask::drawRadio() {
   textClip(4, y, 312, buf, C_DIM);
 }
 
+// ---------------------------------------------------------------- setup tab
+
+// Rows on the Setup tab. Everything is applied through the same command line the web
+// interface uses, so the device and the browser can't drift apart.
+enum SetupRow {
+  SR_NAME = 0, SR_PRESET, SR_TX, SR_BLE, SR_WIFI_SSID, SR_WIFI_PWD, SR_WIFI_JOIN,
+  SR_SCOPE, SR_GPS, SR_UPDATE, SR_REBOOT, SR_FACTORY, SR_COUNT
+};
+
+// name, frequency, bandwidth, spreading factor, coding rate
+struct RadioPreset { const char* name; const char* params; };
+static const RadioPreset kPresets[] = {
+  {"EU/UK Narrow", "869.618,62.5,8,5"},
+  {"EU/UK Medium", "869.525,250,10,5"},
+  {"EU/UK Long", "869.525,250,11,5"},
+  {"EU 433", "433.65,250,11,5"},
+  {"USA/Canada", "910.525,62.5,7,5"},
+};
+static const int kPresetCount = sizeof(kPresets) / sizeof(kPresets[0]);
+static const int kTxSteps[] = {14, 17, 20, 22};
+static const char* kScopes[] = {"-", "yorkshire", "northwest"};
+
+int UITask::setupRowCount() const { return SR_COUNT; }
+
+// Runs a command and returns its reply with the leading "> " removed.
+static const char* umcCli(const char* cmd) {
+  static char reply[160];
+  reply[0] = 0;
+  the_mesh.umcCommand(cmd, reply, sizeof(reply));
+  const char* out = reply;
+  while (*out == '>' || *out == ' ') out++;
+  return out;
+}
+
+void UITask::drawSetup() {
+  const int top = BODY_Y + 2;
+  const int row_h = 20;
+  const int rows_visible = (BODY_H - 24) / row_h;
+  char buf[96];
+
+  if (_editing) {   // full-screen edit line, typed on the keyboard
+    fill(0, top, SCR_W, BODY_H - 2, C_BG);
+    static const char* labels[SR_COUNT] = {"Node name", "", "", "", "WiFi network", "WiFi password", "", "", "", "", "", ""};
+    text(8, top + 10, labels[_edit_row] ? labels[_edit_row] : "Value", C_DIM);
+    fill(6, top + 30, SCR_W - 12, 26, C_CARD);
+    gfx()->drawRect(6, top + 30, SCR_W - 12, 26, C_ACC);
+    if (_edit_secret) {
+      char stars[sizeof(_edit_buf)];
+      int n = _edit_len < (int)sizeof(stars) - 1 ? _edit_len : (int)sizeof(stars) - 1;
+      for (int i = 0; i < n; i++) stars[i] = '*';
+      stars[n] = 0;
+      textClip(12, top + 39, SCR_W - 24, stars, C_TXT);
+    } else {
+      textClip(12, top + 39, SCR_W - 24, _edit_buf, C_TXT);
+    }
+    text(8, top + 66, "Type on the keyboard. Enter = save, Esc = cancel.", C_DIM);
+    return;
+  }
+
+  if (_setup_sel < _setup_scroll) _setup_scroll = _setup_sel;
+  if (_setup_sel >= _setup_scroll + rows_visible) _setup_scroll = _setup_sel - rows_visible + 1;
+
+  for (int i = 0; i < rows_visible; i++) {
+    const int row = _setup_scroll + i;
+    if (row >= SR_COUNT) break;
+    const int y = top + i * row_h;
+    const bool on = row == _setup_sel;
+    if (on) fill(0, y, SCR_W, row_h, C_CARD);
+
+    const char* label = "";
+    buf[0] = 0;
+    switch (row) {
+      case SR_NAME: label = "Name"; snprintf(buf, sizeof(buf), "%s", the_mesh.getNodeName()); break;
+      case SR_PRESET: {
+        label = "Radio";
+        const char* r = umcCli("get radio");
+        const char* nice = r;
+        for (int p = 0; p < kPresetCount; p++) {
+          if (strncmp(r, kPresets[p].params, strlen(kPresets[p].params)) == 0) { nice = kPresets[p].name; break; }
+        }
+        snprintf(buf, sizeof(buf), "%s", nice);
+        break;
+      }
+      case SR_TX: label = "TX power"; snprintf(buf, sizeof(buf), "%s dBm", umcCli("get tx")); break;
+      case SR_BLE: {
+        label = "Bluetooth";
+        snprintf(buf, sizeof(buf), "%s  PIN %lu", isBluetoothEnabled() ? "on" : "off",
+                 (unsigned long)the_mesh.getBLEPin());
+        break;
+      }
+      case SR_WIFI_SSID: {
+        label = "WiFi network";
+        const char* live = umcCli("get wifi.ssid");
+        snprintf(buf, sizeof(buf), "%s", _wifi_ssid[0] ? _wifi_ssid : (live[0] && live[0] != '-' ? live : "not set"));
+        break;
+      }
+      case SR_WIFI_PWD: label = "WiFi password"; snprintf(buf, sizeof(buf), "%s", _wifi_pwd[0] ? "********" : "not set"); break;
+      case SR_WIFI_JOIN: {
+        label = "Join WiFi";
+        NetworkService& net = the_mesh.getNetwork();
+        snprintf(buf, sizeof(buf), "%s", net.isWifiConnected() ? net.getStaIp().c_str() : "tap to connect");
+        break;
+      }
+      case SR_SCOPE: label = "Region"; snprintf(buf, sizeof(buf), "%s", umcCli("get scope")); break;
+      case SR_GPS: label = "GPS"; snprintf(buf, sizeof(buf), "%s", umcCli("gps")); break;
+      case SR_UPDATE: label = "Firmware"; snprintf(buf, sizeof(buf), "v%s - tap to check", UMC_VERSION); break;
+      case SR_REBOOT: label = "Restart"; snprintf(buf, sizeof(buf), "%s", _setup_confirm == row ? "tap again" : "tap"); break;
+      case SR_FACTORY: label = "Factory reset"; snprintf(buf, sizeof(buf), "%s", _setup_confirm == row ? "tap again to erase" : "tap"); break;
+      default: break;
+    }
+    text(6, y + 6, label, on ? C_TXT : C_DIM);
+    textClip(132, y + 6, SCR_W - 140, buf, row == SR_FACTORY && _setup_confirm == row ? C_BAD : C_TXT);
+  }
+
+  if (_setup_status[0]) {
+    fill(0, SCR_H - TAB_H - 14, SCR_W, 14, C_CARD);
+    textClip(6, SCR_H - TAB_H - 11, SCR_W - 12, _setup_status, C_OK);
+  }
+}
+
+void UITask::setupAction(int row) {
+  char cmd[96];
+  _setup_status[0] = 0;
+  if (row != SR_REBOOT && row != SR_FACTORY) _setup_confirm = -1;
+
+  switch (row) {
+    case SR_NAME:
+      _editing = true; _edit_row = row; _edit_secret = false;
+      StrHelper::strncpy(_edit_buf, the_mesh.getNodeName(), sizeof(_edit_buf));
+      _edit_len = strlen(_edit_buf);
+      break;
+    case SR_WIFI_SSID:
+      _editing = true; _edit_row = row; _edit_secret = false;
+      StrHelper::strncpy(_edit_buf, _wifi_ssid, sizeof(_edit_buf));
+      _edit_len = strlen(_edit_buf);
+      break;
+    case SR_WIFI_PWD:
+      _editing = true; _edit_row = row; _edit_secret = true;
+      _edit_buf[0] = 0; _edit_len = 0;
+      break;
+    case SR_PRESET: {
+      const char* now = umcCli("get radio");
+      int next = 0;
+      for (int p = 0; p < kPresetCount; p++) {
+        if (strncmp(now, kPresets[p].params, strlen(kPresets[p].params)) == 0) { next = (p + 1) % kPresetCount; break; }
+      }
+      snprintf(cmd, sizeof(cmd), "set radio %s", kPresets[next].params);
+      StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      break;
+    }
+    case SR_TX: {
+      const int now = atoi(umcCli("get tx"));
+      int next = kTxSteps[0];
+      for (unsigned i = 0; i < sizeof(kTxSteps) / sizeof(kTxSteps[0]); i++) {
+        if (kTxSteps[i] == now) { next = kTxSteps[(i + 1) % (sizeof(kTxSteps) / sizeof(kTxSteps[0]))]; break; }
+      }
+      snprintf(cmd, sizeof(cmd), "set tx %d", next);
+      StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      break;
+    }
+    case SR_BLE:
+      StrHelper::strncpy(_setup_status, umcCli(isBluetoothEnabled() ? "set ble off" : "set ble on"), sizeof(_setup_status));
+      break;
+    case SR_WIFI_JOIN: {
+      if (_wifi_ssid[0] == 0) { StrHelper::strncpy(_setup_status, "Enter the network name first", sizeof(_setup_status)); break; }
+      snprintf(cmd, sizeof(cmd), "set wifi.ssid %s", _wifi_ssid);
+      umcCli(cmd);
+      snprintf(cmd, sizeof(cmd), "set wifi.pwd %s", _wifi_pwd);
+      umcCli(cmd);
+      StrHelper::strncpy(_setup_status, umcCli("wifi reconnect"), sizeof(_setup_status));
+      break;
+    }
+    case SR_SCOPE: {
+      const char* now = umcCli("get scope");
+      int next = 0;
+      for (unsigned i = 0; i < sizeof(kScopes) / sizeof(kScopes[0]); i++) {
+        if (strcmp(now, kScopes[i]) == 0) { next = (i + 1) % (sizeof(kScopes) / sizeof(kScopes[0])); break; }
+      }
+      snprintf(cmd, sizeof(cmd), "set scope %s", kScopes[next]);
+      StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      break;
+    }
+    case SR_GPS:
+      StrHelper::strncpy(_setup_status, umcCli(strcmp(umcCli("gps"), "on") == 0 ? "gps off" : "gps on"), sizeof(_setup_status));
+      break;
+    case SR_UPDATE:
+      StrHelper::strncpy(_setup_status, umcCli("update check"), sizeof(_setup_status));
+      break;
+    case SR_REBOOT:
+      if (_setup_confirm != row) { _setup_confirm = row; break; }
+      showAlert("Restarting...", 1200);
+      draw();
+      delay(600);
+      the_mesh.getUmc().scheduleReboot(200);
+      break;
+    case SR_FACTORY:
+      if (_setup_confirm != row) { _setup_confirm = row; break; }
+      StrHelper::strncpy(_setup_status, umcCli("factory reset confirm"), sizeof(_setup_status));
+      break;
+    default: break;
+  }
+  _dirty = true;
+}
+
+void UITask::setupEditDone() {
+  char cmd[128];
+  if (_edit_row == SR_NAME && _edit_len > 0) {
+    snprintf(cmd, sizeof(cmd), "set name %s", _edit_buf);
+    StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+  } else if (_edit_row == SR_WIFI_SSID) {
+    StrHelper::strncpy(_wifi_ssid, _edit_buf, sizeof(_wifi_ssid));
+  } else if (_edit_row == SR_WIFI_PWD) {
+    StrHelper::strncpy(_wifi_pwd, _edit_buf, sizeof(_wifi_pwd));
+  }
+  _editing = false;
+  _edit_row = -1;
+  _edit_buf[0] = 0;
+  _edit_len = 0;
+  _dirty = true;
+}
+
 // ---------------------------------------------------------------- input
 
 bool UITask::touchInTabs(const TouchEvent& ev) {
@@ -1017,6 +1246,19 @@ void UITask::handleTouch(const TouchEvent& ev) {
     return;
   }
 
+  if (_tab == TAB_SETUP) {
+    if (_editing) return;            // the keyboard does the talking while editing
+    const int row_h = 20, top = BODY_Y + 2;
+    if (ev.released && ev.y >= top && ev.y < SCR_H - TAB_H) {
+      const int row = _setup_scroll + (ev.y - top) / row_h;
+      if (row >= 0 && row < setupRowCount()) {
+        _setup_sel = row;
+        setupAction(row);
+      }
+    }
+    return;
+  }
+
   if (_tab != TAB_INFO) return;   // the buttons below belong to the Info tab only
 
   const int by = SCR_H - TAB_H - 30;
@@ -1041,6 +1283,24 @@ void UITask::handleTouch(const TouchEvent& ev) {
 }
 
 void UITask::handleKey(char c) {
+  if (_tab == TAB_SETUP) {
+    if (_editing) {
+      if (c == 8 || c == 127) {                   // backspace
+        if (_edit_len > 0) _edit_buf[--_edit_len] = 0;
+      } else if (c == 13 || c == 10) {            // enter saves
+        setupEditDone();
+      } else if (c == 27) {                       // escape cancels
+        _editing = false; _edit_row = -1; _edit_len = 0; _edit_buf[0] = 0;
+      } else if (c >= 32 && c < 127 && _edit_len < (int)sizeof(_edit_buf) - 1) {
+        _edit_buf[_edit_len++] = c;
+        _edit_buf[_edit_len] = 0;
+      }
+    } else if (c == 13 || c == 10) {
+      setupAction(_setup_sel);
+    }
+    _dirty = true;
+    return;
+  }
   if (_tab != TAB_MSGS) {
     _tab = TAB_MSGS;   // typing anywhere jumps to the messages screen
     umc_chatlog.markRead();

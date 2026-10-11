@@ -39,7 +39,7 @@ public:
   const char* mapStatus() { return _tiles.status(); }
 
 private:
-  enum Tab { TAB_HOME = 0, TAB_MSGS, TAB_CONTACTS, TAB_MAP, TAB_RADIO, TAB_INFO, TAB_COUNT };
+  enum Tab { TAB_HOME = 0, TAB_MSGS, TAB_CONTACTS, TAB_MAP, TAB_RADIO, TAB_SETUP, TAB_INFO, TAB_COUNT };
 
   void draw();
   void drawHeader();
@@ -50,6 +50,10 @@ private:
   void drawInfo();
   void drawHome();
   void drawRadio();
+  void drawSetup();
+  void setupAction(int row);
+  void setupEditDone();
+  int setupRowCount() const;
   void sampleRadio();
   void drawCompose();
   void drawAlert();
@@ -73,6 +77,19 @@ private:
   bool _dirty = true;
   unsigned long _last_draw = 0;
   unsigned long _tiles_retry = 0;
+
+  // Setup tab: a list of settings, changed on the device itself
+  int _setup_sel = 0;
+  int _setup_scroll = 0;
+  int _setup_confirm = -1;          // row waiting for a second tap to confirm
+  bool _editing = false;            // typing into _edit_buf for the row in _edit_row
+  bool _edit_secret = false;
+  int _edit_row = -1;
+  char _edit_buf[64] = {0};
+  int _edit_len = 0;
+  char _wifi_ssid[33] = {0};        // typed here, applied by "Join WiFi"
+  char _wifi_pwd[65] = {0};
+  char _setup_status[48] = {0};
   uint32_t _last_sig = 0;
   static const unsigned long kMinRedrawMs = 400;
   unsigned long _next_refresh = 0;
