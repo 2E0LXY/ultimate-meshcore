@@ -1,11 +1,10 @@
 #include "UITask.h"
 
+#include "UmcFonts.h"
+
 #include <helpers/umc/UmcMapSink.h>
 
 #include <Adafruit_ST7789.h>
-#include <Fonts/FreeSans9pt7b.h>
-#include <Fonts/FreeSansBold12pt7b.h>
-#include <Fonts/FreeSansBold24pt7b.h>
 #include <helpers/ui/ST7789LCDDisplay.h>
 
 #include "../MyMesh.h"
@@ -74,9 +73,9 @@ static void fill(int x, int y, int w, int h, uint16_t c) { gfx()->fillRect(x, y,
 // ---------------------------------------------------------------------------------------
 // Typography. Every screen uses one family in three sizes, so nothing is drawn with the
 // blocky 5x7 built-in font any more.
-static const GFXfont* const F_SMALL = &FreeSans9pt7b;      // lists, labels, values, buttons
-static const GFXfont* const F_MED = &FreeSansBold12pt7b;   // the figure a card is about
-static const GFXfont* const F_BIG = &FreeSansBold24pt7b;   // the clock
+static const GFXfont* const F_SMALL = &UmcSans;        // lists, labels, values, buttons
+static const GFXfont* const F_MED = &UmcSansMed;       // the figure a card is about
+static const GFXfont* const F_BIG = &UmcSansBig;       // the clock
 
 static const GFXfont* fontFor(int size) { return size >= 4 ? F_BIG : size >= 2 ? F_MED : F_SMALL; }
 
@@ -281,7 +280,7 @@ static int richDraw(int x, int y, const char* s, uint16_t c, const GFXfont* font
   char buf[160];
   foldUtf8(s, buf, sizeof(buf));
   const int asc = fontAscent(font);
-  const int ih = asc >= 28 ? 26 : asc >= 15 ? 16 : 12;     // icons match the letter height
+  const int ih = asc >= 20 ? 22 : asc >= 10 ? 13 : 9;      // icons match the letter height
   const int base = y + asc;
   const int limit = x + max_w;
   int pen = x;
@@ -344,7 +343,7 @@ static void button(int x, int y, int w, int h, const char* label, bool on = fals
   fill(x, y, w, h, on ? C_ACC : C_CARD);
   gfx()->drawRect(x, y, w, h, C_LINE);
   const int tw = textWidth(label);
-  text(x + (w - tw) / 2, y + (h - 12) / 2, label, on ? 0xFFFF : C_TXT);
+  text(x + (w - tw) / 2, y + (h - 8) / 2, label, on ? 0xFFFF : C_TXT);
 }
 
 // The contact store keeps a few reserved slots at the front for anonymous requests, and
@@ -441,9 +440,9 @@ static bool sunTimes(double lat, double lon, int y, int m, int d, int tz_min, in
 // Home dashboard card slots: 3 columns x 2 rows under the clock.
 static void homeCard(int i, int& x, int& y, int& w, int& h) {
   w = 101;
-  h = 46;
+  h = 42;
   x = 4 + (i % 3) * (w + 3);
-  y = BODY_Y + 90 + (i / 3) * (h + 3);
+  y = BODY_Y + 94 + (i / 3) * (h + 4);
 }
 
 // The web server reaches the card through these: it has no business knowing about the
@@ -692,23 +691,23 @@ void UITask::draw() {
 
 void UITask::drawHeader() {
   fill(0, 0, SCR_W, HDR_H, C_CARD);
-  textClip(4, 3, 142, the_mesh.getNodeName(), C_TXT);
+  textClip(4, 6, 150, the_mesh.getNodeName(), C_TXT);
 
   char buf[40];
   uint32_t now = rtc_clock.getCurrentTime();
   DateTime dt(now);
   snprintf(buf, sizeof(buf), "%02d:%02d", dt.hour(), dt.minute());
-  text(SCR_W - 40, 3, buf, C_TXT);
+  text(SCR_W - 36, 6, buf, C_TXT);
 
   int x = SCR_W - 52;
   const uint16_t batt = _board->getBattMilliVolts();
   snprintf(buf, sizeof(buf), "%d.%02dV", batt / 1000, (batt % 1000) / 10);
-  text(x - 46, 3, buf, batt && batt < 3500 ? C_BAD : C_DIM);
+  text(x - 38, 6, buf, batt && batt < 3500 ? C_BAD : C_DIM);
 
   // link indicators
-  text(150, 3, the_mesh.getNetwork().isWifiConnected() ? "wifi" : (the_mesh.getNetwork().isApActive() ? "AP" : "----"),
+  text(162, 6, the_mesh.getNetwork().isWifiConnected() ? "wifi" : (the_mesh.getNetwork().isApActive() ? "AP" : "----"),
        the_mesh.getNetwork().isWifiConnected() ? C_OK : C_DIM);
-  text(188, 3, isBluetoothEnabled() ? (hasConnection() ? "BT+" : "BT") : "--", hasConnection() ? C_OK : C_DIM);
+  text(196, 6, isBluetoothEnabled() ? (hasConnection() ? "BT+" : "BT") : "--", hasConnection() ? C_OK : C_DIM);
 }
 
 void UITask::drawTabs() {
@@ -721,7 +720,7 @@ void UITask::drawTabs() {
     const char* label = names[i];
     const int tw = textWidth(label);
     const int lx = tw < w - 2 ? i * w + (w - tw) / 2 : i * w + 1;
-    textClip(lx, SCR_H - TAB_H + 9, w - 2, label, on ? 0xFFFF : C_TXT);
+    textClip(lx, SCR_H - TAB_H + 11, w - 2, label, on ? 0xFFFF : C_TXT);
     // the unread count rides in the corner, so the label keeps its room
     if (i == TAB_MSGS && umc_chatlog.unread() > 0) {
       gfx()->fillCircle(i * w + w - 8, SCR_H - TAB_H + 8, 6, C_WARN);
@@ -741,7 +740,7 @@ void UITask::drawAlert() {
   const int w = 260, h = 34, x = (SCR_W - w) / 2, y = 90;
   fill(x, y, w, h, C_ACC);
   gfx()->drawRect(x, y, w, h, 0xFFFF);
-  textClip(x + 8, y + 10, w - 16, _alert, 0xFFFF);
+  textClip(x + 8, y + 13, w - 16, _alert, 0xFFFF);
 }
 
 void UITask::applyTheme() {
@@ -753,7 +752,7 @@ void UITask::applyTheme() {
 int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when) {
   const int max_w = SCR_W - 70;
   const int pad = 5;
-  const int line_h = 15;
+  const int line_h = 12;
   const int inner = max_w - pad * 2;
 
   // wrap on spaces
@@ -795,7 +794,7 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
   const int fw = textWidth(foot_pre);          // the name and time can be wider than the body
   if (fw > widest) widest = fw > inner ? inner : fw;
   const int bw = widest + pad * 2;
-  const int bh = line_count * line_h + pad * 2 + 15;      // room for the name/time line
+  const int bh = line_count * line_h + pad * 2 + 11;      // room for the name/time line
   const int bx = mine ? SCR_W - bw - 6 : 6;
   const int by = y_bottom - bh;
 
@@ -812,7 +811,7 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
   } else {
     snprintf(foot, sizeof(foot), "%s", mine ? "" : who);
   }
-  textClip(bx + pad, by + bh - 17, bw - pad * 2, foot, mine ? tc : TH.dim);
+  textClip(bx + pad, by + bh - 13, bw - pad * 2, foot, mine ? tc : TH.dim);
   return by - 4;
 }
 
@@ -825,7 +824,7 @@ void UITask::drawMessages() {
   fill(0, top, SCR_W, 16, TH.card);
   char hdr[48];
   snprintf(hdr, sizeof(hdr), "To: %s%s", _to_channel ? "#" : "", _to_name);
-  textClip(4, top + 2, SCR_W - 60, hdr, TH.text);
+  textClip(4, top + 4, SCR_W - 60, hdr, TH.text);
   button(SCR_W - 52, top, 50, 16, "change");
 
   fill(0, top + 17, SCR_W, list_h, TH.bg);
@@ -851,9 +850,9 @@ void UITask::drawMessages() {
   }
   if (umc_chatlog.count() == 0) {
     text(8, top + 40, "No messages yet.", TH.dim);
-    text(8, top + 58, "Type below and press Enter to send.", TH.dim);
+    text(8, top + 54, "Type below and press Enter to send.", TH.dim);
   } else if (_msg_sel < 0) {
-    text(6, top + 17 + list_h - 15, "Tap a message to reply to it", TH.dim);
+    text(6, top + 17 + list_h - 11, "Tap a message to reply to it", TH.dim);
   }
   if (_quick_open) drawQuickPanel();
   drawCompose();
@@ -863,19 +862,19 @@ void UITask::drawMessages() {
 // can be added to before sending.
 void UITask::drawQuickPanel() {
   const UmcPrefs& p = the_mesh.getUmc().prefs();
-  const int row_h = 24;
-  const int h = row_h * UMC_QUICK_REPLIES + 24;
+  const int row_h = 20;
+  const int h = row_h * UMC_QUICK_REPLIES + 20;
   const int y0 = SCR_H - TAB_H - COMPOSE_H - h;
   fill(0, y0, SCR_W, h, TH.card);
   gfx()->drawFastHLine(0, y0, SCR_W, TH.accent);
-  textF(6, y0 + 3, "Quick replies", TH.accent, F_SMALL);
-  textF(SCR_W - 92, y0 + 3, "Set > Quick", TH.dim, F_SMALL);
+  textF(6, y0 + 4, "Quick replies", TH.accent, F_SMALL);
+  textF(SCR_W - 80, y0 + 4, "Set > Quick", TH.dim, F_SMALL);
   for (int i = 0; i < UMC_QUICK_REPLIES; i++) {
-    const int y = y0 + 22 + i * row_h;
-    fill(4, y, SCR_W - 8, row_h - 3, TH.bg);
+    const int y = y0 + 18 + i * row_h;
+    fill(4, y, SCR_W - 8, row_h - 2, TH.bg);
     char line[48];
     snprintf(line, sizeof(line), "%d  %s", i + 1, p.quick[i][0] ? p.quick[i] : "(empty)");
-    textFClip(10, y + 3, SCR_W - 24, line, p.quick[i][0] ? TH.text : TH.dim, F_SMALL);
+    textFClip(10, y + 4, SCR_W - 24, line, p.quick[i][0] ? TH.text : TH.dim, F_SMALL);
   }
 }
 
@@ -885,17 +884,17 @@ void UITask::drawCompose() {
     fill(0, ry, SCR_W, 12, TH.card);
     char line[52];
     snprintf(line, sizeof(line), "Reply to: %s", _reply_to);
-    textClip(4, ry - 1, SCR_W - 40, line, TH.accent);
+    textClip(4, ry + 2, SCR_W - 40, line, TH.accent);
     button(SCR_W - 34, ry, 32, 12, "x");
   }
   const int y = SCR_H - TAB_H - COMPOSE_H;
   fill(0, y, SCR_W, COMPOSE_H, C_CARD);
   gfx()->drawFastHLine(0, y, SCR_W, C_LINE);
-  const int max_w = SCR_W - 112;
+  const int max_w = SCR_W - 110;
   const char* shown = _compose;
   while (shown[0] != 0 && textWidth(shown) > max_w) shown++;     // keep the end in view
-  text(4, y + 6, shown[0] ? shown : "type a message...", shown[0] ? C_TXT : C_DIM);
-  if (shown[0]) fill(5 + textWidth(shown), y + 5, 2, 15, C_ACC);
+  text(4, y + 9, shown[0] ? shown : "type a message...", shown[0] ? C_TXT : C_DIM);
+  if (shown[0]) fill(5 + textWidth(shown), y + 7, 2, 11, C_ACC);
   button(SCR_W - 106, y + 3, 42, 20, "Quick", _quick_open);
   button(SCR_W - 62, y + 3, 58, 20, "Send", _compose_len > 0);
 }
@@ -911,12 +910,12 @@ void UITask::drawContactDetail() {
   }
   const uint8_t kind_icon = c.type == ADV_TYPE_REPEATER ? IC_TOWER : c.type == ADV_TYPE_ROOM ? IC_HOUSE
                             : c.type == ADV_TYPE_SENSOR ? IC_DISH : IC_FACE;
-  drawIcon(6, top + 6, kind_icon, C_ACC, 16);
-  textFClip(28, top + 4, SCR_W - 34, c.name[0] ? c.name : "(no name)", C_TXT, F_MED);
+  drawIcon(6, top + 5, kind_icon, C_ACC, 13);
+  textFClip(24, top + 4, SCR_W - 30, c.name[0] ? c.name : "(no name)", C_TXT, F_MED);
 
-  const int LX = 6, VX = 96;
-  const int lh = 17;
-  int y = top + 30;
+  const int LX = 6, VX = 84;
+  const int lh = 15;
+  int y = top + 26;
   char buf[64];
 
   text(LX, y, "Kind", C_DIM);
@@ -994,8 +993,8 @@ void UITask::drawContactDetail() {
 
 void UITask::drawContacts() {
   const int top = BODY_Y + 2;
-  const int row_h = 22;
-  const int rows = (BODY_H - 46) / row_h;
+  const int row_h = 20;
+  const int rows = (BODY_H - 44) / row_h;
   const int total = contactCount();
   if (_contact_scroll > max(0, total - rows)) _contact_scroll = max(0, total - rows);
 
@@ -1004,7 +1003,7 @@ void UITask::drawContacts() {
   text(4, top, buf, C_DIM);
 
   const uint32_t now = rtc_clock.getCurrentTime();
-  int y = top + 17;
+  int y = top + 14;
   for (int i = 0; i < rows; i++) {
     const int idx = _contact_scroll + i;
     if (idx >= total) break;
@@ -1014,17 +1013,17 @@ void UITask::drawContacts() {
     fill(0, y, SCR_W, row_h - 2, sel ? C_ACC : C_CARD);
     const uint8_t kind_icon = c.type == ADV_TYPE_REPEATER ? IC_TOWER : c.type == ADV_TYPE_ROOM ? IC_HOUSE
                               : c.type == ADV_TYPE_SENSOR ? IC_DISH : IC_FACE;
-    drawIcon(4, y + 4, kind_icon, sel ? 0xFFFF : C_ACC, 12);
-    textClip(21, y + 3, 133, c.name[0] ? c.name : "(no name)", sel ? 0xFFFF : C_TXT);
+    drawIcon(4, y + 5, kind_icon, sel ? 0xFFFF : C_ACC, 10);
+    textClip(18, y + 4, 140, c.name[0] ? c.name : "(no name)", sel ? 0xFFFF : C_TXT);
     const char* kind = c.type == ADV_TYPE_REPEATER ? "repeater" : c.type == ADV_TYPE_ROOM ? "room" : c.type == ADV_TYPE_SENSOR ? "sensor" : "chat";
-    text(158, y + 3, kind, C_DIM);
-    if (c.out_path_len == 0xFF) text(224, y + 3, "flood", C_DIM);
+    text(162, y + 4, kind, C_DIM);
+    if (c.out_path_len == 0xFF) text(228, y + 4, "flood", C_DIM);
     else {
       snprintf(buf, sizeof(buf), "%dhop", c.out_path_len & 63);
-      text(224, y + 3, buf, C_DIM);
+      text(228, y + 4, buf, C_DIM);
     }
     char age[12];
-    if (c.last_advert_timestamp && now > c.last_advert_timestamp) text(276, y + 3, shortAge(now - c.last_advert_timestamp, age, sizeof(age)), C_DIM);
+    if (c.last_advert_timestamp && now > c.last_advert_timestamp) text(276, y + 4, shortAge(now - c.last_advert_timestamp, age, sizeof(age)), C_DIM);
     y += row_h;
   }
   if (total == 0) text(8, top + 36, "Nothing heard yet. Send an advert from Info.", C_DIM);
@@ -1141,7 +1140,7 @@ void UITask::drawMap() {
 }
 
 void UITask::drawInfo() {
-  const int VX = 108;   // where the values start: the labels need the room
+  const int VX = 92;    // where the values start: the labels need the room
   const int top = BODY_Y + 4;
   char buf[80];
   int y = top;
@@ -1276,9 +1275,9 @@ void UITask::drawHome() {
   if (clock_ok) {
     snprintf(buf, sizeof(buf), "%s %02d %s %04d", wd[weekdayOf(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday)],
              lt.tm_mday, mon[lt.tm_mon], lt.tm_year + 1900);
-    textF(8, top + 52, buf, C_DIM, F_SMALL);
+    textF(8, top + 46, buf, C_DIM, F_SMALL);
   } else {
-    textF(8, top + 52, "clock not set", C_WARN, F_SMALL);
+    textF(8, top + 46, "clock not set", C_WARN, F_SMALL);
   }
 
   // ---- sunrise / sunset from the node's position ----
@@ -1287,11 +1286,11 @@ void UITask::drawHome() {
   if (clock_ok && selfLocation(lat, lon) &&
       sunTimes(lat, lon, lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, tz_min, rise, set)) {
     snprintf(buf, sizeof(buf), "Sunrise %02d:%02d", rise / 60, rise % 60);
-    text(8, top + 74, buf, C_WARN);
+    text(8, top + 64, buf, C_WARN);
     snprintf(buf, sizeof(buf), "Sunset  %02d:%02d", set / 60, set % 60);
-    text(110, top + 74, buf, C_WARN);
+    text(118, top + 64, buf, C_WARN);
   } else {
-    text(8, top + 74, selfLocation(lat, lon) ? "No sunrise/sunset today" : "Sunrise/sunset: needs a location", C_DIM);
+    text(8, top + 64, selfLocation(lat, lon) ? "No sunrise/sunset today" : "Sunrise/sunset: needs a location", C_DIM);
   }
 
   // ---- channel busy ----
@@ -1299,14 +1298,14 @@ void UITask::drawHome() {
   if (_busy_pct >= 0) {
     snprintf(buf, sizeof(buf), "%d%%", _busy_pct);
     meter(176, top + 22, 140, 10, _busy_pct / 100.0f, _busy_pct > 60 ? C_BAD : (_busy_pct > 25 ? C_WARN : C_OK));
-    textF(176, top + 34, buf, C_TXT, F_MED);
+    textF(176, top + 32, buf, C_TXT, F_MED);
   } else {
-    text(176, top + 22, "measuring...", C_DIM);
+    text(176, top + 24, "measuring...", C_DIM);
   }
   const int nf = radio_driver.getNoiseFloor();
   if (nf) {
     snprintf(buf, sizeof(buf), "noise %d dBm", nf);
-    text(176, top + 60, buf, C_DIM);
+    text(176, top + 56, buf, C_DIM);
   }
 
   // ---- status cards ----
@@ -1333,9 +1332,11 @@ void UITask::drawHome() {
   }
 
   cards[1].title = "GPS";
-  snprintf(cards[1].val, sizeof(cards[1].val), fix ? "FIX" : "NONE");
+  LocationProvider* loc = sensors.getLocationProvider();
+  const bool gps_fix = loc != NULL && loc->isValid();
+  snprintf(cards[1].val, sizeof(cards[1].val), gps_fix ? "FIX" : fix ? "SET" : "NONE");
   if (fix) snprintf(cards[1].sub, sizeof(cards[1].sub), "%.3f,%.3f", glat, glon);
-  cards[1].col = fix ? C_OK : C_DIM;
+  cards[1].col = gps_fix ? C_OK : fix ? C_TXT : C_DIM;
 
   cards[2].title = "NODES";
   snprintf(cards[2].val, sizeof(cards[2].val), "%d", contactCount());
@@ -1367,9 +1368,9 @@ void UITask::drawHome() {
     homeCard(i, x, y, w, h);
     fill(x, y, w, h, C_CARD);
     gfx()->drawRect(x, y, w, h, C_LINE);
-    textClip(x + 4, y + 2, w - 8, cards[i].title, C_DIM);
-    textFClip(x + 4, y + 15, w - 8, cards[i].val, cards[i].col, F_MED);
-    textClip(x + 4, y + 32, w - 8, cards[i].sub, C_DIM);
+    textClip(x + 4, y + 3, w - 8, cards[i].title, C_DIM);
+    textFClip(x + 4, y + 14, w - 8, cards[i].val, cards[i].col, F_MED);
+    textClip(x + 4, y + 30, w - 8, cards[i].sub, C_DIM);
   }
 }
 
@@ -1384,7 +1385,7 @@ void UITask::drawRadio() {
   // time on air for typical packet sizes at the live radio settings
   snprintf(buf, sizeof(buf), "Airtime  32B %lums  100B %lums  200B %lums", (unsigned long)radio_driver.getEstAirtimeFor(32),
            (unsigned long)radio_driver.getEstAirtimeFor(100), (unsigned long)radio_driver.getEstAirtimeFor(200));
-  textClip(4, top + 18, 312, buf, C_DIM);
+  textClip(4, top + 13, 312, buf, C_DIM);
 
   // history statistics
   int peak = -140, now_r = -140;
@@ -1404,16 +1405,16 @@ void UITask::drawRadio() {
       {"FLOOR", floor_db, C_DIM, true},
       {"PEAK", peak, C_WARN, _rssi_n > 0},
   };
-  int y = top + 38;
-  for (int i = 0; i < 3; i++, y += 17) {
-    text(4, y - 2, rows[i].label, C_DIM);
+  int y = top + 30;
+  for (int i = 0; i < 3; i++, y += 15) {
+    text(4, y + 1, rows[i].label, C_DIM);
     meter(52, y, 190, 10, rows[i].valid ? (rows[i].dbm + 130) / 90.0f : 0, rows[i].col);
     if (rows[i].valid) snprintf(buf, sizeof(buf), "%d dBm", rows[i].dbm);
     else snprintf(buf, sizeof(buf), "--");
-    text(248, y - 2, buf, C_TXT);
+    text(248, y + 1, buf, C_TXT);
   }
   // margin: how far the last received packet sat above the noise floor
-  text(4, y - 2, "MARGIN", C_DIM);
+  text(4, y + 1, "MARGIN", C_DIM);
   if (last_rssi != 0) {
     const int margin = (int)last_rssi - floor_db;
     meter(52, y, 190, 10, margin / 40.0f, margin > 10 ? C_OK : (margin > 3 ? C_WARN : C_BAD));
@@ -1422,11 +1423,11 @@ void UITask::drawRadio() {
     meter(52, y, 190, 10, 0, C_DIM);
     snprintf(buf, sizeof(buf), "--");
   }
-  text(248, y - 2, buf, C_TXT);
-  y += 20;
+  text(248, y + 1, buf, C_TXT);
+  y += 18;
 
   // live spectrum: the last two minutes of RSSI, one bar per second
-  const int sx = 4, sh = 46, sw = RSSI_HIST * 2;
+  const int sx = 4, sh = 44, sw = RSSI_HIST * 2;
   fill(sx, y, sw, sh, C_CARD);
   gfx()->drawRect(sx - 1, y - 1, sw + 2, sh + 2, C_LINE);
   for (int i = 0; i < _rssi_n; i++) {
@@ -1435,10 +1436,10 @@ void UITask::drawRadio() {
     fill(sx + (RSSI_HIST - _rssi_n + i) * 2, y + sh - bh, 2, bh, v > floor_db + 10 ? C_WARN : C_ACC);
   }
   text(sx + sw + 6, y, "-40", C_DIM);
-  text(sx + sw + 6, y + sh - 13, "-130", C_DIM);
+  text(sx + sw + 6, y + sh - 9, "-130", C_DIM);
   if (_busy_pct >= 0) {
     snprintf(buf, sizeof(buf), "busy %d%%", _busy_pct);
-    text(sx + sw + 6, y + 17, buf, C_TXT);
+    text(sx + sw + 6, y + 16, buf, C_TXT);
   }
   y += sh + 6;
 
@@ -1458,7 +1459,7 @@ void UITask::drawGps() {
   char buf[64];
   fill(0, top, SCR_W, BODY_H, C_BG);
 
-  const int cx = SCR_W - 70, cy = top + 76, r = 62;
+  const int cx = SCR_W - 76, cy = top + 78, r = 66;
   gfx()->drawCircle(cx, cy, r, C_LINE);
   gfx()->drawCircle(cx, cy, r * 2 / 3, C_LINE);      // 30 degrees up
   gfx()->drawCircle(cx, cy, r / 3, C_LINE);          // 60 degrees up
@@ -1489,25 +1490,27 @@ void UITask::drawGps() {
 
   // ---- the numbers, down the left
   int y = top + 6;
-  const int VCOL = 70, VW = SCR_W - 70 - 62 - VCOL - 6;   // stops short of the sky circle
-  const int lh = 15;
+  const int VCOL = 68, VW = SCR_W - 76 - 68 - VCOL - 4;   // stops short of the sky circle
+  const int lh = 14;
   double lat, lon;
-  const bool fix = selfLocation(lat, lon);
+  LocationProvider* loc = sensors.getLocationProvider();
+  const bool fix = loc != NULL && loc->isValid();          // the receiver's own fix
+  const bool known = selfLocation(lat, lon);               // which may be a position set by hand
 
   textF(4, y, "Fix", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%s", fix ? "yes" : (drawn ? "searching" : "no signal"));
   textFClip(VCOL, y, VW, buf, fix ? C_OK : C_WARN, F_SMALL); y += lh;
 
-  textF(4, y, "Sats", C_DIM, F_SMALL);
-  snprintf(buf, sizeof(buf), "%d of %d", (int)sensors.getLocationProvider()->satellitesCount(), drawn);
+  textF(4, y, "Satellites", C_DIM, F_SMALL);
+  snprintf(buf, sizeof(buf), "%d used of %d", (int)sensors.getLocationProvider()->satellitesCount(), drawn);
   textFClip(VCOL, y, VW, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Best", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%d dB", strongest);
   textFClip(VCOL, y, VW, buf, strongest >= 35 ? C_OK : C_TXT, F_SMALL); y += lh;
 
-  textF(4, y, "Position", C_DIM, F_SMALL); y += lh;
-  if (fix) {
+  textF(4, y, known && !fix ? "Set by hand" : "Position", C_DIM, F_SMALL); y += lh;
+  if (known) {
     snprintf(buf, sizeof(buf), "%.5f", lat);
     textF(10, y, buf, C_TXT, F_SMALL); y += lh;
     snprintf(buf, sizeof(buf), "%.5f", lon);
@@ -1516,16 +1519,16 @@ void UITask::drawGps() {
     textF(10, y, "not known yet", C_DIM, F_SMALL); y += lh * 2;
   }
 
-  textF(4, y, "Alt", C_DIM, F_SMALL);
+  textF(4, y, "Altitude", C_DIM, F_SMALL);
   snprintf(buf, sizeof(buf), "%ld m", sensors.getLocationProvider()->getAltitude() / 1000);
   textFClip(VCOL, y, VW, buf, C_TXT, F_SMALL); y += lh;
 
-  textF(4, y, "Rx", C_DIM, F_SMALL);
+  textF(4, y, "Receiver", C_DIM, F_SMALL);
   const uint32_t baud = sensors.gpsBaudDetected();
   snprintf(buf, sizeof(buf), "%s", baud == 38400 ? "u-blox" : baud == 9600 ? "L76K" : baud ? "found" : "none");
   textFClip(VCOL, y, VW, buf, baud ? C_TXT : C_WARN, F_SMALL); y += lh;
 
-  textF(4, y, "Power", C_DIM, F_SMALL);
+  textF(4, y, "GPS power", C_DIM, F_SMALL);
   textFClip(VCOL, y, VW, the_mesh.getNodePrefs()->gps_enabled ? "on" : "off",
             the_mesh.getNodePrefs()->gps_enabled ? C_OK : C_DIM, F_SMALL); y += lh;
 
@@ -2342,10 +2345,10 @@ void UITask::handleTouch(const TouchEvent& ev) {
       return;
     }
     if (_quick_open && ev.released) {
-      const int row_h = 24;
-      const int h = row_h * UMC_QUICK_REPLIES + 24;
+      const int row_h = 20;
+      const int h = row_h * UMC_QUICK_REPLIES + 20;
       const int y0 = SCR_H - TAB_H - COMPOSE_H - h;
-      const int row = (ev.y - (y0 + 22)) / row_h;
+      const int row = (ev.y - (y0 + 18)) / row_h;
       if (row >= 0 && row < UMC_QUICK_REPLIES) {
         const char* text = the_mesh.getUmc().prefs().quick[row];
         if (text[0]) {
@@ -2417,7 +2420,7 @@ void UITask::handleTouch(const TouchEvent& ev) {
   }
 
   if (_tab == TAB_CONTACTS) {
-    const int row_h = 22, top = BODY_Y + 17;
+    const int row_h = 20, top = BODY_Y + 16;
     const int by = SCR_H - TAB_H - 26;
     const int total = contactCount();
     ContactInfo c;
