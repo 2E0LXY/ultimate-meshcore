@@ -3067,6 +3067,19 @@ bool MyMesh::umcCli(const char* command, char* reply, size_t n) {
     snprintf(reply, n, "> %s", umcMapStatus());
     return true;
   }
+  if (umcStartsWith(command, "maps upload")) {
+    const char* arg = command[11] == ' ' ? command + 12 : "";
+    if (strcmp(arg, "off") == 0) {
+      umcCloseMapUpload();
+      snprintf(reply, n, "> uploads closed");
+      return true;
+    }
+    const int mins = arg[0] ? atoi(arg) : 15;
+    if (mins < 1 || mins > 120) { snprintf(reply, n, "Err - 1 to 120 minutes"); return true; }
+    umcOpenMapUpload((uint32_t)mins * 60000UL);
+    snprintf(reply, n, "> uploads open for %d minutes - post tiles to /api/map?z=&x=&y=", mins);
+    return true;
+  }
   if (strcmp(command, "maps test") == 0) {
     // Proves the card can be written: one tile out at an unused zoom, then removed again.
     UmcMapTileSink sink = umcMapTileSink();

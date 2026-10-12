@@ -386,9 +386,11 @@ esp_err_t UmcWebServer::handleAppPost(httpd_req_t* req) {
 // GET /api/map - what the tile store has to say for itself.
 esp_err_t UmcWebServer::handleMapStatus(httpd_req_t* req) {
   setCommonHeaders(req);
-  char json[160];
-  snprintf(json, sizeof(json), "{\"supported\":%s,\"tile_bytes\":%d,\"status\":\"%s\"}",
-           umcMapTileSink() != nullptr ? "true" : "false", (int)UMC_MAP_TILE_BYTES, umcMapStatus());
+  char json[256];
+  snprintf(json, sizeof(json), "{\"supported\":%s,\"tile_bytes\":%d,\"upload_open\":%s,"
+                                "\"upload_left_s\":%u,\"status\":\"%s\"}",
+           umcMapTileSink() != nullptr ? "true" : "false", (int)UMC_MAP_TILE_BYTES,
+           umcMapUploadOpen() ? "true" : "false", (unsigned)(umcMapUploadLeftMs() / 1000), umcMapStatus());
   return sendJson(req, json);
 }
 
@@ -396,7 +398,11 @@ esp_err_t UmcWebServer::handleMapStatus(httpd_req_t* req) {
 esp_err_t UmcWebServer::handleMapTile(httpd_req_t* req) {
   auto* s = self(req);
   setCommonHeaders(req);
-  if (!s->isAuthorized(req)) return sendJson(req, "{\"error\":\"Unauthorized\"}", "401 Unauthorized");
+  // Either a logged-in session, or an upload window opened on the device itself.
+  if (!s->isAuthorized(req) && !umcMapUploadOpen()) {
+    return sendJson(req, "{\"error\":\"Uploads are closed - run 'maps upload' on the device\"}",
+                    "403 Forbidden");
+  }
   UmcMapTileSink sink = umcMapTileSink();
   if (sink == nullptr) return sendJson(req, "{\"error\":\"This board has no tile storage\"}", "501 Not Implemented");
 

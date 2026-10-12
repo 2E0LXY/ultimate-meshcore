@@ -1,5 +1,6 @@
 #include "UmcPrefs.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #if defined(ESP_PLATFORM)
@@ -42,6 +43,16 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.theme = 0;
   p.touch_map = 0;
   strcpy(p.admin_pw, "password");
+  // Starting points for the canned replies: short, and useful on a radio.
+  static const char* const kQuick[UMC_QUICK_REPLIES] = {
+      "Received, thanks", "On my way", "Standing by", "Can't talk now", "QRX - back shortly", "73"};
+  for (int i = 0; i < UMC_QUICK_REPLIES; i++) {
+    strncpy(p.quick[i], kQuick[i], sizeof(p.quick[i]) - 1);
+  }
+  p.lock_enabled = false;
+  p.clock_12h = false;
+  p.units_miles = false;
+  p.beep_on_msg = true;
 }
 
 bool UmcPrefsStore::isValidPin(const char* pin) {
@@ -76,6 +87,15 @@ void UmcPrefsStore::load(UmcPrefs& p) {
     p.touch_map = nvs.getUChar("touch_map", p.touch_map);
     nvs.getString("pin", p.pin, sizeof(p.pin));
     if (nvs.isKey("admin_pw")) nvs.getString("admin_pw", p.admin_pw, sizeof(p.admin_pw));
+    for (int i = 0; i < UMC_QUICK_REPLIES; i++) {
+      char key[8];
+      snprintf(key, sizeof(key), "quick%d", i);
+      if (nvs.isKey(key)) nvs.getString(key, p.quick[i], sizeof(p.quick[i]));
+    }
+    p.lock_enabled = nvs.getBool("lock", p.lock_enabled);
+    p.clock_12h = nvs.getBool("clock12", p.clock_12h);
+    p.units_miles = nvs.getBool("miles", p.units_miles);
+    p.beep_on_msg = nvs.getBool("beep", p.beep_on_msg);
     nvs.end();
   }
   if (!isValidPin(p.pin)) {
@@ -109,6 +129,15 @@ bool UmcPrefsStore::save(const UmcPrefs& p) {
   nvs.putUChar("touch_map", p.touch_map);
   nvs.putString("pin", p.pin);
   nvs.putString("admin_pw", p.admin_pw);
+  for (int i = 0; i < UMC_QUICK_REPLIES; i++) {
+    char key[8];
+    snprintf(key, sizeof(key), "quick%d", i);
+    nvs.putString(key, p.quick[i]);
+  }
+  nvs.putBool("lock", p.lock_enabled);
+  nvs.putBool("clock12", p.clock_12h);
+  nvs.putBool("miles", p.units_miles);
+  nvs.putBool("beep", p.beep_on_msg);
   nvs.end();
   return true;
 #else

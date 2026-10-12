@@ -63,6 +63,8 @@ private:
   void wifiScanPoll();
   void sampleRadio();
   void drawCompose();
+  void drawQuickPanel();
+  void drawContactDetail();
   void applyTheme();
   int drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when);
   void drawAlert();
@@ -132,6 +134,10 @@ private:
   int _msg_scroll = 0;       // 0 = newest at the bottom
   int _contact_scroll = 0;
   int _contact_sel = -1;
+  bool _contact_detail = false;     // the full page for the selected contact
+  int _forget_confirm = -1;         // contact waiting for a second tap to be forgotten
+  bool _quick_open = false;         // the canned-reply panel is showing
+  int _edit_idx = 0;                // which quick reply is being typed into
 
   // map view
   int _zoom = 12;

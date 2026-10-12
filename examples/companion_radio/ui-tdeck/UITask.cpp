@@ -19,8 +19,10 @@
 
 // Setup tab pages and the things you can type into
 enum SetupPage { SP_ROOT = 0, SP_DEVICE, SP_RADIO, SP_WIFI, SP_WIFI_PICK, SP_BLE, SP_REGION, SP_GPS, SP_FW,
-                 SP_CHANNELS, SP_MESSAGING, SP_CONTACTS_CFG, SP_TELEMETRY, SP_CONSOLE, SP_DISPLAY };
-enum SetupEdit { SE_NONE = 0, SE_NAME, SE_SSID, SE_PASSWORD, SE_PIN, SE_REGION, SE_CHANNEL, SE_COMMAND };
+                 SP_CHANNELS, SP_MESSAGING, SP_CONTACTS_CFG, SP_TELEMETRY, SP_CONSOLE, SP_DISPLAY,
+                 SP_QUICK };
+enum SetupEdit { SE_NONE = 0, SE_NAME, SE_SSID, SE_PASSWORD, SE_PIN, SE_REGION, SE_CHANNEL, SE_COMMAND,
+                 SE_QUICK };
 
 // ---- layout (320 x 240 landscape) ----
 #define SCR_W 320
@@ -677,7 +679,7 @@ void UITask::draw() {
   switch (_tab) {
     case TAB_HOME: drawHome(); break;
     case TAB_MSGS: drawMessages(); break;
-    case TAB_CONTACTS: drawContacts(); break;
+    case TAB_CONTACTS: _contact_detail ? drawContactDetail() : drawContacts(); break;
     case TAB_MAP: drawMap(); break;
     case TAB_GPS: drawGps(); break;
     case TAB_RADIO: drawRadio(); break;
@@ -853,7 +855,28 @@ void UITask::drawMessages() {
   } else if (_msg_sel < 0) {
     text(6, top + 17 + list_h - 15, "Tap a message to reply to it", TH.dim);
   }
+  if (_quick_open) drawQuickPanel();
   drawCompose();
+}
+
+// The canned replies, over the conversation. Tapping one loads it into the composer so it
+// can be added to before sending.
+void UITask::drawQuickPanel() {
+  const UmcPrefs& p = the_mesh.getUmc().prefs();
+  const int row_h = 24;
+  const int h = row_h * UMC_QUICK_REPLIES + 24;
+  const int y0 = SCR_H - TAB_H - COMPOSE_H - h;
+  fill(0, y0, SCR_W, h, TH.card);
+  gfx()->drawFastHLine(0, y0, SCR_W, TH.accent);
+  textF(6, y0 + 3, "Quick replies", TH.accent, F_SMALL);
+  textF(SCR_W - 92, y0 + 3, "Set > Quick", TH.dim, F_SMALL);
+  for (int i = 0; i < UMC_QUICK_REPLIES; i++) {
+    const int y = y0 + 22 + i * row_h;
+    fill(4, y, SCR_W - 8, row_h - 3, TH.bg);
+    char line[48];
+    snprintf(line, sizeof(line), "%d  %s", i + 1, p.quick[i][0] ? p.quick[i] : "(empty)");
+    textFClip(10, y + 3, SCR_W - 24, line, p.quick[i][0] ? TH.text : TH.dim, F_SMALL);
+  }
 }
 
 void UITask::drawCompose() {
@@ -868,12 +891,105 @@ void UITask::drawCompose() {
   const int y = SCR_H - TAB_H - COMPOSE_H;
   fill(0, y, SCR_W, COMPOSE_H, C_CARD);
   gfx()->drawFastHLine(0, y, SCR_W, C_LINE);
-  const int max_w = SCR_W - 68;
+  const int max_w = SCR_W - 112;
   const char* shown = _compose;
   while (shown[0] != 0 && textWidth(shown) > max_w) shown++;     // keep the end in view
   text(4, y + 6, shown[0] ? shown : "type a message...", shown[0] ? C_TXT : C_DIM);
   if (shown[0]) fill(5 + textWidth(shown), y + 5, 2, 15, C_ACC);
+  button(SCR_W - 106, y + 3, 42, 20, "Quick", _quick_open);
   button(SCR_W - 62, y + 3, 58, 20, "Send", _compose_len > 0);
+}
+
+// Everything the radio knows about one contact, with the actions that need the room.
+void UITask::drawContactDetail() {
+  const int top = BODY_Y;
+  fill(0, top, SCR_W, BODY_H, C_BG);
+  ContactInfo c;
+  if (!contactAt(_contact_sel, c)) {
+    _contact_detail = false;
+    return;
+  }
+  const uint8_t kind_icon = c.type == ADV_TYPE_REPEATER ? IC_TOWER : c.type == ADV_TYPE_ROOM ? IC_HOUSE
+                            : c.type == ADV_TYPE_SENSOR ? IC_DISH : IC_FACE;
+  drawIcon(6, top + 6, kind_icon, C_ACC, 16);
+  textFClip(28, top + 4, SCR_W - 34, c.name[0] ? c.name : "(no name)", C_TXT, F_MED);
+
+  const int LX = 6, VX = 96;
+  const int lh = 17;
+  int y = top + 30;
+  char buf[64];
+
+  text(LX, y, "Kind", C_DIM);
+  text(VX, y, c.type == ADV_TYPE_REPEATER ? "repeater" : c.type == ADV_TYPE_ROOM ? "room"
+              : c.type == ADV_TYPE_SENSOR ? "sensor" : "chat node", C_TXT);
+  y += lh;
+
+  text(LX, y, "Route", C_DIM);
+  if (c.out_path_len == 0xFF) {
+    text(VX, y, "flood (no path yet)", C_WARN);
+  } else {
+    snprintf(buf, sizeof(buf), "%d hop%s", c.out_path_len & 63, (c.out_path_len & 63) == 1 ? "" : "s");
+    text(VX, y, buf, C_OK);
+  }
+  y += lh;
+
+  if (c.out_path_len != 0xFF && (c.out_path_len & 63) > 0) {
+    text(LX, y, "Path", C_DIM);
+    size_t pos = 0;
+    buf[0] = 0;
+    for (int i = 0; i < (c.out_path_len & 63) && pos + 4 < sizeof(buf); i++) {
+      pos += snprintf(&buf[pos], sizeof(buf) - pos, "%s%02X", i ? " " : "", c.out_path[i]);
+    }
+    textClip(VX, y, SCR_W - VX - 6, buf, C_TXT);
+    y += lh;
+  }
+
+  const uint32_t now = rtc_clock.getCurrentTime();
+  text(LX, y, "Heard", C_DIM);
+  if (c.last_advert_timestamp && now > c.last_advert_timestamp) {
+    char age[12];
+    DateTime dt(c.last_advert_timestamp);
+    snprintf(buf, sizeof(buf), "%02d:%02d, %s ago", dt.hour(), dt.minute(),
+             shortAge(now - c.last_advert_timestamp, age, sizeof(age)));
+    textClip(VX, y, SCR_W - VX - 6, buf, C_TXT);
+  } else {
+    text(VX, y, "not yet", C_DIM);
+  }
+  y += lh;
+
+  text(LX, y, "Position", C_DIM);
+  if (c.gps_lat || c.gps_lon) {
+    snprintf(buf, sizeof(buf), "%.5f, %.5f", c.gps_lat / 1e6, c.gps_lon / 1e6);
+    textClip(VX, y, SCR_W - VX - 6, buf, C_TXT);
+    y += lh;
+    double slat, slon;
+    if (selfLocation(slat, slon)) {
+      const double m = UmcTiles::distanceM(slat, slon, c.gps_lat / 1e6, c.gps_lon / 1e6);
+      const double b = UmcTiles::bearingDeg(slat, slon, c.gps_lat / 1e6, c.gps_lon / 1e6);
+      const bool miles = the_mesh.getUmc().prefs().units_miles;
+      text(LX, y, "Distance", C_DIM);
+      snprintf(buf, sizeof(buf), "%.1f %s, bearing %d", miles ? m / 1609.344 : m / 1000.0,
+               miles ? "mi" : "km", (int)lround(b));
+      textClip(VX, y, SCR_W - VX - 6, buf, C_TXT);
+      y += lh;
+    }
+  } else {
+    text(VX, y, "not shared", C_DIM);
+    y += lh;
+  }
+
+  text(LX, y, "Key", C_DIM);
+  char hex[25];
+  for (int i = 0; i < 12; i++) snprintf(&hex[i * 2], 3, "%02X", c.id.pub_key[i]);
+  textClip(VX, y, SCR_W - VX - 6, hex, C_TXT);
+  y += lh;
+
+  const int by = SCR_H - TAB_H - 26;
+  button(2, by, 74, 22, "Message");
+  button(80, by, 74, 22, "Reset path");
+  button(158, by, 74, 22, _forget_confirm == _contact_sel ? "Sure?" : "Forget",
+         _forget_confirm == _contact_sel);
+  button(236, by, 80, 22, "< Back");
 }
 
 void UITask::drawContacts() {
@@ -919,7 +1035,7 @@ void UITask::drawContacts() {
     button(2, by, 74, 22, "Message");
     button(80, by, 74, 22, "Show map");
     button(158, by, 74, 22, "Share");
-    button(236, by, 80, 22, "Reset path");
+    button(236, by, 80, 22, "Details");
   } else {
     text(6, by + 5, "Tap a contact to select it", C_DIM);
   }
@@ -1500,7 +1616,7 @@ void UITask::wifiScanPoll() {
 
 int UITask::setupRowCount() const {
   switch (_setup_page) {
-    case SP_ROOT: return 13;                   // the sections
+    case SP_ROOT: return 14;                   // the sections
     case SP_DEVICE: return 4;                  // name, restart, factory reset, back
     case SP_RADIO: return kBandCount + 2;      // bands, TX power, back
     case SP_WIFI: return 5;                    // scan, network, password, connect, back
@@ -1514,7 +1630,8 @@ int UITask::setupRowCount() const {
     case SP_CONTACTS_CFG: return 8;
     case SP_TELEMETRY: return 4;
     case SP_CONSOLE: return 2;
-    case SP_DISPLAY: return kThemeCount + 3;   // themes, touch orientation, brightness, back
+    case SP_DISPLAY: return kThemeCount + 7;   // themes, touch, brightness, four switches, back
+    case SP_QUICK: return UMC_QUICK_REPLIES + 1;
     default: return 1;
   }
 }
@@ -1527,9 +1644,9 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
   NetworkService& net = the_mesh.getNetwork();
   switch (_setup_page) {
     case SP_ROOT: {
-      static const char* sections[13] = {"Device", "Radio", "WiFi", "Bluetooth", "Region", "GPS", "Firmware",
+      static const char* sections[14] = {"Device", "Radio", "WiFi", "Bluetooth", "Region", "GPS", "Firmware",
                                          "Channels", "Messaging", "New contacts", "Telemetry", "Command line",
-                                         "Display & touch"};
+                                         "Display & touch", "Quick replies"};
       snprintf(label, label_n, "%s", sections[row]);
       switch (row) {
         case 0: snprintf(value, value_n, "%s", the_mesh.getNodeName()); break;
@@ -1558,6 +1675,7 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
         case 10: snprintf(value, value_n, "%s", umcCli("get telemetry.base")); break;
         case 11: snprintf(value, value_n, "run any command"); break;
         case 12: snprintf(value, value_n, "%s", kThemes[g_theme].name); break;
+        case 13: snprintf(value, value_n, "%d canned messages", UMC_QUICK_REPLIES); break;
       }
       break;
     }
@@ -1689,6 +1807,28 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
       } else if (row == kThemeCount + 1) {
         snprintf(label, label_n, "Backlight");
         snprintf(value, value_n, "%d%%", (int)brightness());
+      } else if (row == kThemeCount + 2) {
+        snprintf(label, label_n, "Clock");
+        snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().clock_12h ? "12 hour" : "24 hour");
+      } else if (row == kThemeCount + 3) {
+        snprintf(label, label_n, "Distances");
+        snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().units_miles ? "miles" : "kilometres");
+      } else if (row == kThemeCount + 4) {
+        snprintf(label, label_n, "Beep on a message");
+        snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().beep_on_msg ? "on" : "off");
+      } else if (row == kThemeCount + 5) {
+        snprintf(label, label_n, "Flash on a message");
+        snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().lock_enabled ? "on" : "off");
+      } else {
+        snprintf(label, label_n, "< Back");
+      }
+      break;
+
+    case SP_QUICK:
+      if (row < UMC_QUICK_REPLIES) {
+        snprintf(label, label_n, "Reply %d", row + 1);
+        snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().quick[row][0]
+                                           ? the_mesh.getUmc().prefs().quick[row] : "(empty)");
       } else {
         snprintf(label, label_n, "< Back");
       }
@@ -1709,7 +1849,7 @@ void UITask::drawSetup() {
   if (_editing) {   // typing line
     fill(0, top, SCR_W, BODY_H, C_BG);
     static const char* what[] = {"", "Node name", "WiFi network", "WiFi password", "Bluetooth PIN", "Region name",
-                                 "Channel name (without the #)", "Command"};
+                                 "Channel name (without the #)", "Command", "Quick reply"};
     textF(8, top + 12, what[_edit_what], C_DIM, F_SMALL);
     fill(6, top + 32, SCR_W - 12, 28, C_CARD);
     gfx()->drawRect(6, top + 32, SCR_W - 12, 28, C_ACC);
@@ -1729,7 +1869,8 @@ void UITask::drawSetup() {
 
   static const char* titles[] = {"Setup", "Device", "Radio band", "WiFi", "Choose a network",
                                  "Bluetooth", "Region scope", "GPS", "Firmware", "Channels", "Messaging",
-                                 "New contacts", "Telemetry sharing", "Command line", "Display & touch"};
+                                 "New contacts", "Telemetry sharing", "Command line", "Display & touch",
+                                 "Quick replies"};
   fill(0, top, SCR_W, 16, C_CARD);
   textF(6, top + 4, titles[_setup_page], C_ACC, F_SMALL);
   if (_setup_page != SP_ROOT) textF(SCR_W - 76, top + 4, "Back: left", C_DIM, F_SMALL);
@@ -1784,10 +1925,10 @@ void UITask::setupAction(int row) {
 
   switch (page) {
     case SP_ROOT: {
-      static const int pages[13] = {SP_DEVICE, SP_RADIO, SP_WIFI, SP_BLE, SP_REGION, SP_GPS, SP_FW,
+      static const int pages[14] = {SP_DEVICE, SP_RADIO, SP_WIFI, SP_BLE, SP_REGION, SP_GPS, SP_FW,
                                     SP_CHANNELS, SP_MESSAGING, SP_CONTACTS_CFG, SP_TELEMETRY, SP_CONSOLE,
-                                    SP_DISPLAY};
-      setupOpen(pages[row < 13 ? row : 0]);
+                                    SP_DISPLAY, SP_QUICK};
+      setupOpen(pages[row < 14 ? row : 0]);
       return;
     }
 
@@ -2010,12 +2151,33 @@ void UITask::setupAction(int row) {
       } else if (row == kThemeCount + 1) {
         setBrightness(brightness() >= 100 ? 20 : brightness() + 20);
         snprintf(_setup_status, sizeof(_setup_status), "Backlight %d%%", (int)brightness());
+      } else if (row >= kThemeCount + 2 && row <= kThemeCount + 5) {
+        static const char* const names[4] = {"clock12", "miles", "beep", "lock"};
+        const char* name = names[row - kThemeCount - 2];
+        char q[24];
+        snprintf(q, sizeof(q), "get %s", name);
+        const bool on = strstr(umcCli(q), "on") != NULL;
+        snprintf(cmd2, sizeof(cmd2), "set %s %s", name, on ? "off" : "on");
+        StrHelper::strncpy(_setup_status, umcCli(cmd2), sizeof(_setup_status));
       } else {
         setupOpen(SP_ROOT);
         return;
       }
       break;
     }
+
+    case SP_QUICK:
+      if (row < UMC_QUICK_REPLIES) {
+        _editing = true;
+        _edit_what = SE_QUICK;
+        _edit_idx = row;
+        _edit_secret = false;
+        StrHelper::strncpy(_edit_buf, the_mesh.getUmc().prefs().quick[row], sizeof(_edit_buf));
+        _edit_len = strlen(_edit_buf);
+      } else {
+        setupOpen(SP_ROOT);
+      }
+      return;
 
     case SP_CONSOLE:
       if (row == 0) {
@@ -2095,6 +2257,10 @@ void UITask::setupEditDone() {
       StrHelper::strncpy(_console_cmd, _edit_buf, sizeof(_console_cmd));
       consoleRun(_console_cmd);
       break;
+    case SE_QUICK:
+      snprintf(cmd, sizeof(cmd), "set quick%d %s", _edit_idx + 1, _edit_buf);
+      StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      break;
     default: break;
   }
   _editing = false;
@@ -2170,6 +2336,28 @@ void UITask::handleTouch(const TouchEvent& ev) {
       return;
     }
     if (hit(ev, SCR_W - 62, SCR_H - TAB_H - COMPOSE_H + 3, 58, 20)) { sendCompose(); return; }
+    if (hit(ev, SCR_W - 106, SCR_H - TAB_H - COMPOSE_H + 3, 42, 20)) {
+      _quick_open = !_quick_open;
+      _dirty = true;
+      return;
+    }
+    if (_quick_open && ev.released) {
+      const int row_h = 24;
+      const int h = row_h * UMC_QUICK_REPLIES + 24;
+      const int y0 = SCR_H - TAB_H - COMPOSE_H - h;
+      const int row = (ev.y - (y0 + 22)) / row_h;
+      if (row >= 0 && row < UMC_QUICK_REPLIES) {
+        const char* text = the_mesh.getUmc().prefs().quick[row];
+        if (text[0]) {
+          StrHelper::strncpy(_compose, text, sizeof(_compose));
+          _compose_len = strlen(_compose);
+        }
+        _quick_open = false;
+        _dirty = true;
+        return;
+      }
+      if (ev.y >= y0) { _quick_open = false; _dirty = true; return; }   // the panel's own header
+    }
     if (_reply_to[0] && hit(ev, SCR_W - 34, SCR_H - TAB_H - COMPOSE_H - 12, 32, 12)) {
       _reply_to[0] = 0;              // stop replying
       _msg_sel = -1;
@@ -2196,8 +2384,40 @@ void UITask::handleTouch(const TouchEvent& ev) {
     return;
   }
 
+  if (_tab == TAB_CONTACTS && _contact_detail) {
+    const int by = SCR_H - TAB_H - 26;
+    ContactInfo c;
+    if (!contactAt(_contact_sel, c)) { _contact_detail = false; _dirty = true; return; }
+    if (hit(ev, 2, by, 74, 22)) { selectContact(_contact_sel); _tab = TAB_MSGS; _dirty = true; return; }
+    if (hit(ev, 80, by, 74, 22)) {
+      ContactInfo* live = the_mesh.lookupContactByPubKey(c.id.pub_key, PUB_KEY_SIZE);
+      if (live) { the_mesh.resetPathTo(*live); showAlert("Path reset", 1500); }
+      return;
+    }
+    if (hit(ev, 158, by, 74, 22)) {
+      if (_forget_confirm != _contact_sel) {        // ask before losing a contact
+        _forget_confirm = _contact_sel;
+        _dirty = true;
+        return;
+      }
+      ContactInfo* live = the_mesh.lookupContactByPubKey(c.id.pub_key, PUB_KEY_SIZE);
+      if (live && the_mesh.removeContact(*live)) {
+        showAlert("Contact forgotten", 1500);
+        _contact_detail = false;
+        _contact_sel = -1;
+      } else {
+        showAlert("Could not remove it", 1500);
+      }
+      _forget_confirm = -1;
+      _dirty = true;
+      return;
+    }
+    if (hit(ev, 236, by, 80, 22)) { _contact_detail = false; _forget_confirm = -1; _dirty = true; return; }
+    return;
+  }
+
   if (_tab == TAB_CONTACTS) {
-    const int row_h = 22, top = BODY_Y + 14;
+    const int row_h = 22, top = BODY_Y + 17;
     const int by = SCR_H - TAB_H - 26;
     const int total = contactCount();
     ContactInfo c;
@@ -2213,15 +2433,15 @@ void UITask::handleTouch(const TouchEvent& ev) {
         showAlert(the_mesh.shareContactZeroHop(c) ? "Shared with nodes in range" : "Busy - try again", 1500);
         return;
       }
-      if (hit(ev, 236, by, 80, 22)) {
-        ContactInfo* live = the_mesh.lookupContactByPubKey(c.id.pub_key, PUB_KEY_SIZE);
-        if (live) { the_mesh.resetPathTo(*live); showAlert("Path reset", 1500); }
-        return;
-      }
+      if (hit(ev, 236, by, 80, 22)) { _contact_detail = true; _forget_confirm = -1; _dirty = true; return; }
     }
     if (ev.released && ev.y >= top && ev.y < SCR_H - TAB_H - 28) {
       const int idx = _contact_scroll + (ev.y - top) / row_h;
-      if (idx >= 0 && idx < total) { _contact_sel = idx; _dirty = true; }
+      if (idx >= 0 && idx < total) {
+        if (idx == _contact_sel) _contact_detail = true;   // a second tap opens the detail
+        _contact_sel = idx;
+        _dirty = true;
+      }
       return;
     }
     if (ev.down && ev.dy) {

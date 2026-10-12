@@ -778,6 +778,59 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
   }
 
   // ---- per-type flood hop caps (Low-Power firmware compatible names) ----
+  // ---- touch client options ----
+  // Six canned replies, sent from the message composer: "get quick", "set quick3 On my way"
+  if (strcmp(command, "get quick") == 0) {
+    size_t pos = 0;
+    reply[0] = 0;
+    for (int i = 0; i < UMC_QUICK_REPLIES && pos + 8 < reply_size; i++) {
+      pos += snprintf(&reply[pos], reply_size - pos, "%s%d:%s", i ? "\n" : "> ", i + 1, _prefs.quick[i]);
+    }
+    return true;
+  }
+  if (startsWith(command, "set quick")) {
+    const int slot = command[9] - '1';
+    if (slot < 0 || slot >= UMC_QUICK_REPLIES) {
+      snprintf(reply, reply_size, "Err - use set quick1 .. set quick%d", UMC_QUICK_REPLIES);
+      return true;
+    }
+    const char* text = command[10] == ' ' ? command + 11 : "";
+    StrHelper::strncpy(_prefs.quick[slot], text, sizeof(_prefs.quick[slot]));
+    UmcPrefsStore::save(_prefs);
+    snprintf(reply, reply_size, "OK");
+    return true;
+  }
+  {
+    // the plain on/off options, all handled the same way
+    struct Flag { const char* name; bool* value; };
+    const Flag flags[] = {
+        {"lock", &_prefs.lock_enabled},
+        {"clock12", &_prefs.clock_12h},
+        {"miles", &_prefs.units_miles},
+        {"beep", &_prefs.beep_on_msg},
+    };
+    for (const auto& f : flags) {
+      char get_cmd[24], set_cmd[24];
+      snprintf(get_cmd, sizeof(get_cmd), "get %s", f.name);
+      snprintf(set_cmd, sizeof(set_cmd), "set %s ", f.name);
+      if (strcmp(command, get_cmd) == 0) {
+        snprintf(reply, reply_size, "> %s", onOff(*f.value));
+        return true;
+      }
+      if (startsWith(command, set_cmd)) {
+        bool b;
+        if (!parseOnOff(command + strlen(set_cmd), b)) {
+          snprintf(reply, reply_size, "Err - use on|off");
+        } else {
+          *f.value = b;
+          UmcPrefsStore::save(_prefs);
+          snprintf(reply, reply_size, "OK");
+        }
+        return true;
+      }
+    }
+  }
+
   if (strcmp(command, "get theme") == 0) {
     snprintf(reply, reply_size, "> %u", (unsigned)_prefs.theme);
     return true;

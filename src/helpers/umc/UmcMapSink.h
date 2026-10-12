@@ -27,6 +27,14 @@ typedef const char* (*UmcMapStatusFn)();
 void umcSetMapStatusFn(UmcMapStatusFn fn);
 const char* umcMapStatus();
 
+// Uploading tiles writes to the card, so it needs permission. Rather than a password,
+// the window is opened by whoever has the cable or the device in their hand - the console
+// command or the Setup screen - and it closes again on its own.
+void umcOpenMapUpload(uint32_t for_ms);
+void umcCloseMapUpload();
+bool umcMapUploadOpen();
+uint32_t umcMapUploadLeftMs();
+
 // Removes one stored tile, for the console's self-test.
 typedef bool (*UmcMapRemoveFn)(int zoom, int x, int y);
 

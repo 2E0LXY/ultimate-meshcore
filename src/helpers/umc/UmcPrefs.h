@@ -25,7 +25,16 @@ struct UmcPrefs {
   uint8_t touch_map;           // touch panel orientation on touch clients (0-7)
   uint8_t theme;               // colour scheme on screens that have one
   char admin_pw[33];           // web/telnet password on roles without a mesh admin password (companion)
+
+  // ---- touch client extras ----
+  char quick[6][40];           // canned replies, sent from the message composer
+  bool lock_enabled;           // ask for a hold-to-unlock before the screen can be used
+  bool clock_12h;              // show times as am/pm rather than 24 hour
+  bool units_miles;            // distances in miles instead of kilometres
+  bool beep_on_msg;            // a short tone when a message arrives
 };
+
+#define UMC_QUICK_REPLIES 6
 
 class UmcPrefsStore {
 public:

@@ -30,7 +30,8 @@ def get_status(host, timeout=10):
 def put_tile(host, z, x, y, data, timeout=30):
     req = urllib.request.Request(
         f"http://{host}/api/map?z={z}&x={x}&y={y}", data=data, method="POST",
-        headers={"Content-Type": "application/octet-stream", "Content-Length": str(len(data))})
+        headers={"Content-Type": "application/octet-stream", "Content-Length": str(len(data)),
+                 "Connection": "close"})      # one socket per tile: the device has few to spare
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
@@ -66,6 +67,13 @@ def main():
     if not status.get("supported"):
         sys.exit(f"That device cannot store tiles: {status.get('status')}")
     print(f"device: {status.get('status')}")
+    if not status.get("upload_open", True):
+        sys.exit("Uploads are closed. On the device, open Setup > Command line and run\n"
+                 "  maps upload 30\n"
+                 "(or send 'maps upload 30' over USB), then run this again.")
+    left = status.get("upload_left_s")
+    if left:
+        print(f"upload window: {left // 60}m {left % 60}s left")
 
     zoom_lo, zoom_hi = 0, 99
     if args.zoom:
