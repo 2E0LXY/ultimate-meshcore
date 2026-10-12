@@ -6,6 +6,7 @@
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
+#include "FreeSans7pt7b.h"
 #include <helpers/ui/ST7789LCDDisplay.h>
 
 #include "../MyMesh.h"
@@ -74,7 +75,7 @@ static void fill(int x, int y, int w, int h, uint16_t c) { gfx()->fillRect(x, y,
 // ---------------------------------------------------------------------------------------
 // Typography. Every screen uses one family in three sizes, so nothing is drawn with the
 // blocky 5x7 built-in font any more.
-static const GFXfont* const F_SMALL = &FreeSans9pt7b;      // lists, labels, values, buttons
+static const GFXfont* const F_SMALL = &FreeSans7pt7b;      // lists, labels, values, buttons
 static const GFXfont* const F_MED = &FreeSansBold12pt7b;   // the figure a card is about
 static const GFXfont* const F_BIG = &FreeSansBold24pt7b;   // the clock
 
@@ -282,7 +283,8 @@ static int richDraw(int x, int y, const char* s, uint16_t c, const GFXfont* font
   foldUtf8(s, buf, sizeof(buf));
   const int asc = fontAscent(font);
   const int ih = asc >= 28 ? 26 : asc >= 15 ? 16 : 12;     // icons match the letter height
-  const int base = y + asc;
+  // the body face is 7pt: sit it 1px low so it stays centred in rows drawn for a taller one
+  const int base = y + asc + (font == F_SMALL ? 1 : 0);
   const int limit = x + max_w;
   int pen = x;
   if (draw) {
@@ -441,9 +443,9 @@ static bool sunTimes(double lat, double lon, int y, int m, int d, int tz_min, in
 // Home dashboard card slots: 3 columns x 2 rows under the clock.
 static void homeCard(int i, int& x, int& y, int& w, int& h) {
   w = 101;
-  h = 46;
+  h = 48;
   x = 4 + (i % 3) * (w + 3);
-  y = BODY_Y + 90 + (i / 3) * (h + 3);
+  y = BODY_Y + 89 + (i / 3) * (h + 2);
 }
 
 // The web server reaches the card through these: it has no business knowing about the
@@ -1276,9 +1278,9 @@ void UITask::drawHome() {
   if (clock_ok) {
     snprintf(buf, sizeof(buf), "%s %02d %s %04d", wd[weekdayOf(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday)],
              lt.tm_mday, mon[lt.tm_mon], lt.tm_year + 1900);
-    textF(8, top + 52, buf, C_DIM, F_SMALL);
+    text(8, top + 44, buf, C_DIM);
   } else {
-    textF(8, top + 52, "clock not set", C_WARN, F_SMALL);
+    text(8, top + 44, "clock not set", C_WARN);
   }
 
   // ---- sunrise / sunset from the node's position ----
@@ -1287,26 +1289,26 @@ void UITask::drawHome() {
   if (clock_ok && selfLocation(lat, lon) &&
       sunTimes(lat, lon, lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, tz_min, rise, set)) {
     snprintf(buf, sizeof(buf), "Sunrise %02d:%02d", rise / 60, rise % 60);
-    text(8, top + 74, buf, C_WARN);
+    text(8, top + 58, buf, C_WARN);
     snprintf(buf, sizeof(buf), "Sunset  %02d:%02d", set / 60, set % 60);
-    text(110, top + 74, buf, C_WARN);
+    text(8, top + 71, buf, C_WARN);
   } else {
-    text(8, top + 74, selfLocation(lat, lon) ? "No sunrise/sunset today" : "Sunrise/sunset: needs a location", C_DIM);
+    text(8, top + 58, selfLocation(lat, lon) ? "No sunrise/sunset today" : "Sunrise/sunset: needs a location", C_DIM);
   }
 
   // ---- channel busy ----
-  text(176, top + 8, "CHANNEL BUSY", C_DIM);
+  text(176, top + 6, "CHANNEL BUSY", C_DIM);
   if (_busy_pct >= 0) {
     snprintf(buf, sizeof(buf), "%d%%", _busy_pct);
-    meter(176, top + 22, 140, 10, _busy_pct / 100.0f, _busy_pct > 60 ? C_BAD : (_busy_pct > 25 ? C_WARN : C_OK));
+    meter(176, top + 20, 140, 10, _busy_pct / 100.0f, _busy_pct > 60 ? C_BAD : (_busy_pct > 25 ? C_WARN : C_OK));
     textF(176, top + 34, buf, C_TXT, F_MED);
   } else {
-    text(176, top + 22, "measuring...", C_DIM);
+    text(176, top + 20, "measuring...", C_DIM);
   }
   const int nf = radio_driver.getNoiseFloor();
   if (nf) {
     snprintf(buf, sizeof(buf), "noise %d dBm", nf);
-    text(176, top + 60, buf, C_DIM);
+    text(176, top + 58, buf, C_DIM);
   }
 
   // ---- status cards ----
@@ -1334,7 +1336,7 @@ void UITask::drawHome() {
 
   cards[1].title = "GPS";
   snprintf(cards[1].val, sizeof(cards[1].val), fix ? "FIX" : "NONE");
-  if (fix) snprintf(cards[1].sub, sizeof(cards[1].sub), "%.3f,%.3f", glat, glon);
+  if (fix) snprintf(cards[1].sub, sizeof(cards[1].sub), "%.2f,%.2f", glat, glon);
   cards[1].col = fix ? C_OK : C_DIM;
 
   cards[2].title = "NODES";
@@ -1344,13 +1346,13 @@ void UITask::drawHome() {
 
   cards[3].title = "MESSAGES";
   snprintf(cards[3].val, sizeof(cards[3].val), "%d", umc_chatlog.unread());
-  snprintf(cards[3].sub, sizeof(cards[3].sub), "unread / %d kept", umc_chatlog.count());
+  snprintf(cards[3].sub, sizeof(cards[3].sub), "of %d kept", umc_chatlog.count());
   cards[3].col = umc_chatlog.unread() > 0 ? C_WARN : C_TXT;
 
   cards[4].title = "LAST SIGNAL";
   if (rssi != 0) {
     snprintf(cards[4].val, sizeof(cards[4].val), "%d", (int)rssi);
-    snprintf(cards[4].sub, sizeof(cards[4].sub), "dBm  SNR %.1f", snr);
+    snprintf(cards[4].sub, sizeof(cards[4].sub), "SNR %.1f dB", snr);
     cards[4].col = snr > 5 ? C_OK : (snr > -5 ? C_WARN : C_BAD);
   } else {
     snprintf(cards[4].val, sizeof(cards[4].val), "--");
@@ -1367,9 +1369,9 @@ void UITask::drawHome() {
     homeCard(i, x, y, w, h);
     fill(x, y, w, h, C_CARD);
     gfx()->drawRect(x, y, w, h, C_LINE);
-    textClip(x + 4, y + 2, w - 8, cards[i].title, C_DIM);
-    textFClip(x + 4, y + 15, w - 8, cards[i].val, cards[i].col, F_MED);
-    textClip(x + 4, y + 32, w - 8, cards[i].sub, C_DIM);
+    textClip(x + 4, y + 3, w - 6, cards[i].title, C_DIM);
+    textFClip(x + 4, y + 15, w - 6, cards[i].val, cards[i].col, F_MED);
+    textClip(x + 4, y + 34, w - 6, cards[i].sub, C_DIM);
   }
 }
 
@@ -1384,7 +1386,7 @@ void UITask::drawRadio() {
   // time on air for typical packet sizes at the live radio settings
   snprintf(buf, sizeof(buf), "Airtime  32B %lums  100B %lums  200B %lums", (unsigned long)radio_driver.getEstAirtimeFor(32),
            (unsigned long)radio_driver.getEstAirtimeFor(100), (unsigned long)radio_driver.getEstAirtimeFor(200));
-  textClip(4, top + 18, 312, buf, C_DIM);
+  textClip(4, top + 15, 312, buf, C_DIM);
 
   // history statistics
   int peak = -140, now_r = -140;
@@ -1404,29 +1406,29 @@ void UITask::drawRadio() {
       {"FLOOR", floor_db, C_DIM, true},
       {"PEAK", peak, C_WARN, _rssi_n > 0},
   };
-  int y = top + 38;
-  for (int i = 0; i < 3; i++, y += 17) {
-    text(4, y - 2, rows[i].label, C_DIM);
-    meter(52, y, 190, 10, rows[i].valid ? (rows[i].dbm + 130) / 90.0f : 0, rows[i].col);
+  int y = top + 34;
+  for (int i = 0; i < 3; i++, y += 16) {
+    text(4, y, rows[i].label, C_DIM);
+    meter(64, y, 178, 10, rows[i].valid ? (rows[i].dbm + 130) / 90.0f : 0, rows[i].col);
     if (rows[i].valid) snprintf(buf, sizeof(buf), "%d dBm", rows[i].dbm);
     else snprintf(buf, sizeof(buf), "--");
-    text(248, y - 2, buf, C_TXT);
+    text(248, y, buf, C_TXT);
   }
   // margin: how far the last received packet sat above the noise floor
-  text(4, y - 2, "MARGIN", C_DIM);
+  text(4, y, "MARGIN", C_DIM);
   if (last_rssi != 0) {
     const int margin = (int)last_rssi - floor_db;
-    meter(52, y, 190, 10, margin / 40.0f, margin > 10 ? C_OK : (margin > 3 ? C_WARN : C_BAD));
+    meter(64, y, 178, 10, margin / 40.0f, margin > 10 ? C_OK : (margin > 3 ? C_WARN : C_BAD));
     snprintf(buf, sizeof(buf), "%+d dB", margin);
   } else {
-    meter(52, y, 190, 10, 0, C_DIM);
+    meter(64, y, 178, 10, 0, C_DIM);
     snprintf(buf, sizeof(buf), "--");
   }
-  text(248, y - 2, buf, C_TXT);
-  y += 20;
+  text(248, y, buf, C_TXT);
+  y += 22;
 
   // live spectrum: the last two minutes of RSSI, one bar per second
-  const int sx = 4, sh = 46, sw = RSSI_HIST * 2;
+  const int sx = 4, sh = 56, sw = RSSI_HIST * 2;
   fill(sx, y, sw, sh, C_CARD);
   gfx()->drawRect(sx - 1, y - 1, sw + 2, sh + 2, C_LINE);
   for (int i = 0; i < _rssi_n; i++) {
@@ -1435,12 +1437,12 @@ void UITask::drawRadio() {
     fill(sx + (RSSI_HIST - _rssi_n + i) * 2, y + sh - bh, 2, bh, v > floor_db + 10 ? C_WARN : C_ACC);
   }
   text(sx + sw + 6, y, "-40", C_DIM);
-  text(sx + sw + 6, y + sh - 13, "-130", C_DIM);
+  text(sx + sw + 6, y + sh - 11, "-130", C_DIM);
   if (_busy_pct >= 0) {
     snprintf(buf, sizeof(buf), "busy %d%%", _busy_pct);
-    text(sx + sw + 6, y + 17, buf, C_TXT);
+    text(sx + sw + 6, y + 20, buf, C_TXT);
   }
-  y += sh + 6;
+  y += sh + 7;
 
   snprintf(buf, sizeof(buf), "Sent flood %lu direct %lu   Heard flood %lu direct %lu", (unsigned long)the_mesh.getNumSentFlood(),
            (unsigned long)the_mesh.getNumSentDirect(), (unsigned long)the_mesh.getNumRecvFlood(),

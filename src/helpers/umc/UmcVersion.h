@@ -6,7 +6,7 @@
 #define UMC_SHORT_NAME  "UMC"
 
 #ifndef UMC_VERSION
-  #define UMC_VERSION   "0.1.1"
+  #define UMC_VERSION   "0.1.2"
 #endif
 
 // Bumped whenever the /api contract used by the web UI changes.
