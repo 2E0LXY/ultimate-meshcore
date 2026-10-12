@@ -21,7 +21,7 @@
 // Setup tab pages and the things you can type into
 enum SetupPage { SP_ROOT = 0, SP_DEVICE, SP_RADIO, SP_WIFI, SP_WIFI_PICK, SP_BLE, SP_REGION, SP_GPS, SP_FW,
                  SP_CHANNELS, SP_MESSAGING, SP_CONTACTS_CFG, SP_TELEMETRY, SP_CONSOLE, SP_DISPLAY,
-                 SP_QUICK };
+                 SP_QUICK, SP_THEME };
 enum SetupEdit { SE_NONE = 0, SE_NAME, SE_SSID, SE_PASSWORD, SE_PIN, SE_REGION, SE_CHANNEL, SE_COMMAND,
                  SE_QUICK };
 
@@ -42,15 +42,18 @@ struct UiTheme {
   uint16_t bg, card, line, text, dim, accent, mine, mine_text, theirs, theirs_text;
 };
 static const UiTheme kThemes[] = {
-  {"Green",   0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x0568, 0x0568, 0xFFFF, 0x2104, 0xE73C},
-  {"Blue",    0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x1C9F, 0x1C9F, 0xFFFF, 0x2104, 0xE73C},
-  {"Teal",    0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x045F, 0x045F, 0xFFFF, 0x2104, 0xE73C},
-  {"Purple",  0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x7819, 0x7819, 0xFFFF, 0x2104, 0xE73C},
-  {"Olive",   0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x5B2A, 0x5B2A, 0xFFFF, 0x2104, 0xE73C},
-  {"Orange",  0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0xC9A0, 0xC9A0, 0xFFFF, 0x2104, 0xE73C},
-  {"Rose",    0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0xB2CC, 0xB2CC, 0xFFFF, 0x2104, 0xE73C},
-  {"Magenta", 0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0xC80E, 0xC80E, 0xFFFF, 0x2104, 0xE73C},
-  {"Grey",    0x0861, 0x18E3, 0x3186, 0xE73C, 0x8410, 0x8410, 0x8410, 0xFFFF, 0x2104, 0xE73C},
+  {"Ocean",   0x08A4, 0x1127, 0x29EA, 0xEF7E, 0x8D17, 0x3C1E, 0x3C1E, 0xFFFF, 0xF7BF, 0x1107},
+  {"Forest",  0x08A2, 0x1923, 0x29E5, 0xEF9C, 0x9551, 0x9E6C, 0x9E6C, 0x1101, 0x2183, 0xDF5A},
+  {"Violet",  0x1063, 0x20C5, 0x3969, 0xF75E, 0xAC97, 0xAABE, 0xAABE, 0xFFFF, 0x2907, 0xEF1E},
+  {"Teal",    0x08A2, 0x1124, 0x19E7, 0xE79E, 0x8575, 0x15D4, 0x15D4, 0x0103, 0x1986, 0xDF7D},
+  {"Rose",    0x1862, 0x28C4, 0x4146, 0xF75D, 0xC494, 0xF1EB, 0xF1EB, 0xFFFF, 0x3905, 0xF71D},
+  {"Amber",   0x1880, 0x2902, 0x4183, 0xFF7C, 0xC52F, 0xF4E1, 0xF4E1, 0x28C0, 0x3942, 0xF739},
+  {"Slate",   0x10A3, 0x1905, 0x29C8, 0xEF7E, 0x9516, 0x63B1, 0x63B1, 0xFFFF, 0x2187, 0xE75E},
+  {"Mint",    0x08A2, 0x1123, 0x19C5, 0xE79D, 0x8DB3, 0x3693, 0x3693, 0x0143, 0x1984, 0xDF7C},
+  {"Crimson", 0x1041, 0x28A2, 0x4104, 0xF75D, 0xBC92, 0xD924, 0xD924, 0xFFFF, 0x30E3, 0xF6FB},
+  {"Indigo",  0x0864, 0x10C6, 0x216A, 0xE75F, 0x94D8, 0x633E, 0x633E, 0xFFFF, 0x2148, 0xE73E},
+  {"Sand",    0x1081, 0x2102, 0x3984, 0xF77C, 0xB551, 0xD58D, 0xD58D, 0x20E1, 0x3143, 0xEF3A},
+  {"Mono",    0x0000, 0x10A2, 0x2945, 0xFFFF, 0x9CD3, 0xFFFF, 0xFFFF, 0x0000, 0x18E3, 0xFFFF},
 };
 static const int kThemeCount = sizeof(kThemes) / sizeof(kThemes[0]);
 static int g_theme = 0;
@@ -644,7 +647,7 @@ uint32_t UITask::screenSignature() {
                           (uint32_t)sensors.getLocationProvider()->satellitesCount() * 31 + (millis() / 5000) * 3);
   }
   if (_tab == TAB_SETUP) {   // values here change as you set them
-    return h ^ (uint32_t)(_setup_page * 65537 + _setup_sel * 131 + _setup_scroll * 17 +
+    return h ^ (uint32_t)(g_theme * 7331 + _setup_page * 65537 + _setup_sel * 131 + _setup_scroll * 17 +
                           (_editing ? 7919 : 0) + _edit_len * 31 + (_setup_confirm + 2) * 13 +
                           _wifi_scan_state * 101 + _wifi_found * 7 + (uint32_t)strlen(_setup_status) +
                           (uint32_t)strlen(_console_out) * 3);
@@ -752,8 +755,15 @@ void UITask::applyTheme() {
 }
 
 // One message bubble, drawn upwards from y_bottom. Returns the new bottom for the next one.
-int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when) {
-  const int max_w = SCR_W - 70;
+// One message. Drawn upwards from y_bottom, and returns the new bottom for the next one.
+//
+// The look follows what a phone does: the sender's own corner is square, the time and the
+// name sit outside the bubble rather than inside it, and a run of messages from the same
+// person shares one heading.
+int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when,
+                       bool show_who) {
+  const int avatar = mine ? 0 : 18;                  // the column the incoming avatar sits in
+  const int max_w = SCR_W - 76 - avatar;
   const int pad = 5;
   const int line_h = 12;
   const int inner = max_w - pad * 2;
@@ -787,35 +797,112 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
     const int w = textWidth(lines[i]);
     if (w > widest) widest = w;
   }
-  char foot_pre[40];
-  if (when) {
-    DateTime dt0(when);
-    snprintf(foot_pre, sizeof(foot_pre), "%s %02d:%02d", mine ? "" : who, dt0.hour(), dt0.minute());
-  } else {
-    snprintf(foot_pre, sizeof(foot_pre), "%s", mine ? "" : who);
-  }
-  const int fw = textWidth(foot_pre);          // the name and time can be wider than the body
-  if (fw > widest) widest = fw > inner ? inner : fw;
   const int bw = widest + pad * 2;
-  const int bh = line_count * line_h + pad * 2 + 11;      // room for the name/time line
-  const int bx = mine ? SCR_W - bw - 6 : 6;
+  const int bh = line_count * line_h + pad * 2;
+  const int bx = mine ? SCR_W - bw - 6 : 6 + avatar;
   const int by = y_bottom - bh;
 
-  gfx()->fillRoundRect(bx, by, bw, bh, 7, mine ? TH.mine : TH.theirs);
-  if (selected) gfx()->drawRoundRect(bx - 1, by - 1, bw + 2, bh + 2, 8, TH.accent == TH.mine ? 0xFFFF : TH.accent);
+  const uint16_t fill_c = mine ? TH.mine : TH.theirs;
+  gfx()->fillRoundRect(bx, by, bw, bh, 6, fill_c);
+  // square off the corner nearest the sender, the way a chat app does
+  if (mine) gfx()->fillRect(bx + bw - 6, by + bh - 6, 6, 6, fill_c);
+  else gfx()->fillRect(bx, by + bh - 6, 6, 6, fill_c);
+  if (selected) gfx()->drawRoundRect(bx - 2, by - 2, bw + 4, bh + 4, 8, TH.accent == fill_c ? 0xFFFF : TH.accent);
 
   const uint16_t tc = mine ? TH.mine_text : TH.theirs_text;
-  for (int i = 0; i < line_count; i++) text(bx + pad, by + pad + i * line_h, lines[i], tc);
+  for (int i = 0; i < line_count; i++) textClip(bx + pad, by + pad + i * line_h, inner, lines[i], tc);
 
-  char foot[40];
+  if (!show_who) return by - 3;
+
+  // the heading above the run: who it was from, when, and a tick on our own messages
+  const int hy = by - 12;
+  char stamp[24];
   if (when) {
     DateTime dt(when);
-    snprintf(foot, sizeof(foot), "%s %02d:%02d", mine ? "" : who, dt.hour(), dt.minute());
+    int hour = dt.hour();
+    const bool pm = hour >= 12;
+    if (the_mesh.getUmc().prefs().clock_12h) {
+      hour = hour % 12;
+      if (hour == 0) hour = 12;
+      snprintf(stamp, sizeof(stamp), "%d:%02d%s", hour, dt.minute(), pm ? "pm" : "am");
+    } else {
+      snprintf(stamp, sizeof(stamp), "%02d:%02d", hour, dt.minute());
+    }
   } else {
-    snprintf(foot, sizeof(foot), "%s", mine ? "" : who);
+    stamp[0] = 0;
   }
-  textClip(bx + pad, by + bh - 13, bw - pad * 2, foot, mine ? tc : TH.dim);
-  return by - 4;
+
+  if (mine) {
+    int x = SCR_W - 6;
+    drawIcon(x - 9, hy + 1, IC_CHECK, TH.dim, 8);    // sent
+    x -= 12;
+    const int sw = textWidth(stamp);
+    text(x - sw, hy, stamp, TH.dim);
+  } else {
+    // a round avatar with the sender's initial, coloured from the name so it stays the same
+    uint8_t hash = 0;
+    for (const char* q = who; *q; q++) hash = hash * 31 + (uint8_t)*q;
+    static const uint16_t kAvatar[6] = {0xF4E1, 0x3C1E, 0x9E6C, 0xAABE, 0x15D4, 0xF1EB};
+    const uint16_t ac = kAvatar[hash % 6];
+    gfx()->fillCircle(12, by + bh - 8, 8, ac);
+    char initial[2] = {(char)toupper((unsigned char)who[0]), 0};
+    if (initial[0] < 0x20 || initial[0] > 0x7E) initial[0] = '?';
+    text(12 - textWidth(initial) / 2, by + bh - 13, initial, 0x0000);
+
+    char head[40];
+    snprintf(head, sizeof(head), "%s", who);
+    const int hw = textWidth(head);
+    textClip(6 + avatar, hy, SCR_W - 90, head, TH.dim);
+    if (stamp[0]) text(6 + avatar + (hw > SCR_W - 90 ? SCR_W - 90 : hw) + 6, hy, stamp, TH.dim);
+  }
+  return hy - 3;
+}
+
+// A small sample of the chat, for picking a theme by eye rather than by name.
+void UITask::drawThemePreview(int x, int y, int w, int h, int theme) {
+  const UiTheme& th = kThemes[theme];
+  gfx()->fillRoundRect(x, y, w, h, 4, th.bg);
+  gfx()->drawRoundRect(x, y, w, h, 4, th.line);
+
+  struct Line { const char* text; bool mine; };
+  static const Line sample[3] = {
+      {"Net at 8?", false}, {"I'll be there", true}, {"73 for now", false}};
+  int by = y + 6;
+  for (int i = 0; i < 3; i++) {
+    const int tw = textWidth(sample[i].text);
+    const int bw = tw + 10;
+    const int bx = sample[i].mine ? x + w - bw - 5 : x + 5;
+    const uint16_t c = sample[i].mine ? th.mine : th.theirs;
+    gfx()->fillRoundRect(bx, by, bw, 15, 5, c);
+    if (sample[i].mine) gfx()->fillRect(bx + bw - 5, by + 10, 5, 5, c);
+    else gfx()->fillRect(bx, by + 10, 5, 5, c);
+    text(bx + 5, by + 3, sample[i].text, sample[i].mine ? th.mine_text : th.theirs_text);
+    by += 18;
+  }
+}
+
+// Pick a chat theme by looking at it.
+void UITask::drawThemePage() {
+  const int top = BODY_Y;
+  fill(0, top, SCR_W, BODY_H, C_BG);
+  fill(0, top, SCR_W, 16, C_CARD);
+  textF(6, top + 4, "Chat theme", C_ACC, F_SMALL);
+  textF(SCR_W - 76, top + 4, "Back: left", C_DIM, F_SMALL);
+
+  drawThemePreview(8, top + 22, SCR_W - 16, 66, g_theme);
+
+  // the swatches, two rows of six
+  const int cols = 6, sw = 40, sh = 30;
+  const int x0 = (SCR_W - cols * sw) / 2;
+  const int y0 = top + 96;
+  for (int i = 0; i < kThemeCount && i < 12; i++) {
+    const int cx = x0 + (i % cols) * sw + sw / 2;
+    const int cy = y0 + (i / cols) * sh + 13;
+    gfx()->fillCircle(cx, cy, 11, kThemes[i].mine);
+    gfx()->fillCircle(cx, cy, 6, kThemes[i].theirs);
+    if (i == g_theme) gfx()->drawCircle(cx, cy, 14, C_TXT);
+  }
+  textFClip(8, top + BODY_H - 30, SCR_W - 16, kThemes[g_theme].name, C_TXT, F_SMALL);
 }
 
 void UITask::drawMessages() {
@@ -843,7 +930,12 @@ void UITask::drawMessages() {
     if (e->from[0]) snprintf(who, sizeof(who), "%s", e->from);
     else snprintf(who, sizeof(who), "%02x%02x%02x", e->key[0], e->key[1], e->key[2]);
     const int bottom_before = y;
-    y = drawBubble(y, who, e->text, e->outgoing, _msg_sel == i, e->epoch);
+    // a run of messages from the same person shares one heading
+    const UmcChatLog::Entry* prev = i > 0 ? umc_chatlog.get(i - 1) : NULL;
+    const bool same_run = prev != NULL && prev->outgoing == e->outgoing &&
+                          strcmp(prev->from, e->from) == 0 &&
+                          e->epoch && prev->epoch && e->epoch - prev->epoch < 300;
+    y = drawBubble(y, who, e->text, e->outgoing, _msg_sel == i, e->epoch, !same_run);
     if (_msg_rows < (int)(sizeof(_msg_row_y) / sizeof(_msg_row_y[0]))) {
       _msg_row_y[_msg_rows] = y;            // top of this bubble
       _msg_row_bottom[_msg_rows] = bottom_before;
@@ -1636,7 +1728,8 @@ int UITask::setupRowCount() const {
     case SP_CONTACTS_CFG: return 8;
     case SP_TELEMETRY: return 4;
     case SP_CONSOLE: return 2;
-    case SP_DISPLAY: return kThemeCount + 7;   // themes, touch, brightness, four switches, back
+    case SP_DISPLAY: return 8;   // theme, touch, brightness, four switches, back
+    case SP_THEME: return 1;
     case SP_QUICK: return UMC_QUICK_REPLIES + 1;
     default: return 1;
   }
@@ -1804,29 +1897,38 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
       break;
 
     case SP_DISPLAY:
-      if (row < kThemeCount) {
-        snprintf(label, label_n, "Theme: %s", kThemes[row].name);
-        snprintf(value, value_n, "%s", g_theme == row ? "in use" : "");
-      } else if (row == kThemeCount) {
-        snprintf(label, label_n, "Touch orientation");
-        snprintf(value, value_n, "%s  (tap to change)", umcCli("get touch.map"));
-      } else if (row == kThemeCount + 1) {
-        snprintf(label, label_n, "Backlight");
-        snprintf(value, value_n, "%d%%", (int)brightness());
-      } else if (row == kThemeCount + 2) {
-        snprintf(label, label_n, "Clock");
-        snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().clock_12h ? "12 hour" : "24 hour");
-      } else if (row == kThemeCount + 3) {
-        snprintf(label, label_n, "Distances");
-        snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().units_miles ? "miles" : "kilometres");
-      } else if (row == kThemeCount + 4) {
-        snprintf(label, label_n, "Beep on a message");
-        snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().beep_on_msg ? "on" : "off");
-      } else if (row == kThemeCount + 5) {
-        snprintf(label, label_n, "Flash on a message");
-        snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().lock_enabled ? "on" : "off");
-      } else {
-        snprintf(label, label_n, "< Back");
+      switch (row) {
+        case 0:
+          snprintf(label, label_n, "Chat theme");
+          snprintf(value, value_n, "%s", kThemes[g_theme].name);
+          break;
+        case 1:
+          snprintf(label, label_n, "Touch orientation");
+          snprintf(value, value_n, "%s  (tap to change)", umcCli("get touch.map"));
+          break;
+        case 2:
+          snprintf(label, label_n, "Backlight");
+          snprintf(value, value_n, "%d%%", (int)brightness());
+          break;
+        case 3:
+          snprintf(label, label_n, "Clock");
+          snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().clock_12h ? "12 hour" : "24 hour");
+          break;
+        case 4:
+          snprintf(label, label_n, "Distances");
+          snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().units_miles ? "miles" : "kilometres");
+          break;
+        case 5:
+          snprintf(label, label_n, "Beep on a message");
+          snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().beep_on_msg ? "on" : "off");
+          break;
+        case 6:
+          snprintf(label, label_n, "Flash on a message");
+          snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().lock_enabled ? "on" : "off");
+          break;
+        default:
+          snprintf(label, label_n, "< Back");
+          break;
       }
       break;
 
@@ -1844,6 +1946,7 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
 }
 
 void UITask::drawSetup() {
+  if (_setup_page == SP_THEME) { drawThemePage(); return; }
   const int top = BODY_Y;
   const int row_h = 20;
   const int list_top = top + 18;
@@ -1876,7 +1979,7 @@ void UITask::drawSetup() {
   static const char* titles[] = {"Setup", "Device", "Radio band", "WiFi", "Choose a network",
                                  "Bluetooth", "Region scope", "GPS", "Firmware", "Channels", "Messaging",
                                  "New contacts", "Telemetry sharing", "Command line", "Display & touch",
-                                 "Quick replies"};
+                                 "Quick replies", "Chat theme"};
   fill(0, top, SCR_W, 16, C_CARD);
   textF(6, top + 4, titles[_setup_page], C_ACC, F_SMALL);
   if (_setup_page != SP_ROOT) textF(SCR_W - 76, top + 4, "Back: left", C_DIM, F_SMALL);
@@ -2145,21 +2248,20 @@ void UITask::setupAction(int row) {
 
     case SP_DISPLAY: {
       char cmd2[48];
-      if (row < kThemeCount) {
-        snprintf(cmd2, sizeof(cmd2), "set theme %d", row);
-        StrHelper::strncpy(_setup_status, umcCli(cmd2), sizeof(_setup_status));
-        applyTheme();
-      } else if (row == kThemeCount) {
+      if (row == 0) {
+        setupOpen(SP_THEME);
+        return;
+      } else if (row == 1) {
         const int now = atoi(umcCli("get touch.map"));
         snprintf(cmd2, sizeof(cmd2), "set touch.map %d", (now + 1) % 8);
         StrHelper::strncpy(_setup_status, umcCli(cmd2), sizeof(_setup_status));
         _input.setTouchMap((now + 1) % 8);
-      } else if (row == kThemeCount + 1) {
+      } else if (row == 2) {
         setBrightness(brightness() >= 100 ? 20 : brightness() + 20);
         snprintf(_setup_status, sizeof(_setup_status), "Backlight %d%%", (int)brightness());
-      } else if (row >= kThemeCount + 2 && row <= kThemeCount + 5) {
+      } else if (row >= 3 && row <= 6) {
         static const char* const names[4] = {"clock12", "miles", "beep", "lock"};
-        const char* name = names[row - kThemeCount - 2];
+        const char* name = names[row - 3];
         char q[24];
         snprintf(q, sizeof(q), "get %s", name);
         const bool on = strstr(umcCli(q), "on") != NULL;
@@ -2491,6 +2593,26 @@ void UITask::handleTouch(const TouchEvent& ev) {
         showAlert("No fix yet", 1500);
       }
       return;
+    }
+    return;
+  }
+
+  if (_tab == TAB_SETUP && _setup_page == SP_THEME) {
+    const int top = BODY_Y;
+    if (ev.released && ev.y >= top && ev.y < top + 16) { setupOpen(SP_DISPLAY); return; }
+    const int cols = 6, sw = 40, sh = 30;
+    const int x0 = (SCR_W - cols * sw) / 2;
+    const int y0 = top + 96;
+    if (ev.released && ev.x >= x0 && ev.y >= y0) {
+      const int col = (ev.x - x0) / sw, rowi = (ev.y - y0) / sh;
+      const int idx = rowi * cols + col;
+      if (col >= 0 && col < cols && idx >= 0 && idx < kThemeCount) {
+        char cmd[24];
+        snprintf(cmd, sizeof(cmd), "set theme %d", idx);
+        umcCli(cmd);
+        applyTheme();
+        _dirty = true;
+      }
     }
     return;
   }

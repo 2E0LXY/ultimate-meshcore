@@ -66,7 +66,10 @@ private:
   void drawQuickPanel();
   void drawContactDetail();
   void applyTheme();
-  int drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when);
+  int drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when,
+                 bool show_who);
+  void drawThemePage();
+  void drawThemePreview(int x, int y, int w, int h, int theme);
   void drawAlert();
   uint32_t screenSignature();
 
