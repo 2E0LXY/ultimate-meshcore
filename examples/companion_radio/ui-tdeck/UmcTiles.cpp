@@ -77,6 +77,97 @@ void UmcTiles::scanZooms() {
   if (_max_zoom < 0) _min_zoom = 0;
 }
 
+// Called from the web server's task: hand the tile over and wait for the UI task.
+bool UmcTiles::queueTile(int z, int x, int y, const uint8_t* data, size_t len) {
+  if (data == nullptr || len != UMC_TILE_BYTES) return false;
+  if (z < 0 || z > 20) return false;
+  const int span = 1 << z;
+  if (x < 0 || y < 0 || x >= span || y >= span) return false;
+  if (_pending.state != 0) return false;            // one upload at a time
+
+  _pending.z = z;
+  _pending.x = x;
+  _pending.y = y;
+  _pending.data = data;
+  _pending.len = len;
+  _pending.state = 1;
+
+  for (int waited = 0; waited < 8000 && _pending.state == 1; waited += 2) {
+    vTaskDelay(pdMS_TO_TICKS(2));                   // the UI loop picks it up within a tick
+  }
+  const bool ok = _pending.state == 2;
+  _pending.data = nullptr;
+  _pending.state = 0;
+  return ok;
+}
+
+// Called from the UI loop, which is the only task allowed near the card.
+void UmcTiles::servicePending() {
+  if (_pending.state != 1) return;
+  const bool ok = writeTileNow(_pending.z, _pending.x, _pending.y, _pending.data, _pending.len);
+  _pending.state = ok ? 2 : 3;
+}
+
+bool UmcTiles::writeTileNow(int z, int x, int y, const uint8_t* data, size_t len) {
+  if (SD.cardType() == CARD_NONE) {                 // a card put in after start-up
+    if (!SD.begin(TDECK_SD_CS, display.spiBus(), 4000000)) {
+      strncpy(_status, "no SD card", sizeof(_status) - 1);
+      return false;
+    }
+  }
+  char path[48];
+  // each level has to be made on its own
+  if (!SD.exists("/maps") && !SD.mkdir("/maps")) return false;
+  snprintf(path, sizeof(path), "/maps/%d", z);
+  if (!SD.exists(path) && !SD.mkdir(path)) return false;
+  snprintf(path, sizeof(path), "/maps/%d/%d", z, x);
+  if (!SD.exists(path) && !SD.mkdir(path)) return false;
+
+  snprintf(path, sizeof(path), "/maps/%d/%d/%d.bin", z, x, y);
+  File f = SD.open(path, FILE_WRITE);
+  if (!f) return false;
+  const size_t put = f.write(data, len);
+  f.close();
+  if (put != len) {
+    SD.remove(path);                                // a half-written tile is worse than none
+    return false;
+  }
+
+  // a new zoom folder may have appeared, and the first tile makes the map usable
+  for (int i = 0; i < _num_slots; i++) {
+    if (_slots[i].z == z && _slots[i].x == x && _slots[i].y == y) _slots[i].z = -1;   // drop stale cache
+  }
+  scanZooms();
+  if (_max_zoom >= 0) {
+    if (_slots == nullptr) {                        // begin() gave up earlier: set up now
+      _num_slots = 6;
+      _slots = new Slot[_num_slots];
+      for (int i = 0; i < _num_slots; i++) {
+        _slots[i].px = static_cast<uint16_t*>(heap_caps_malloc(UMC_TILE_BYTES, MALLOC_CAP_SPIRAM));
+        if (_slots[i].px == nullptr) { _num_slots = i; break; }
+      }
+    }
+    if (_num_slots > 0) {
+      snprintf(_status, sizeof(_status), "SD maps, zoom %d-%d", _min_zoom, _max_zoom);
+      _ok = true;
+    }
+  }
+  return true;
+}
+
+// Used by the self-test to clear up after itself.
+bool UmcTiles::removeTile(int z, int x, int y) {
+  char path[48];
+  snprintf(path, sizeof(path), "/maps/%d/%d/%d.bin", z, x, y);
+  const bool gone = SD.remove(path);
+  snprintf(path, sizeof(path), "/maps/%d/%d", z, x);
+  SD.rmdir(path);
+  snprintf(path, sizeof(path), "/maps/%d", z);
+  SD.rmdir(path);
+  scanZooms();
+  return gone;
+}
+
 const uint16_t* UmcTiles::tile(int z, int x, int y) {
   if (!_ok || z < 0) return nullptr;
   const int span = 1 << z;
@@ -116,5 +207,9 @@ const uint16_t* UmcTiles::tile(int z, int x, int y) {
 bool UmcTiles::begin(int) { return false; }
 const uint16_t* UmcTiles::tile(int, int, int) { return nullptr; }
 void UmcTiles::scanZooms() {}
+bool UmcTiles::queueTile(int, int, int, const uint8_t*, size_t) { return false; }
+void UmcTiles::servicePending() {}
+bool UmcTiles::writeTileNow(int, int, int, const uint8_t*, size_t) { return false; }
+bool UmcTiles::removeTile(int, int, int) { return false; }
 
 #endif

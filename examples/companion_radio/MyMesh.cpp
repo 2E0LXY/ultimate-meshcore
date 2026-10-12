@@ -1,5 +1,6 @@
 #include "MyMesh.h"
 #include <helpers/umc/UmcGpsSky.h>
+#include <helpers/umc/UmcMapSink.h>
 
 #include <Arduino.h> // needed for PlatformIO
 #include <Mesh.h>
@@ -3062,6 +3063,27 @@ bool MyMesh::umcCli(const char* command, char* reply, size_t n) {
 
   // ---------------------------------------------------------------- GPS
 #if ENV_INCLUDE_GPS == 1
+  if (strcmp(command, "maps") == 0) {
+    snprintf(reply, n, "> %s", umcMapStatus());
+    return true;
+  }
+  if (strcmp(command, "maps test") == 0) {
+    // Proves the card can be written: one tile out at an unused zoom, then removed again.
+    UmcMapTileSink sink = umcMapTileSink();
+    if (sink == NULL) { snprintf(reply, n, "> this board has no tile storage"); return true; }
+    uint8_t* buf = (uint8_t*)heap_caps_malloc(UMC_MAP_TILE_BYTES, MALLOC_CAP_SPIRAM);
+    if (buf == NULL) buf = (uint8_t*)malloc(UMC_MAP_TILE_BYTES);
+    if (buf == NULL) { snprintf(reply, n, "> out of memory for a test tile"); return true; }
+    for (size_t i = 0; i < UMC_MAP_TILE_BYTES; i++) buf[i] = (uint8_t)(i & 0xFF);
+    const unsigned long t0 = millis();
+    const bool wrote = sink(99, 0, 0, buf, UMC_MAP_TILE_BYTES);   // zoom 99 is never drawn
+    const unsigned long took = millis() - t0;
+    free(buf);
+    const bool tidied = wrote && umcMapRemove(99, 0, 0);
+    snprintf(reply, n, "> write:%s %lums  tidy:%s\nstore: %s", wrote ? "ok" : "FAILED",
+             took, tidied ? "ok" : "left behind", umcMapStatus());
+    return true;
+  }
   if (strcmp(command, "gps") == 0) { snprintf(reply, n, "> %s", umcOnOff(_prefs.gps_enabled)); return true; }
   if (strcmp(command, "gps info") == 0) {
     LocationProvider* loc = sensors.getLocationProvider();

@@ -1,5 +1,7 @@
 #include "UITask.h"
 
+#include <helpers/umc/UmcMapSink.h>
+
 #include <Adafruit_ST7789.h>
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
@@ -442,6 +444,26 @@ static void homeCard(int i, int& x, int& y, int& w, int& h) {
   y = BODY_Y + 90 + (i / 3) * (h + 3);
 }
 
+// The web server reaches the card through these: it has no business knowing about the
+// screen, and the tile store belongs to the UI.
+static UmcTiles* s_tiles = nullptr;
+static TaskHandle_t s_ui_task = nullptr;
+
+static bool umcTileSinkThunk(int z, int x, int y, const uint8_t* data, size_t len) {
+  if (s_tiles == nullptr) return false;
+  // Called from the UI task itself (the console's self-test): write straight away, since
+  // handing it to the queue would wait for a task that is already here.
+  if (xTaskGetCurrentTaskHandle() == s_ui_task) return s_tiles->writeTileNow(z, x, y, data, len);
+  return s_tiles->queueTile(z, x, y, data, len);
+}
+
+// Clears up after the self-test, again only from the UI task.
+static bool umcTileRemoveThunk(int z, int x, int y) {
+  return s_tiles != nullptr && s_tiles->removeTile(z, x, y);
+}
+
+static const char* umcTileStatusThunk() { return s_tiles != nullptr ? s_tiles->status() : "no display task"; }
+
 void UITask::begin(DisplayDriver* disp, SensorManager* sensors, NodePrefs* node_prefs) {
   _display = disp;
   _sensors = sensors;
@@ -453,6 +475,12 @@ void UITask::begin(DisplayDriver* disp, SensorManager* sensors, NodePrefs* node_
   delay(2500);
   _input.begin(SCR_W, SCR_H, the_mesh.getUmc().prefs().touch_map);
   _tiles.begin();
+  // let the web server upload map tiles to the card
+  s_tiles = &_tiles;
+  s_ui_task = xTaskGetCurrentTaskHandle();
+  umcSetMapTileSink(umcTileSinkThunk);
+  umcSetMapStatusFn(umcTileStatusThunk);
+  umcSetMapRemoveFn(umcTileRemoveThunk);
 #ifdef PIN_TFT_LEDA_CTL
   pinMode(PIN_TFT_LEDA_CTL, OUTPUT);
   digitalWrite(PIN_TFT_LEDA_CTL, HIGH);
@@ -522,6 +550,8 @@ void UITask::centreOnSelf() {
 
 void UITask::loop() {
   if (_display == NULL) return;
+
+  _tiles.servicePending();   // a tile uploaded over WiFi, written here where the bus is ours
 
   char key = _input.readKey();
   if (key) handleKey(key);

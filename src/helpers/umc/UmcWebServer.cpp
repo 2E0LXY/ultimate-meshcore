@@ -1,4 +1,6 @@
 #include "UmcWebServer.h"
+
+#include "UmcMapSink.h"
 #include "UmcLog.h"
 
 #include "UmcService.h"
@@ -106,6 +108,8 @@ bool UmcWebServer::start() {
       {.uri = "/api/app", .method = HTTP_GET, .handler = handleAppPoll, .user_ctx = this},
       {.uri = "/api/app", .method = HTTP_POST, .handler = handleAppPost, .user_ctx = this},
       {.uri = "/api/ota", .method = HTTP_POST, .handler = handleOta, .user_ctx = this},
+      {.uri = "/api/map", .method = HTTP_GET, .handler = handleMapStatus, .user_ctx = this},
+      {.uri = "/api/map", .method = HTTP_POST, .handler = handleMapTile, .user_ctx = this},
       {.uri = "/generate_204", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
       {.uri = "/gen_204", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
       {.uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
@@ -377,6 +381,64 @@ esp_err_t UmcWebServer::handleAppPost(httpd_req_t* req) {
   char json[48];
   snprintf(json, sizeof(json), "{\"accepted\":%d}", accepted);
   return sendJson(req, json, accepted > 0 ? nullptr : "503 Service Unavailable");
+}
+
+// GET /api/map - what the tile store has to say for itself.
+esp_err_t UmcWebServer::handleMapStatus(httpd_req_t* req) {
+  setCommonHeaders(req);
+  char json[160];
+  snprintf(json, sizeof(json), "{\"supported\":%s,\"tile_bytes\":%d,\"status\":\"%s\"}",
+           umcMapTileSink() != nullptr ? "true" : "false", (int)UMC_MAP_TILE_BYTES, umcMapStatus());
+  return sendJson(req, json);
+}
+
+// POST /api/map?z=&x=&y= with one raw RGB565 tile as the body.
+esp_err_t UmcWebServer::handleMapTile(httpd_req_t* req) {
+  auto* s = self(req);
+  setCommonHeaders(req);
+  if (!s->isAuthorized(req)) return sendJson(req, "{\"error\":\"Unauthorized\"}", "401 Unauthorized");
+  UmcMapTileSink sink = umcMapTileSink();
+  if (sink == nullptr) return sendJson(req, "{\"error\":\"This board has no tile storage\"}", "501 Not Implemented");
+
+  char query[96] = {0};
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+    return sendJson(req, "{\"error\":\"Need ?z=&x=&y=\"}", "400 Bad Request");
+  }
+  char zs[8] = {0}, xs[12] = {0}, ys[12] = {0};
+  if (httpd_query_key_value(query, "z", zs, sizeof(zs)) != ESP_OK ||
+      httpd_query_key_value(query, "x", xs, sizeof(xs)) != ESP_OK ||
+      httpd_query_key_value(query, "y", ys, sizeof(ys)) != ESP_OK) {
+    return sendJson(req, "{\"error\":\"Need ?z=&x=&y=\"}", "400 Bad Request");
+  }
+  if (req->content_len != UMC_MAP_TILE_BYTES) {
+    char json[128];
+    snprintf(json, sizeof(json), "{\"error\":\"A tile is %d bytes, got %d\"}", (int)UMC_MAP_TILE_BYTES,
+             (int)req->content_len);
+    return sendJson(req, json, "400 Bad Request");
+  }
+
+  uint8_t* buf = static_cast<uint8_t*>(heap_caps_malloc(UMC_MAP_TILE_BYTES, MALLOC_CAP_SPIRAM));
+  if (buf == nullptr) buf = static_cast<uint8_t*>(malloc(UMC_MAP_TILE_BYTES));
+  if (buf == nullptr) return sendJson(req, "{\"error\":\"Out of memory\"}", "507 Insufficient Storage");
+
+  size_t have = 0;
+  bool broken = false;
+  while (have < UMC_MAP_TILE_BYTES) {
+    const int got = httpd_req_recv(req, static_cast<char*>(static_cast<void*>(buf + have)),
+                                   UMC_MAP_TILE_BYTES - have);
+    if (got == HTTPD_SOCK_ERR_TIMEOUT) continue;
+    if (got <= 0) { broken = true; break; }
+    have += (size_t)got;
+  }
+  bool stored = false;
+  if (!broken) stored = sink(atoi(zs), atoi(xs), atoi(ys), buf, have);
+  free(buf);
+
+  if (broken) return sendJson(req, "{\"error\":\"Upload interrupted\"}", "400 Bad Request");
+  if (!stored) return sendJson(req, "{\"error\":\"Could not write to the card\"}", "500 Internal Server Error");
+  char json[96];
+  snprintf(json, sizeof(json), "{\"ok\":true,\"z\":%d,\"x\":%d,\"y\":%d}", atoi(zs), atoi(xs), atoi(ys));
+  return sendJson(req, json);
 }
 
 esp_err_t UmcWebServer::handleOta(httpd_req_t* req) {

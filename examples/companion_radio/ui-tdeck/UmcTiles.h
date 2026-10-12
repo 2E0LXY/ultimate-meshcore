@@ -24,6 +24,17 @@ public:
   // Returns a cached tile (UMC_TILE_BYTES bytes) or NULL when that tile isn't on the card.
   const uint16_t* tile(int z, int x, int y);
 
+  // ---- tiles arriving over WiFi ----
+  // queueTile() is called from the web server's task and blocks until the UI task has
+  // written the file: the card shares its SPI bus with the display and the radio, so only
+  // the task that draws may touch it. servicePending() does that write and is called from
+  // the UI loop.
+  bool queueTile(int z, int x, int y, const uint8_t* data, size_t len);
+  void servicePending();
+  // Writes straight away. Only safe on the UI task, which owns the SPI bus.
+  bool writeTileNow(int z, int x, int y, const uint8_t* data, size_t len);
+  bool removeTile(int z, int x, int y);
+
   // Web-Mercator helpers: world pixel coordinates at a zoom level.
   static double lonToWorldX(double lon, int z) { return (lon + 180.0) / 360.0 * UMC_TILE_PX * (1 << z); }
   static double latToWorldY(double lat, int z) {
@@ -56,6 +67,15 @@ private:
     uint16_t* px = nullptr;
   };
   void scanZooms();
+
+  // one slot, because an upload is one tile at a time
+  struct Pending {
+    volatile uint8_t state = 0;    // 0 idle, 1 waiting for the UI task, 2 written, 3 failed
+    int z = 0, x = 0, y = 0;
+    const uint8_t* data = nullptr;
+    size_t len = 0;
+  };
+  Pending _pending;
 
   Slot* _slots = nullptr;
   int _num_slots = 0;
