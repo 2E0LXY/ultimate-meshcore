@@ -67,7 +67,7 @@ private:
   void drawContactDetail();
   void applyTheme();
   int drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when,
-                 bool show_who);
+                 bool show_who, const UmcChatLog::Entry* entry = NULL);
   void drawThemePage();
   void serviceScreenShot();
   void drawThemePreview(int x, int y, int w, int h, int theme);

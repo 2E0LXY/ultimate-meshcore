@@ -137,6 +137,10 @@ public:
   UmcService& getUmc() { return umc; }
   bool umcSerialIsManager() const { return _serial == _umc_all_serial; }
   void saveChannels() { _store->saveChannels(this); }
+  // Registers the ACK a message we just sent is waiting for. The phone app's send path
+  // does this itself; a message sent from the device's own screen has to say so too, or
+  // the reply would never be matched to anything.
+  void expectAck(uint32_t ack, ContactInfo* contact);
   unsigned long umcFramesRead() const { return _umc_frames_read; }
   NetworkService& getNetwork() { return network; }
   UmcAppLink& getAppLink() { return app_link; }

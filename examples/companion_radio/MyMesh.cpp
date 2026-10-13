@@ -496,6 +496,14 @@ void MyMesh::onContactPathUpdated(const ContactInfo &contact) {
   dirty_contacts_expiry = futureMillis(LAZY_CONTACTS_WRITE_DELAY);
 }
 
+void MyMesh::expectAck(uint32_t ack, ContactInfo* contact) {
+  if (ack == 0) return;
+  expected_ack_table[next_ack_idx].msg_sent = _ms->getMillis();
+  expected_ack_table[next_ack_idx].ack = ack;
+  expected_ack_table[next_ack_idx].contact = contact;
+  next_ack_idx = (next_ack_idx + 1) % EXPECTED_ACK_TABLE_SIZE;
+}
+
 ContactInfo*  MyMesh::processAck(const uint8_t *data) {
   // see if matches any in a table
   for (int i = 0; i < EXPECTED_ACK_TABLE_SIZE; i++) {
@@ -506,6 +514,9 @@ ContactInfo*  MyMesh::processAck(const uint8_t *data) {
       memcpy(&out_frame[5], &trip_time, 4);
       _serial->writeFrame(out_frame, 9);
 
+#ifdef UMC_BUILD
+      if (umc_chatlog.markDelivered(expected_ack_table[i].ack) && _ui) _ui->notify();
+#endif
       // NOTE: the same ACK can be received multiple times!
       expected_ack_table[i].ack = 0; // clear expected hash, now that we have received ACK
       return expected_ack_table[i].contact;

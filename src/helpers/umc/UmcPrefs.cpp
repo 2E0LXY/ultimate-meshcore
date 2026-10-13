@@ -54,6 +54,12 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.units_miles = false;
   p.beep_on_msg = true;
   p.flash_on_msg = false;
+  p.ack_display = 2;
+  // The UK communities publish these; anything else is added by the operator.
+  static const char* const kRegions[] = {"yorkshire", "eng-ne", "northwest", "uk"};
+  for (size_t i = 0; i < sizeof(kRegions) / sizeof(kRegions[0]) && i < UMC_MAX_REGIONS; i++) {
+    strncpy(p.regions[i], kRegions[i], sizeof(p.regions[i]) - 1);
+  }
 }
 
 bool UmcPrefsStore::isValidPin(const char* pin) {
@@ -98,6 +104,12 @@ void UmcPrefsStore::load(UmcPrefs& p) {
     p.units_miles = nvs.getBool("miles", p.units_miles);
     p.beep_on_msg = nvs.getBool("beep", p.beep_on_msg);
     p.flash_on_msg = nvs.getBool("flash", p.flash_on_msg);
+    p.ack_display = nvs.getUChar("ackshow", p.ack_display);
+    for (int i = 0; i < UMC_MAX_REGIONS; i++) {
+      char key[10];
+      snprintf(key, sizeof(key), "region%d", i);
+      if (nvs.isKey(key)) nvs.getString(key, p.regions[i], sizeof(p.regions[i]));
+    }
     if (nvs.isKey("chscope")) nvs.getString("chscope", p.ch_scopes, sizeof(p.ch_scopes));
     nvs.end();
   }
@@ -142,6 +154,12 @@ bool UmcPrefsStore::save(const UmcPrefs& p) {
   nvs.putBool("miles", p.units_miles);
   nvs.putBool("beep", p.beep_on_msg);
   nvs.putBool("flash", p.flash_on_msg);
+  nvs.putUChar("ackshow", p.ack_display);
+  for (int i = 0; i < UMC_MAX_REGIONS; i++) {
+    char key[10];
+    snprintf(key, sizeof(key), "region%d", i);
+    nvs.putString(key, p.regions[i]);
+  }
   nvs.putString("chscope", p.ch_scopes);
   nvs.end();
   return true;

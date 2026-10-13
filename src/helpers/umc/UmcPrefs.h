@@ -33,6 +33,14 @@ struct UmcPrefs {
   bool units_miles;            // distances in miles instead of kilometres
   bool beep_on_msg;            // a short tone when a message arrives
   bool flash_on_msg;           // the screen flashes when a message arrives
+  // How much a sent message says about where it got to:
+  //   0 off, 1 a coloured mark, 2 the mark plus the count of acks or relays
+  uint8_t ack_display;
+  // Regions this node knows about, as the mesh's own naming rules allow: up to 29 bytes of
+  // lowercase letters, digits and hyphens. The first is used when a channel has no scope
+  // of its own. Communities agree these between themselves, so they are typed in, not
+  // built in.
+  char regions[8][30];
   // Region scope per channel, as "#yorkshire=yorkshire;#northeast=eng-ne". A channel not
   // listed uses the default scope. This is how the community guides ask channels to be
   // set up - one region per channel, not one for everything.
@@ -40,6 +48,7 @@ struct UmcPrefs {
 };
 
 #define UMC_QUICK_REPLIES 6
+#define UMC_MAX_REGIONS 8
 
 class UmcPrefsStore {
 public:

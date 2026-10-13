@@ -63,6 +63,11 @@ public:
   bool channelScope(const char* channel_name, char* scope, size_t scope_size) const;
   // Sets (or with scope "-", clears) one channel's scope. False if the table is full.
   bool setChannelScope(const char* channel_name, const char* scope);
+  // A region name the mesh will accept: up to 29 bytes, lowercase letters, digits and
+  // hyphens. Names must match exactly between nodes, so anything else is refused.
+  static bool isValidRegionName(const char* name);
+  bool addRegion(const char* name);       // false when full or already there
+  bool removeRegion(const char* name);
   UmcHost* host() const { return _host; }
   NetworkService* network() const { return _network; }
   UmcUpdater* updater() const { return _updater; }

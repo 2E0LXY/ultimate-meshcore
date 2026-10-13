@@ -58,6 +58,8 @@ static const UiTheme kThemes[] = {
   {"Mono",    0x0000, 0x10A2, 0x2945, 0xFFFF, 0x9CD3, 0xFFFF, 0xFFFF, 0x0000, 0x18E3, 0xFFFF},
 };
 static const int kThemeCount = sizeof(kThemes) / sizeof(kThemes[0]);
+// How long a direct message waits for its acknowledgement before it is called failed.
+static const unsigned long kAckWaitMs = 90000;
 static int g_theme = 0;
 #define TH (kThemes[g_theme])
 
@@ -943,7 +945,7 @@ void UITask::applyTheme() {
 // name sit outside the bubble rather than inside it, and a run of messages from the same
 // person shares one heading.
 int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when,
-                       bool show_who) {
+                       bool show_who, const UmcChatLog::Entry* entry) {
   const int avatar = mine ? 0 : 18;                  // the column the incoming avatar sits in
   const int max_w = SCR_W - 76 - avatar;
   const int pad = 5;
@@ -1015,9 +1017,32 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
   }
 
   if (mine) {
+    // What became of it, in colour: green once the recipient acknowledged it, amber while
+    // that is still outstanding, red once it has been too long for an answer to be coming.
+    // Channel messages count the repeaters heard passing it on instead.
+    const uint8_t show = the_mesh.getUmc().prefs().ack_display;
     int x = SCR_W - 6;
-    drawIcon(x - 9, hy + 1, IC_CHECK, TH.dim, 8);    // sent
-    x -= 12;
+    if (show > 0 && entry != NULL) {
+      const bool waiting = entry->expect_ack != 0 && !entry->delivered;
+      const bool gave_up = waiting && (millis() - entry->sent_ms) > kAckWaitMs;
+      uint16_t col = TH.dim;
+      uint8_t mark = IC_CHECK;
+      if (entry->delivered) col = C_OK;
+      else if (gave_up) { col = C_BAD; mark = IC_DOT; }
+      else if (waiting) { col = C_WARN; mark = IC_DOT; }
+      else if (entry->relays > 0) col = C_OK;
+
+      if (show > 1 && (entry->relays > 0 || entry->delivered)) {
+        char count[12];
+        // a direct message has the one acknowledgement; a channel message has relays
+        snprintf(count, sizeof(count), "%ux", entry->relays > 0 ? (unsigned)entry->relays : 1u);
+        const int cw = textWidth(count);
+        text(x - cw, hy, count, col);
+        x -= cw + 3;
+      }
+      drawIcon(x - 9, hy + 1, mark, col, 8);
+      x -= 12;
+    }
     const int sw = textWidth(stamp);
     text(x - sw, hy, stamp, TH.dim);
   } else {
@@ -1120,7 +1145,7 @@ void UITask::drawMessages() {
                           memcmp(prev->key, e->key, sizeof(e->key)) == 0 &&
                           strcmp(prev->from, e->from) == 0 &&
                           e->epoch && prev->epoch && e->epoch >= prev->epoch && e->epoch - prev->epoch < 300;
-    y = drawBubble(y, who, e->text, e->outgoing, _msg_sel == i, e->epoch, !same_run);
+    y = drawBubble(y, who, e->text, e->outgoing, _msg_sel == i, e->epoch, !same_run, e);
     if (_msg_rows < (int)(sizeof(_msg_row_y) / sizeof(_msg_row_y[0]))) {
       _msg_row_y[_msg_rows] = y;            // top of this bubble
       _msg_row_bottom[_msg_rows] = bottom_before;
@@ -1888,10 +1913,25 @@ static const RadioBand kBands[] = {
 static const int kBandCount = sizeof(kBands) / sizeof(kBands[0]);
 static const int kTxSteps[] = {2, 5, 8, 11, 14, 17, 20, 22};
 static const int kTxCount = sizeof(kTxSteps) / sizeof(kTxSteps[0]);
-// Region scopes decide which repeaters forward a packet. These are the ones the UK
-// communities publish; "-" leaves messages unscoped.
-static const char* kScopes[] = {"-", "yorkshire", "eng-ne", "northwest", "eng-yh", "uk"};
-static const int kScopeCount = sizeof(kScopes) / sizeof(kScopes[0]);
+// Region scopes decide which repeaters forward a packet. The list comes from the node's
+// own settings, so operators can add whatever their community agreed; "-" is unscoped.
+static int scopeCount() {
+  int n = 1;                                            // the "-" entry always exists
+  for (int i = 0; i < UMC_MAX_REGIONS; i++) {
+    if (the_mesh.getUmc().prefs().regions[i][0]) n++;
+  }
+  return n;
+}
+
+static const char* scopeAt(int i) {
+  if (i <= 0) return "-";
+  int seen = 0;
+  for (int j = 0; j < UMC_MAX_REGIONS; j++) {
+    if (the_mesh.getUmc().prefs().regions[j][0] == 0) continue;
+    if (++seen == i) return the_mesh.getUmc().prefs().regions[j];
+  }
+  return "-";
+}
 
 // Adds a hashtag channel by name. The key is worked out from the name the same way the
 // phone apps do it, so everyone who types "#yorkshire" lands on the same channel. Returns
@@ -1989,7 +2029,7 @@ int UITask::setupRowCount() const {
     case SP_WIFI: return 5;                    // scan, network, password, connect, back
     case SP_WIFI_PICK: return _wifi_found + 1; // networks, back
     case SP_BLE: return 3;                     // on/off, PIN, back
-    case SP_REGION: return kScopeCount + 3;
+    case SP_REGION: return scopeCount() + 4;
     case SP_GPS: return 2;
     case SP_FW: return 4;                      // version, check, install, back
     case SP_CHANNELS: return MAX_GROUP_CHANNELS > 12 ? 14 : MAX_GROUP_CHANNELS + 2;   // channels, add, back
@@ -1997,7 +2037,7 @@ int UITask::setupRowCount() const {
     case SP_CONTACTS_CFG: return 8;
     case SP_TELEMETRY: return 4;
     case SP_CONSOLE: return 2;
-    case SP_DISPLAY: return 8;   // theme, touch, brightness, four switches, back
+    case SP_DISPLAY: return 9;   // theme, touch, brightness, five switches, back
     case SP_THEME: return 1;
     case SP_QUICK: return UMC_QUICK_REPLIES + 1;
     default: return 1;
@@ -2099,19 +2139,24 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
       }
       break;
     case SP_REGION:
-      if (row == kScopeCount) {
+      if (row == scopeCount()) {
         snprintf(label, label_n, "Yorkshire starter");
         snprintf(value, value_n, "%s", _setup_confirm == row ? "tap again" : "radio, scope, channels");
         break;
       }
-      if (row == kScopeCount + 1) {
+      if (row == scopeCount() + 2) {
+        snprintf(label, label_n, "Add a region");
+        snprintf(value, value_n, "type its exact name");
+        break;
+      }
+      if (row == scopeCount() + 1) {
         snprintf(label, label_n, "Repeater commands");
         snprintf(value, value_n, "region put yorkshire ...");
         break;
       }
-      if (row < kScopeCount) {
-        snprintf(label, label_n, "%s", strcmp(kScopes[row], "-") == 0 ? "No region (whole mesh)" : kScopes[row]);
-        snprintf(value, value_n, "%s", strcmp(umcCli("get scope"), kScopes[row]) == 0 ? "in use" : "");
+      if (row < scopeCount()) {
+        snprintf(label, label_n, "%s", strcmp(scopeAt(row), "-") == 0 ? "No region (whole mesh)" : scopeAt(row));
+        snprintf(value, value_n, "%s", strcmp(umcCli("get scope"), scopeAt(row)) == 0 ? "in use" : "");
       } else {
         snprintf(label, label_n, "< Back");
       }
@@ -2218,6 +2263,10 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
           snprintf(label, label_n, "Flash on a message");
           snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().flash_on_msg ? "on" : "off");
           break;
+        case 7:
+          snprintf(label, label_n, "Delivery marks");
+          snprintf(value, value_n, "%s", umcCli("get ack.show"));
+          break;
         default:
           snprintf(label, label_n, "< Back");
           break;
@@ -2249,7 +2298,8 @@ void UITask::drawSetup() {
 
   if (_editing) {   // typing line
     fill(0, top, SCR_W, BODY_H, C_BG);
-    static const char* what[] = {"", "Node name", "WiFi network", "WiFi password", "Bluetooth PIN", "Region name",
+    static const char* what[] = {"", "Node name", "WiFi network", "WiFi password", "Bluetooth PIN",
+                                 "Region name: lowercase, digits and hyphens",
                                  "Channel name (without the #)", "Command", "Quick reply"};
     textF(8, top + 12, what[_edit_what], C_DIM, F_SMALL);
     fill(6, top + 32, SCR_W - 12, 28, C_CARD);
@@ -2433,10 +2483,17 @@ void UITask::setupAction(int row) {
       break;
 
     case SP_REGION:
-      if (row < kScopeCount) {
-        snprintf(cmd, sizeof(cmd), "set scope %s", kScopes[row]);
+      if (row < scopeCount()) {
+        snprintf(cmd, sizeof(cmd), "set scope %s", scopeAt(row));
         StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
-      } else if (row == kScopeCount + 1) {
+      } else if (row == scopeCount() + 2) {
+        _editing = true;
+        _edit_what = SE_REGION;
+        _edit_secret = false;
+        _edit_buf[0] = 0;
+        _edit_len = 0;
+        return;
+      } else if (row == scopeCount() + 1) {
         // What a Yorkshire repeater operator has to enter on the repeater itself.
         StrHelper::strncpy(_console_out,
                            "On each repeater:\nregion put yorkshire\nregion default yorkshire\n"
@@ -2444,7 +2501,7 @@ void UITask::setupAction(int row) {
                            sizeof(_console_out));
         setupOpen(SP_CONSOLE);
         return;
-      } else if (row == kScopeCount) {
+      } else if (row == scopeCount()) {
         // The published MeshCore Yorkshire setup: the shared radio profile, the regional
         // scope, and the three public channels.
         if (_setup_confirm != row) {           // it changes the radio, so ask first
@@ -2596,6 +2653,15 @@ void UITask::setupAction(int row) {
       } else if (row == 2) {
         setBrightness(brightness() >= 100 ? 20 : brightness() + 20);
         snprintf(_setup_status, sizeof(_setup_status), "Backlight %d%%", (int)brightness());
+      } else if (row == 7) {
+        static const char* const modes[3] = {"off", "mark", "count"};
+        const char* now = umcCli("get ack.show");
+        int next = 0;
+        for (int i = 0; i < 3; i++) {
+          if (strcmp(now, modes[i]) == 0) { next = (i + 1) % 3; break; }
+        }
+        snprintf(cmd2, sizeof(cmd2), "set ack.show %s", modes[next]);
+        StrHelper::strncpy(_setup_status, umcCli(cmd2), sizeof(_setup_status));
       } else if (row >= 3 && row <= 6) {
         static const char* const names[4] = {"clock12", "miles", "beep", "flash"};
         const char* name = names[row - 3];
@@ -2683,6 +2749,12 @@ void UITask::setupEditDone() {
     case SE_COMMAND:
       StrHelper::strncpy(_console_cmd, _edit_buf, sizeof(_console_cmd));
       consoleRun(_console_cmd);
+      break;
+    case SE_REGION:
+      if (_edit_len > 0) {
+        snprintf(cmd, sizeof(cmd), "region add %s", _edit_buf);
+        StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      }
       break;
     case SE_QUICK:
       snprintf(cmd, sizeof(cmd), "set quick%d %s", _edit_idx + 1, _edit_buf);
@@ -3051,6 +3123,10 @@ void UITask::sendCompose() {
       showAlert("Send failed", 1500);
     } else {
       umc_chatlog.addDirect(_to_key, "", _compose, ts, true);
+      // remember what the recipient will send back, so the message can show as delivered
+      the_mesh.expectAck(ack, c);
+      UmcChatLog::Entry* sent = umc_chatlog.newestOutgoing();
+      if (sent != NULL) sent->expect_ack = ack;
       showAlert(res == MSG_SEND_SENT_FLOOD ? "Sent (flood)" : "Sent", 900);
     }
   }

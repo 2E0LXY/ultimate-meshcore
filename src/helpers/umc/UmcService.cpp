@@ -537,6 +537,46 @@ void UmcService::runCommandsNow(const char* cmds, char* out, size_t out_size) {
 // Desktop / app bridge: the same data as the web API, for a computer connected over USB or
 // Bluetooth. Runs on the loop task. Requests: "info", "routes", "traffic", "scan",
 // "scan refresh", "cli <commands>" (newline-separated). Writes JSON into out.
+bool UmcService::isValidRegionName(const char* name) {
+  if (name == nullptr) return false;
+  const size_t n = strlen(name);
+  if (n == 0 || n > 29) return false;
+  for (size_t i = 0; i < n; i++) {
+    const char c = name[i];
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+    if (!ok) return false;
+  }
+  return true;
+}
+
+bool UmcService::addRegion(const char* name) {
+  if (!isValidRegionName(name)) return false;
+  for (int i = 0; i < UMC_MAX_REGIONS; i++) {
+    if (strcmp(_prefs.regions[i], name) == 0) return false;     // already known
+  }
+  for (int i = 0; i < UMC_MAX_REGIONS; i++) {
+    if (_prefs.regions[i][0] == 0) {
+      StrHelper::strncpy(_prefs.regions[i], name, sizeof(_prefs.regions[i]));
+      UmcPrefsStore::save(_prefs);
+      return true;
+    }
+  }
+  return false;                                                 // no room
+}
+
+bool UmcService::removeRegion(const char* name) {
+  for (int i = 0; i < UMC_MAX_REGIONS; i++) {
+    if (strcmp(_prefs.regions[i], name) != 0) continue;
+    for (int j = i; j < UMC_MAX_REGIONS - 1; j++) {             // close the gap
+      StrHelper::strncpy(_prefs.regions[j], _prefs.regions[j + 1], sizeof(_prefs.regions[j]));
+    }
+    _prefs.regions[UMC_MAX_REGIONS - 1][0] = 0;
+    UmcPrefsStore::save(_prefs);
+    return true;
+  }
+  return false;
+}
+
 bool UmcService::channelScope(const char* channel_name, char* scope, size_t scope_size) const {
   if (channel_name == nullptr || channel_name[0] == 0 || scope_size == 0) return false;
   const size_t want = strlen(channel_name);
@@ -858,6 +898,51 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
     const char* scope = space + 1;
     while (*scope == ' ') scope++;
     snprintf(reply, reply_size, setChannelScope(chan, scope) ? "OK" : "Err - table full or bad name");
+    return true;
+  }
+  // how much a sent message reports: off, mark, or mark and count
+  // the regions this node knows about
+  if (strcmp(command, "get regions") == 0) {
+    size_t pos = 0;
+    reply[0] = 0;
+    for (int i = 0; i < UMC_MAX_REGIONS && pos + 4 < reply_size; i++) {
+      if (_prefs.regions[i][0] == 0) continue;
+      pos += snprintf(&reply[pos], reply_size - pos, "%s%s", pos ? "\n" : "> ", _prefs.regions[i]);
+    }
+    if (pos == 0) snprintf(reply, reply_size, "> none");
+    return true;
+  }
+  if (startsWith(command, "region add ")) {
+    const char* name = command + 11;
+    if (!isValidRegionName(name)) {
+      snprintf(reply, reply_size, "Err - up to 29 lowercase letters, digits and hyphens");
+    } else {
+      snprintf(reply, reply_size, addRegion(name) ? "OK" : "Err - already known, or no room for more");
+    }
+    return true;
+  }
+  if (startsWith(command, "region del ")) {
+    snprintf(reply, reply_size, removeRegion(command + 11) ? "OK" : "Err - not found");
+    return true;
+  }
+  if (strcmp(command, "get ack.show") == 0) {
+    static const char* const names[3] = {"off", "mark", "count"};
+    snprintf(reply, reply_size, "> %s", names[_prefs.ack_display > 2 ? 2 : _prefs.ack_display]);
+    return true;
+  }
+  if (startsWith(command, "set ack.show ")) {
+    const char* v = command + 13;
+    int mode = -1;
+    if (strcmp(v, "off") == 0) mode = 0;
+    else if (strcmp(v, "mark") == 0) mode = 1;
+    else if (strcmp(v, "count") == 0) mode = 2;
+    if (mode < 0) {
+      snprintf(reply, reply_size, "Err - use off|mark|count");
+    } else {
+      _prefs.ack_display = (uint8_t)mode;
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK");
+    }
     return true;
   }
   if (strcmp(command, "get quick") == 0) {
