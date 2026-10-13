@@ -34,6 +34,9 @@ public:
   // Writes straight away. Only safe on the UI task, which owns the SPI bus.
   bool writeTileNow(int z, int x, int y, const uint8_t* data, size_t len);
   bool removeTile(int z, int x, int y);
+  // Deletes every /maps/<zoom>/<x>/<y>.bin and the numbered folders left empty. Anything
+  // else on the card, even inside /maps, is left where it is. Returns tiles removed.
+  int clearAll();
 
   // Web-Mercator helpers: world pixel coordinates at a zoom level.
   static double lonToWorldX(double lon, int z) { return (lon + 180.0) / 360.0 * UMC_TILE_PX * (1 << z); }
@@ -69,8 +72,12 @@ private:
   void scanZooms();
 
   // one slot, because an upload is one tile at a time
+  // The hand-off between the web task and the UI task. The web task may only abandon a
+  // tile the UI task has not started on; once writing has begun it waits for the result,
+  // because the data it would free is the data being written.
+  enum : uint8_t { P_IDLE = 0, P_QUEUED = 1, P_DONE = 2, P_FAILED = 3, P_WRITING = 4 };
   struct Pending {
-    volatile uint8_t state = 0;    // 0 idle, 1 waiting for the UI task, 2 written, 3 failed
+    uint8_t state = 0;    // one of the P_ values, only ever touched through __atomic builtins
     int z = 0, x = 0, y = 0;
     const uint8_t* data = nullptr;
     size_t len = 0;

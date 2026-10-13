@@ -1,6 +1,7 @@
 #include "UmcWebServer.h"
 
 #include "UmcMapSink.h"
+#include "UmcScreenShot.h"
 #include "UmcLog.h"
 
 #include "UmcService.h"
@@ -110,6 +111,7 @@ bool UmcWebServer::start() {
       {.uri = "/api/ota", .method = HTTP_POST, .handler = handleOta, .user_ctx = this},
       {.uri = "/api/map", .method = HTTP_GET, .handler = handleMapStatus, .user_ctx = this},
       {.uri = "/api/map", .method = HTTP_POST, .handler = handleMapTile, .user_ctx = this},
+      {.uri = "/api/screen", .method = HTTP_GET, .handler = handleScreen, .user_ctx = this},
       {.uri = "/generate_204", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
       {.uri = "/gen_204", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
       {.uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = handleCaptive, .user_ctx = this},
@@ -383,6 +385,58 @@ esp_err_t UmcWebServer::handleAppPost(httpd_req_t* req) {
   return sendJson(req, json, accepted > 0 ? nullptr : "503 Service Unavailable");
 }
 
+// GET /api/screen?page=home - the page as a 24-bit BMP, drawn off-screen.
+esp_err_t UmcWebServer::handleScreen(httpd_req_t* req) {
+  auto* s = self(req);
+  setCommonHeaders(req);
+  if (!s->isAuthorized(req) && !umcScreenShareOpen()) {
+    return sendJson(req, "{\"error\":\"Screen sharing is off - run 'screen share' on the device\"}",
+                    "403 Forbidden");
+  }
+  UmcShotFn shot = umcScreenShot();
+  if (shot == nullptr) return sendJson(req, "{\"error\":\"This board has no screen\"}", "501 Not Implemented");
+
+  char query[64] = {0}, page[32] = "home";
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+    httpd_query_key_value(query, "page", page, sizeof(page));
+  }
+  const uint16_t* px = nullptr;
+  int w = 0, h = 0;
+  if (!shot(page, &px, &w, &h) || px == nullptr || w <= 0 || h <= 0) {
+    return sendJson(req, "{\"error\":\"No such page, or the screen is busy\"}", "404 Not Found");
+  }
+
+  // a plain bottom-up 24-bit BMP: every viewer opens it and it needs no encoder
+  const uint32_t row = (uint32_t)w * 3;           // 320 * 3 is already a multiple of four
+  const uint32_t image = row * (uint32_t)h;
+  uint8_t head[54] = {'B', 'M'};
+  auto put32 = [&](int at, uint32_t v) { for (int i = 0; i < 4; i++) head[at + i] = (v >> (8 * i)) & 0xFF; };
+  put32(2, 54 + image);
+  put32(10, 54);
+  put32(14, 40);
+  put32(18, (uint32_t)w);
+  put32(22, (uint32_t)h);
+  head[26] = 1;
+  head[28] = 24;
+  put32(34, image);
+  httpd_resp_set_type(req, "image/bmp");
+  httpd_resp_send_chunk(req, (const char*)head, sizeof(head));
+
+  uint8_t line[320 * 3];
+  if (w > 320) w = 320;
+  for (int y = h - 1; y >= 0; y--) {
+    const uint16_t* src = px + y * w;
+    for (int x = 0; x < w; x++) {
+      const uint16_t c = src[x];
+      line[x * 3 + 0] = (uint8_t)((c & 0x1F) << 3);          // blue
+      line[x * 3 + 1] = (uint8_t)(((c >> 5) & 0x3F) << 2);   // green
+      line[x * 3 + 2] = (uint8_t)(((c >> 11) & 0x1F) << 3);  // red
+    }
+    if (httpd_resp_send_chunk(req, (const char*)line, w * 3) != ESP_OK) return ESP_FAIL;
+  }
+  return httpd_resp_send_chunk(req, nullptr, 0);
+}
+
 // GET /api/map - what the tile store has to say for itself.
 esp_err_t UmcWebServer::handleMapStatus(httpd_req_t* req) {
   setCommonHeaders(req);
@@ -415,6 +469,13 @@ esp_err_t UmcWebServer::handleMapTile(httpd_req_t* req) {
       httpd_query_key_value(query, "x", xs, sizeof(xs)) != ESP_OK ||
       httpd_query_key_value(query, "y", ys, sizeof(ys)) != ESP_OK) {
     return sendJson(req, "{\"error\":\"Need ?z=&x=&y=\"}", "400 Bad Request");
+  }
+  // whole numbers only: atoi() would turn "z=abc" into tile 0/0/0 and write it
+  for (const char* v : {zs, xs, ys}) {
+    if (v[0] == 0) return sendJson(req, "{\"error\":\"z, x and y must be numbers\"}", "400 Bad Request");
+    for (const char* c = v; *c; c++) {
+      if (*c < '0' || *c > '9') return sendJson(req, "{\"error\":\"z, x and y must be numbers\"}", "400 Bad Request");
+    }
   }
   if (req->content_len != UMC_MAP_TILE_BYTES) {
     char json[128];

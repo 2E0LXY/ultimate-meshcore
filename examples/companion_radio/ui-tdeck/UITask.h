@@ -69,6 +69,7 @@ private:
   int drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when,
                  bool show_who);
   void drawThemePage();
+  void serviceScreenShot();
   void drawThemePreview(int x, int y, int w, int h, int theme);
   void drawAlert();
   uint32_t screenSignature();
@@ -140,6 +141,7 @@ private:
   bool _contact_detail = false;     // the full page for the selected contact
   int _forget_confirm = -1;         // contact waiting for a second tap to be forgotten
   bool _quick_open = false;         // the canned-reply panel is showing
+  unsigned long _flash_until = 0;   // when a new-message flash ends
   int _edit_idx = 0;                // which quick reply is being typed into
 
   // map view

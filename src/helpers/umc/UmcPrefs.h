@@ -32,6 +32,11 @@ struct UmcPrefs {
   bool clock_12h;              // show times as am/pm rather than 24 hour
   bool units_miles;            // distances in miles instead of kilometres
   bool beep_on_msg;            // a short tone when a message arrives
+  bool flash_on_msg;           // the screen flashes when a message arrives
+  // Region scope per channel, as "#yorkshire=yorkshire;#northeast=eng-ne". A channel not
+  // listed uses the default scope. This is how the community guides ask channels to be
+  // set up - one region per channel, not one for everything.
+  char ch_scopes[160];
 };
 
 #define UMC_QUICK_REPLIES 6

@@ -7,20 +7,27 @@ them as /maps/<zoom>/<x>/<y>.bin on the card.
 
 Examples
 --------
-Area around Leeds, zoom 10 to 13, onto a card mounted at E:\\ :
+Area around Leeds, zoom 10 to 13, from a tile service whose terms allow offline use, onto
+a card mounted at E:\\ :
 
-    python scripts/umc_make_map_tiles.py --bbox 53.5,-2.0,54.0,-1.2 --zoom 10-13 --out E:/maps
+    python scripts/umc_make_map_tiles.py --bbox 53.5,-2.0,54.0,-1.2 --zoom 10-13 \\
+        --url "https://tiles.example.com/{z}/{x}/{y}.png?key=YOUR_KEY" --out E:/maps
 
 From tiles you already have on disk (any layout PNG/JPG, named <z>/<x>/<y>.png):
 
     python scripts/umc_make_map_tiles.py --from-dir ./tiles --out E:/maps
 
-Tile servers have usage policies. OpenStreetMap's standard tiles are fine for small
-personal areas (see https://operations.osmfoundation.org/policies/tiles/) but not for bulk
-downloads: keep the area small, or point --url at your own or a commercial tile source.
+There is deliberately no default source. OpenStreetMap's own tile servers are run by
+volunteers and their usage policy does not allow downloading areas for offline use
+(https://operations.osmfoundation.org/policies/tiles/) - a client that tries is sent an
+"Access blocked" picture in place of every tile. Use a provider whose terms allow offline
+caching, your own tile server, or tiles you already have (--from-dir). If the server sends
+the same picture for many different tiles, this tool stops rather than filling a card with
+copies of an error page.
 Map data (c) OpenStreetMap contributors, ODbL.
 """
 import argparse
+import hashlib
 import math
 import os
 import sys
@@ -28,7 +35,6 @@ import time
 import urllib.request
 
 TILE = 256
-DEFAULT_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 USER_AGENT = "UltimateMeshCore-tile-tool/1.0 (personal offline maps)"
 
 
@@ -65,7 +71,7 @@ def main():
     ap.add_argument("--out", required=True, help="output folder, e.g. E:/maps (the card's /maps)")
     ap.add_argument("--bbox", help="lat1,lon1,lat2,lon2 area to cover")
     ap.add_argument("--zoom", default="11-14", help="zoom level or range, e.g. 10-14")
-    ap.add_argument("--url", default=DEFAULT_URL, help="tile URL template with {z}/{x}/{y}")
+    ap.add_argument("--url", help="tile URL template with {z}/{x}/{y}, from a source that allows offline use")
     ap.add_argument("--from-dir", help="convert tiles already downloaded into <dir>/<z>/<x>/<y>.png instead of downloading")
     ap.add_argument("--delay", type=float, default=0.2, help="seconds between downloads (be kind to tile servers)")
     ap.add_argument("--max-tiles", type=int, default=4000, help="safety limit")
@@ -95,6 +101,11 @@ def main():
     else:
         if not args.bbox:
             sys.exit("Give --bbox lat1,lon1,lat2,lon2 (or --from-dir)")
+        if not args.url:
+            sys.exit("Give --url for a tile source whose terms allow offline use (see the notes at the top).")
+        if "tile.openstreetmap.org" in args.url:
+            sys.exit("OpenStreetMap's own tile servers do not allow downloading for offline use.\n"
+                     "Use a provider that does, your own server, or --from-dir.")
         lat1, lon1, lat2, lon2 = (float(v) for v in args.bbox.split(","))
         for z in range(z0, z1 + 1):
             x0, y0 = deg2tile(max(lat1, lat2), min(lon1, lon2), z)
@@ -108,6 +119,7 @@ def main():
 
     print(f"{len(jobs)} tiles -> {args.out}  ({len(jobs) * TILE * TILE * 2 / 1e6:.1f} MB)")
     done = 0
+    seen = {}            # image hash -> how many tiles came back as exactly that picture
     for z, x, y, path in jobs:
         try:
             if path:
@@ -117,7 +129,17 @@ def main():
                 req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
                 with urllib.request.urlopen(req, timeout=30) as r:
                     import io
-                    img = Image.open(io.BytesIO(r.read()))
+                    body = r.read()
+                # A blocked client gets one "access blocked" picture for every tile, with a
+                # normal 200 status. Real map tiles of different places are never identical
+                # in bulk, so many repeats mean the server is refusing, not serving.
+                digest = hashlib.md5(body).hexdigest()
+                seen[digest] = seen.get(digest, 0) + 1
+                if seen[digest] >= 8 and seen[digest] > done // 2:
+                    sys.exit(f"Stopped: the server sent the same image for {seen[digest]} different tiles.\n"
+                             "That is an error or block page, not a map. Nothing more was written; "
+                             "delete what was saved and check the --url and its terms.")
+                img = Image.open(io.BytesIO(body))
                 time.sleep(args.delay)
             save(args.out, z, x, y, to_rgb565(img))
             done += 1

@@ -1,6 +1,7 @@
 #include "UITask.h"
 
 #include <helpers/umc/UmcMapSink.h>
+#include <helpers/umc/UmcScreenShot.h>
 
 #include <Adafruit_ST7789.h>
 #include <Fonts/FreeSans9pt7b.h>
@@ -14,6 +15,7 @@
 #include "target.h"
 
 #include <WiFi.h>
+#include <driver/i2s.h>
 #include <ctype.h>
 #include <math.h>
 #include <time.h>
@@ -71,7 +73,20 @@ static int g_theme = 0;
 #define C_BAD 0xF9A6
 #define C_ME 0x1C9F
 
-static Adafruit_ST7789* gfx() { return display.gfx(); }
+// Everything is drawn through gfx(). Normally that is the screen; while a screenshot is
+// being taken it is an off-screen canvas of the same size, so the same code paints both.
+static GFXcanvas16* s_canvas = nullptr;
+static bool s_to_canvas = false;
+static Adafruit_GFX* gfx() {
+  return s_to_canvas ? static_cast<Adafruit_GFX*>(s_canvas) : static_cast<Adafruit_GFX*>(display.gfx());
+}
+
+// Bitmaps go to the display's own bulk writer: through the base class they would be sent a
+// pixel at a time, which is far too slow for map tiles.
+static void blit(int x, int y, const uint16_t* px, int w, int h) {
+  if (s_to_canvas) s_canvas->drawRGBBitmap(x, y, const_cast<uint16_t*>(px), w, h);
+  else display.gfx()->drawRGBBitmap(x, y, const_cast<uint16_t*>(px), w, h);
+}
 
 static void fill(int x, int y, int w, int h, uint16_t c) { gfx()->fillRect(x, y, w, h, c); }
 
@@ -483,9 +498,45 @@ static bool umcTileSinkThunk(int z, int x, int y, const uint8_t* data, size_t le
   return s_tiles->queueTile(z, x, y, data, len);
 }
 
+// Clears every tile off the card; the console runs on the UI task, so the bus is ours.
+static int umcTileClearThunk() { return s_tiles != nullptr ? s_tiles->clearAll() : -1; }
+
 // Clears up after the self-test, again only from the UI task.
 static bool umcTileRemoveThunk(int z, int x, int y) {
   return s_tiles != nullptr && s_tiles->removeTile(z, x, y);
+}
+
+enum : uint8_t { SHOT_IDLE = 0, SHOT_QUEUED = 1, SHOT_DONE = 2, SHOT_FAILED = 3, SHOT_WORKING = 4 };
+static uint8_t s_shot_state = SHOT_IDLE;
+static char s_shot_page[32];
+
+static bool umcShotThunk(const char* page, const uint16_t** pixels, int* width, int* height) {
+  if (__atomic_load_n(&s_shot_state, __ATOMIC_ACQUIRE) != SHOT_IDLE) return false;
+  StrHelper::strncpy(s_shot_page, page ? page : "home", sizeof(s_shot_page));
+  __atomic_store_n(&s_shot_state, SHOT_QUEUED, __ATOMIC_RELEASE);
+  for (int waited = 0;; waited += 5) {
+    const uint8_t s = __atomic_load_n(&s_shot_state, __ATOMIC_ACQUIRE);
+    if (s == SHOT_DONE || s == SHOT_FAILED) break;
+    if (s == SHOT_QUEUED && waited >= 5000) {
+      uint8_t expect = SHOT_QUEUED;
+      if (__atomic_compare_exchange_n(&s_shot_state, &expect, SHOT_IDLE, false, __ATOMIC_ACQ_REL,
+                                      __ATOMIC_ACQUIRE)) {
+        return false;
+      }
+      continue;
+    }
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+  const bool ok = __atomic_load_n(&s_shot_state, __ATOMIC_ACQUIRE) == SHOT_DONE;
+  // The canvas is only repainted when the next request comes in, and only the web server
+  // asks, one request at a time - so it stays valid while the reply is sent.
+  if (ok) {
+    *pixels = s_canvas->getBuffer();
+    *width = s_canvas->width();
+    *height = s_canvas->height();
+  }
+  __atomic_store_n(&s_shot_state, SHOT_IDLE, __ATOMIC_RELEASE);
+  return ok;
 }
 
 static const char* umcTileStatusThunk() { return s_tiles != nullptr ? s_tiles->status() : "no display task"; }
@@ -496,7 +547,7 @@ void UITask::begin(DisplayDriver* disp, SensorManager* sensors, NodePrefs* node_
   _prefs = node_prefs;
   if (_display) _display->turnOn();
   // start screen: full-screen artwork, with the MeshCore version over it
-  gfx()->drawRGBBitmap(0, 0, const_cast<uint16_t*>(UMC_SPLASH), UMC_SPLASH_W, UMC_SPLASH_H);
+  blit(0, 0, UMC_SPLASH, UMC_SPLASH_W, UMC_SPLASH_H);
   text(8, 224, "MeshCore " FIRMWARE_VERSION, C_DIM);
   delay(2500);
   _input.begin(SCR_W, SCR_H, the_mesh.getUmc().prefs().touch_map);
@@ -507,6 +558,8 @@ void UITask::begin(DisplayDriver* disp, SensorManager* sensors, NodePrefs* node_
   umcSetMapTileSink(umcTileSinkThunk);
   umcSetMapStatusFn(umcTileStatusThunk);
   umcSetMapRemoveFn(umcTileRemoveThunk);
+  umcSetMapClearFn(umcTileClearThunk);
+  umcSetScreenShot(umcShotThunk);
 #ifdef PIN_TFT_LEDA_CTL
   pinMode(PIN_TFT_LEDA_CTL, OUTPUT);
   digitalWrite(PIN_TFT_LEDA_CTL, HIGH);
@@ -547,10 +600,53 @@ void UITask::showAlert(const char* t, int duration_millis) {
 
 void UITask::msgRead(int) { _dirty = true; }
 
+// The T-Deck's speaker amplifier sits on I2S: word select 5, bit clock 7, data 6. The
+// driver is only installed the first time a beep is wanted, so a quiet device pays nothing.
+#ifndef TDECK_I2S_WS
+  #define TDECK_I2S_WS 5
+  #define TDECK_I2S_BCK 7
+  #define TDECK_I2S_DOUT 6
+#endif
+static int8_t s_i2s_state = 0;   // 0 not tried, 1 ready, -1 failed: stay quiet
+
+static void messageBeep() {
+  if (s_i2s_state == 0) {
+    i2s_config_t cfg = {};
+    cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
+    cfg.sample_rate = 16000;
+    cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+    cfg.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+    cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+    cfg.dma_buf_count = 4;
+    cfg.dma_buf_len = 256;
+    cfg.tx_desc_auto_clear = true;              // silence once the tone has played
+    i2s_pin_config_t pins = {};
+    pins.mck_io_num = I2S_PIN_NO_CHANGE;
+    pins.bck_io_num = TDECK_I2S_BCK;
+    pins.ws_io_num = TDECK_I2S_WS;
+    pins.data_out_num = TDECK_I2S_DOUT;
+    pins.data_in_num = I2S_PIN_NO_CHANGE;
+    s_i2s_state = (i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL) == ESP_OK &&
+                   i2s_set_pin(I2S_NUM_0, &pins) == ESP_OK) ? 1 : -1;
+  }
+  if (s_i2s_state != 1) return;
+  // 60 ms of a 2 kHz square wave: short enough to fit the DMA buffers, so this never waits
+  static int16_t tone[960];
+  for (int i = 0; i < 960; i++) tone[i] = ((i / 4) & 1) ? 5000 : -5000;
+  size_t written = 0;
+  i2s_write(I2S_NUM_0, tone, sizeof(tone), &written, 0);
+}
+
 void UITask::newMsg(uint8_t, const char*, const char*, int) {
-  // the message itself is already in umc_chatlog; just wake the screen
+  // the message itself is already in umc_chatlog; wake the screen and say so
   if (_tab == TAB_MSGS) _msg_scroll = 0;
   _dirty = true;
+  const UmcPrefs& p = the_mesh.getUmc().prefs();
+  if (p.beep_on_msg) messageBeep();
+  if (p.flash_on_msg) {                         // inverted for a moment, put back by the loop
+    display.gfx()->invertDisplay(true);
+    _flash_until = millis() + 180;
+  }
 }
 
 void UITask::notify(UIEventType) { _dirty = true; }
@@ -577,7 +673,12 @@ void UITask::centreOnSelf() {
 void UITask::loop() {
   if (_display == NULL) return;
 
+  if (_flash_until && (long)(millis() - _flash_until) >= 0) {
+    display.gfx()->invertDisplay(false);
+    _flash_until = 0;
+  }
   _tiles.servicePending();   // a tile uploaded over WiFi, written here where the bus is ours
+  serviceScreenShot();
 
   char key = _input.readKey();
   if (key) handleKey(key);
@@ -696,6 +797,68 @@ uint32_t UITask::screenSignature() {
 }
 
 // ---------------------------------------------------------------- drawing
+
+// Paints a page into the canvas for a screenshot. The visible screen is left alone, and
+// everything that says which page is showing is put back afterwards.
+void UITask::serviceScreenShot() {
+  uint8_t expect = SHOT_QUEUED;
+  if (!__atomic_compare_exchange_n(&s_shot_state, &expect, SHOT_WORKING, false, __ATOMIC_ACQ_REL,
+                                   __ATOMIC_ACQUIRE)) {
+    return;
+  }
+  if (s_canvas == nullptr) s_canvas = new GFXcanvas16(SCR_W, SCR_H);   // PSRAM, on first use
+  if (s_canvas == nullptr || s_canvas->getBuffer() == nullptr) {
+    __atomic_store_n(&s_shot_state, SHOT_FAILED, __ATOMIC_RELEASE);
+    return;
+  }
+
+  const Tab tab = _tab;
+  const int page = _setup_page, sel = _setup_sel, scroll = _setup_scroll;
+  const bool detail = _contact_detail, quick = _quick_open;
+  const int csel = _contact_sel;
+
+  struct Named { const char* name; Tab tab; int setup; };
+  static const Named kPages[] = {
+      {"home", TAB_HOME, -1}, {"msgs", TAB_MSGS, -1}, {"who", TAB_CONTACTS, -1}, {"map", TAB_MAP, -1},
+      {"gps", TAB_GPS, -1}, {"radio", TAB_RADIO, -1}, {"info", TAB_INFO, -1}, {"setup", TAB_SETUP, SP_ROOT},
+      {"setup/device", TAB_SETUP, SP_DEVICE}, {"setup/radio", TAB_SETUP, SP_RADIO},
+      {"setup/wifi", TAB_SETUP, SP_WIFI}, {"setup/ble", TAB_SETUP, SP_BLE},
+      {"setup/region", TAB_SETUP, SP_REGION}, {"setup/gps", TAB_SETUP, SP_GPS},
+      {"setup/fw", TAB_SETUP, SP_FW}, {"setup/channels", TAB_SETUP, SP_CHANNELS},
+      {"setup/messaging", TAB_SETUP, SP_MESSAGING}, {"setup/contacts", TAB_SETUP, SP_CONTACTS_CFG},
+      {"setup/telemetry", TAB_SETUP, SP_TELEMETRY}, {"setup/console", TAB_SETUP, SP_CONSOLE},
+      {"setup/display", TAB_SETUP, SP_DISPLAY}, {"setup/quick", TAB_SETUP, SP_QUICK},
+      {"setup/theme", TAB_SETUP, SP_THEME},
+  };
+  bool found = false;
+  char want[32];
+  StrHelper::strncpy(want, s_shot_page, sizeof(want));
+  const bool want_detail = strcmp(want, "who/detail") == 0;
+  const bool want_quick = strcmp(want, "msgs/quick") == 0;
+  if (want_detail) StrHelper::strncpy(want, "who", sizeof(want));
+  if (want_quick) StrHelper::strncpy(want, "msgs", sizeof(want));
+  for (const auto& p : kPages) {
+    if (strcmp(p.name, want) != 0) continue;
+    _tab = p.tab;
+    if (p.setup >= 0) { _setup_page = p.setup; _setup_sel = 0; _setup_scroll = 0; }
+    found = true;
+    break;
+  }
+  if (found) {
+    _contact_detail = want_detail;
+    if (want_detail && _contact_sel < 0) _contact_sel = 0;
+    _quick_open = want_quick;
+    s_to_canvas = true;
+    draw();
+    s_to_canvas = false;
+  }
+
+  _tab = tab;
+  _setup_page = page; _setup_sel = sel; _setup_scroll = scroll;
+  _contact_detail = detail; _quick_open = quick; _contact_sel = csel;
+  _dirty = true;                       // the real screen's touch areas get worked out again
+  __atomic_store_n(&s_shot_state, found ? SHOT_DONE : SHOT_FAILED, __ATOMIC_RELEASE);
+}
 
 void UITask::draw() {
   drawHeader();
@@ -951,9 +1114,12 @@ void UITask::drawMessages() {
     const int bottom_before = y;
     // a run of messages from the same person shares one heading
     const UmcChatLog::Entry* prev = i > 0 ? umc_chatlog.get(i - 1) : NULL;
-    const bool same_run = prev != NULL && prev->outgoing == e->outgoing &&
+    // Same person means the same conversation too: direct messages often have no name, only
+    // a key, so the name alone would merge two different people under one heading.
+    const bool same_run = prev != NULL && prev->outgoing == e->outgoing && prev->channel == e->channel &&
+                          memcmp(prev->key, e->key, sizeof(e->key)) == 0 &&
                           strcmp(prev->from, e->from) == 0 &&
-                          e->epoch && prev->epoch && e->epoch - prev->epoch < 300;
+                          e->epoch && prev->epoch && e->epoch >= prev->epoch && e->epoch - prev->epoch < 300;
     y = drawBubble(y, who, e->text, e->outgoing, _msg_sel == i, e->epoch, !same_run);
     if (_msg_rows < (int)(sizeof(_msg_row_y) / sizeof(_msg_row_y[0]))) {
       _msg_row_y[_msg_rows] = y;            // top of this bubble
@@ -1184,7 +1350,7 @@ void UITask::drawMap() {
         const int x0 = max(0, -sx), y0 = max(0, top - sy);
         const int x1 = min(UMC_TILE_PX, SCR_W - sx), y1 = min(UMC_TILE_PX, top + BODY_H - sy);
         for (int row = y0; row < y1; row++) {
-          gfx()->drawRGBBitmap(sx + x0, sy + row, const_cast<uint16_t*>(px + row * UMC_TILE_PX + x0), x1 - x0, 1);
+          blit(sx + x0, sy + row, px + row * UMC_TILE_PX + x0, x1 - x0, 1);
         }
         drew_tiles = true;
       }
@@ -1198,13 +1364,26 @@ void UITask::drawMap() {
     for (int r = 1; r <= 3; r++) {
       gfx()->drawCircle(mx, my, r * 30, C_LINE);
     }
-    text(4, top + 4, _tiles.available() ? "No tiles for this zoom" : _tiles.status(), C_DIM);
+    text(4, top + 4, _tiles.available() ? "No tiles at this zoom" : "No map tiles - rings are distance", C_DIM);
     if (!have_self) {
       text(60, my - 4, "Set this node's location first", C_DIM);
     }
   }
 
   // markers
+  struct Box { int16_t x, y, w, h; };
+  Box taken[48];
+  int n_taken = 0;
+  taken[n_taken++] = {(int16_t)(SCR_W - 32), (int16_t)(top + 2), 30, 56};                // + and -
+  taken[n_taken++] = {(int16_t)(SCR_W - 64), (int16_t)(top + BODY_H - 30), 62, 28};     // me
+  taken[n_taken++] = {0, (int16_t)top, (int16_t)SCR_W, 16};                             // status line
+  auto overlaps = [&](const Box& b) {
+    for (int i = 0; i < n_taken; i++) {
+      const Box& o = taken[i];
+      if (b.x < o.x + o.w && o.x < b.x + b.w && b.y < o.y + o.h && o.y < b.y + b.h) return true;
+    }
+    return false;
+  };
   const int total = contactCount();
   double far_m = 1;
   for (int i = 0; i < total; i++) {
@@ -1229,7 +1408,12 @@ void UITask::drawMap() {
     const uint16_t col = c.type == ADV_TYPE_REPEATER ? C_WARN : c.type == ADV_TYPE_ROOM ? C_OK : C_ACC;
     gfx()->fillCircle(px, py, 4, col);
     gfx()->drawCircle(px, py, 4, 0xFFFF);
-    textClip(px + 6, py - 3, 90, c.name, 0xFFFF);
+    const int lw = min(90, textWidth(c.name));
+    const Box label = {(int16_t)(px + 6), (int16_t)(py - 5), (int16_t)(lw + 2), 12};
+    if (label.x + label.w <= SCR_W && !overlaps(label) && n_taken < 48) {
+      taken[n_taken++] = label;
+      textClip(px + 6, py - 4, 90, c.name, 0xFFFF);
+    }
   }
   if (have_self) {
     int px = SCR_W / 2, py = top + BODY_H / 2;
@@ -1264,7 +1448,7 @@ void UITask::drawInfo() {
   NetworkService& net = the_mesh.getNetwork();
   textF(4, y, "WiFi", C_DIM, F_SMALL);
   if (net.isWifiConnected()) {
-    snprintf(buf, sizeof(buf), "%s  %s", net.getWifiSSID(), net.getStaIp().c_str());
+    snprintf(buf, sizeof(buf), "%s  %d dBm", net.getWifiSSID(), (int)WiFi.RSSI());
   } else if (net.isApActive()) {
     snprintf(buf, sizeof(buf), "hotspot %s  192.168.4.1", net.getApSsid());
   } else {
@@ -1273,7 +1457,8 @@ void UITask::drawInfo() {
   textFClip(VX, y, SCR_W - VX - 6, buf, net.isWifiConnected() || net.isApActive() ? C_TXT : C_DIM, F_SMALL); y += lh;
 
   textF(4, y, "Web", C_DIM, F_SMALL);
-  snprintf(buf, sizeof(buf), "%s.local", net.getHostname());
+  if (net.isWifiConnected()) snprintf(buf, sizeof(buf), "http://%s", net.getStaIp().c_str());
+  else snprintf(buf, sizeof(buf), "%s.local", net.getHostname());
   textFClip(VX, y, SCR_W - VX - 6, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Bluetooth", C_DIM, F_SMALL);
@@ -1283,7 +1468,8 @@ void UITask::drawInfo() {
   textFClip(VX, y, SCR_W - VX - 6, buf, isBluetoothEnabled() ? C_TXT : C_DIM, F_SMALL); y += lh;
 
   textF(4, y, "Radio", C_DIM, F_SMALL);
-  snprintf(buf, sizeof(buf), "%.3f MHz  SF%d  BW%.1f  %ddBm", _prefs->freq, _prefs->sf, _prefs->bw, _prefs->tx_power_dbm);
+  snprintf(buf, sizeof(buf), "%.3f SF%d BW%.1f CR%d %ddBm", _prefs->freq, _prefs->sf, _prefs->bw, _prefs->cr,
+           _prefs->tx_power_dbm);
   textFClip(VX, y, SCR_W - VX - 6, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "GPS", C_DIM, F_SMALL);
@@ -1305,7 +1491,7 @@ void UITask::drawInfo() {
   textF(4, y, "Maps", C_DIM, F_SMALL); textFClip(VX, y, SCR_W - VX - 6, _tiles.status(), _tiles.available() ? C_TXT : C_DIM, F_SMALL); y += lh;
 
   textF(4, y, "Contacts", C_DIM, F_SMALL);
-  snprintf(buf, sizeof(buf), "%d contacts, %d messages kept", the_mesh.getNumContacts(), umc_chatlog.count());
+  snprintf(buf, sizeof(buf), "%d contacts, %d messages kept", contactCount(), umc_chatlog.count());
   textFClip(VX, y, SCR_W - VX - 6, buf, C_TXT, F_SMALL); y += lh;
 
   textF(4, y, "Memory", C_DIM, F_SMALL);
@@ -1316,8 +1502,8 @@ void UITask::drawInfo() {
   textF(4, y, "Running", C_DIM, F_SMALL);
   const unsigned long up = millis() / 1000;
   const char* died = UmcService::lastBootStage();
-  snprintf(buf, sizeof(buf), "%luh %lum %lus  ·  last restart: %s%s%s", up / 3600, (up % 3600) / 60, up % 60,
-           UmcService::lastResetReason(), died[0] ? " while starting: " : "", died);
+  snprintf(buf, sizeof(buf), "%luh %lum %lus  reset: %s%s%s", up / 3600, (up % 3600) / 60, up % 60,
+           UmcService::lastResetReason(), died[0] ? " at " : "", died);
   textFClip(VX, y, SCR_W - VX - 6, buf, C_TXT, F_SMALL); y += lh;
 
   const int by = SCR_H - TAB_H - 30;
@@ -1463,7 +1649,7 @@ void UITask::drawHome() {
   snprintf(cards[3].sub, sizeof(cards[3].sub), "of %d kept", umc_chatlog.count());
   cards[3].col = umc_chatlog.unread() > 0 ? C_WARN : C_TXT;
 
-  cards[4].title = "LAST SIGNAL";
+  cards[4].title = "SIGNAL";
   if (rssi != 0) {
     snprintf(cards[4].val, sizeof(cards[4].val), "%d", (int)rssi);
     snprintf(cards[4].sub, sizeof(cards[4].sub), "SNR %.1f dB", snr);
@@ -1580,7 +1766,7 @@ void UITask::drawGps() {
   char buf[64];
   fill(0, top, SCR_W, BODY_H, C_BG);
 
-  const int cx = SCR_W - 76, cy = top + 78, r = 66;
+  const int cx = SCR_W - 78, cy = top + 78, r = 64;
   gfx()->drawCircle(cx, cy, r, C_LINE);
   gfx()->drawCircle(cx, cy, r * 2 / 3, C_LINE);      // 30 degrees up
   gfx()->drawCircle(cx, cy, r / 3, C_LINE);          // 60 degrees up
@@ -1611,7 +1797,7 @@ void UITask::drawGps() {
 
   // ---- the numbers, down the left
   int y = top + 6;
-  const int VCOL = 68, VW = SCR_W - 76 - 68 - VCOL - 4;   // stops short of the sky circle
+  const int VCOL = 80, VW = SCR_W - 78 - 64 - VCOL - 4;   // stops short of the sky circle
   const int lh = 14;
   double lat, lon;
   LocationProvider* loc = sensors.getLocationProvider();
@@ -1655,8 +1841,8 @@ void UITask::drawGps() {
 
   // buttons
   const int by = SCR_H - TAB_H - 26;
-  button(4, by, 96, 22, the_mesh.getNodePrefs()->gps_enabled ? "GPS off" : "GPS on");
-  button(104, by, 108, 22, "Use as my location");
+  button(4, by, 84, 22, the_mesh.getNodePrefs()->gps_enabled ? "GPS off" : "GPS on");
+  button(92, by, 136, 22, "Use as my location");
 }
 
 // ---------------------------------------------------------------- setup tab
@@ -1886,7 +2072,10 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
     case SP_WIFI:
       if (row == 0) { snprintf(label, label_n, "Scan for networks"); snprintf(value, value_n, "%s", _wifi_scan_state == 1 ? "scanning" : "tap"); }
       else if (row == 1) { snprintf(label, label_n, "Network"); snprintf(value, value_n, "%s", _wifi_ssid[0] ? _wifi_ssid : umcCli("get wifi.ssid")); }
-      else if (row == 2) { snprintf(label, label_n, "Password"); snprintf(value, value_n, "%s", _wifi_pwd[0] ? "********" : "not set"); }
+      else if (row == 2) {
+        snprintf(label, label_n, "Password");
+        snprintf(value, value_n, "%s", _wifi_pwd[0] || strcmp(umcCli("get wifi.pwd"), "set") == 0 ? "********" : "not set");
+      }
       else if (row == 3) { snprintf(label, label_n, "Connect"); snprintf(value, value_n, "%s", net.isWifiConnected() ? net.getStaIp().c_str() : "tap"); }
       else snprintf(label, label_n, "< Back");
       break;
@@ -2022,7 +2211,7 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
           break;
         case 6:
           snprintf(label, label_n, "Flash on a message");
-          snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().lock_enabled ? "on" : "off");
+          snprintf(value, value_n, "%s", the_mesh.getUmc().prefs().flash_on_msg ? "on" : "off");
           break;
         default:
           snprintf(label, label_n, "< Back");
@@ -2259,12 +2448,20 @@ void UITask::setupAction(int row) {
           break;
         }
         _setup_confirm = -1;
-        umcCli("set radio 869.618,62.5,8,8");
+        const char* radio = umcCli("set radio 869.618,62.5,8,8");
+        if (strncmp(radio, "Err", 3) == 0) {   // e.g. client repeat is on: say why, change nothing
+          StrHelper::strncpy(_setup_status, radio, sizeof(_setup_status));
+          break;
+        }
         umcCli("set scope yorkshire");
         int added = 0;
         for (const char* name : {"yorkshire", "northwest", "northeast"}) {
           if (addHashChannel(name)) added++;
         }
+        // each channel sends in its own region, as the community guide sets them up
+        umcCli("set chscope #yorkshire yorkshire");
+        umcCli("set chscope #northwest northwest");
+        umcCli("set chscope #northeast eng-ne");
         snprintf(_setup_status, sizeof(_setup_status), "UK narrow, scope yorkshire, %d channels", added);
       } else {
         setupOpen(SP_ROOT);
@@ -2395,7 +2592,7 @@ void UITask::setupAction(int row) {
         setBrightness(brightness() >= 100 ? 20 : brightness() + 20);
         snprintf(_setup_status, sizeof(_setup_status), "Backlight %d%%", (int)brightness());
       } else if (row >= 3 && row <= 6) {
-        static const char* const names[4] = {"clock12", "miles", "beep", "lock"};
+        static const char* const names[4] = {"clock12", "miles", "beep", "flash"};
         const char* name = names[row - 3];
         char q[24];
         snprintf(q, sizeof(q), "get %s", name);

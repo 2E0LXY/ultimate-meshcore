@@ -34,3 +34,9 @@ uint32_t umcMapUploadLeftMs() {
   if (!umcMapUploadOpen()) return 0;
   return s_upload_until - millis();
 }
+
+static UmcMapClearFn s_clear = nullptr;
+
+void umcSetMapClearFn(UmcMapClearFn fn) { s_clear = fn; }
+
+int umcMapClear() { return s_clear != nullptr ? s_clear() : -1; }

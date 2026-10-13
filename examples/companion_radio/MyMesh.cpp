@@ -1,6 +1,7 @@
 #include "MyMesh.h"
 #include <helpers/umc/UmcGpsSky.h>
 #include <helpers/umc/UmcMapSink.h>
+#include <helpers/umc/UmcScreenShot.h>
 
 #include <Arduino.h> // needed for PlatformIO
 #include <Mesh.h>
@@ -599,16 +600,31 @@ void MyMesh::sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, ui
   }
 }
 void MyMesh::sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t delay_millis) {
-  // TODO: have per-channel send_scope
   if (send_unscoped) {
     sendFlood(pkt, delay_millis, _prefs.path_hash_mode + 1);  // app has explicitly requested un-scoped
-  } else {
-    TransportKey default_scope;
-    memcpy(&default_scope.key, _prefs.default_scope_key, sizeof(default_scope.key));
-
-    auto scope = send_scope.isNull() ? &default_scope : &send_scope;
-    sendFloodScoped(*scope, pkt, delay_millis);
+    return;
   }
+  // An app that asked for a scope gets it. Otherwise the channel's own scope, if it has
+  // one, and the default for everything else - #northeast belongs in eng-ne, not in
+  // whatever the node happens to default to.
+  TransportKey scope;
+  memcpy(&scope.key, _prefs.default_scope_key, sizeof(scope.key));
+  if (!send_scope.isNull()) {
+    scope = send_scope;
+  } else {
+#ifdef UMC_BUILD
+    const int idx = findChannelIdx(channel);
+    ChannelDetails details;
+    char name[32];
+    if (idx >= 0 && getChannel(idx, details) && umc.channelScope(details.name, name, sizeof(name))) {
+      char hashed[40];
+      snprintf(hashed, sizeof(hashed), "#%s", name);   // public region keys are SHA256 of "#name"
+      TransportKeyStore temp;
+      temp.getAutoKeyFor(0, hashed, scope);
+    }
+#endif
+  }
+  sendFloodScoped(scope, pkt, delay_millis);
 }
 
 void MyMesh::onMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
@@ -3063,11 +3079,20 @@ bool MyMesh::umcCli(const char* command, char* reply, size_t n) {
 
   // ---------------------------------------------------------------- GPS
 #if ENV_INCLUDE_GPS == 1
+  if (umcStartsWith(command, "screen share") && (command[12] == ' ' || command[12] == 0)) {
+    const char* arg = command[12] == ' ' ? command + 13 : "";
+    if (strcmp(arg, "off") == 0) { umcCloseScreenShare(); snprintf(reply, n, "> screen sharing off"); return true; }
+    const int mins = arg[0] ? atoi(arg) : 10;
+    if (mins < 1 || mins > 120) { snprintf(reply, n, "Err - 1 to 120 minutes"); return true; }
+    umcOpenScreenShare((uint32_t)mins * 60000UL);
+    snprintf(reply, n, "> screen sharing on for %d minutes - GET /api/screen?page=home", mins);
+    return true;
+  }
   if (strcmp(command, "maps") == 0) {
     snprintf(reply, n, "> %s", umcMapStatus());
     return true;
   }
-  if (umcStartsWith(command, "maps upload")) {
+  if (umcStartsWith(command, "maps upload") && (command[11] == ' ' || command[11] == 0)) {
     const char* arg = command[11] == ' ' ? command + 12 : "";
     if (strcmp(arg, "off") == 0) {
       umcCloseMapUpload();
@@ -3078,6 +3103,12 @@ bool MyMesh::umcCli(const char* command, char* reply, size_t n) {
     if (mins < 1 || mins > 120) { snprintf(reply, n, "Err - 1 to 120 minutes"); return true; }
     umcOpenMapUpload((uint32_t)mins * 60000UL);
     snprintf(reply, n, "> uploads open for %d minutes - post tiles to /api/map?z=&x=&y=", mins);
+    return true;
+  }
+  if (strcmp(command, "maps clear") == 0) {
+    const int n_removed = umcMapClear();
+    if (n_removed < 0) snprintf(reply, n, "> no card, nothing removed");
+    else snprintf(reply, n, "> removed %d tiles - %s", n_removed, umcMapStatus());
     return true;
   }
   if (strcmp(command, "maps test") == 0) {

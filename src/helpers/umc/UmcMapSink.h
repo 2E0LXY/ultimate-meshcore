@@ -40,3 +40,9 @@ typedef bool (*UmcMapRemoveFn)(int zoom, int x, int y);
 
 void umcSetMapRemoveFn(UmcMapRemoveFn fn);
 bool umcMapRemove(int zoom, int x, int y);
+
+// Removes every stored tile. Returns how many, or -1 when there is no card.
+typedef int (*UmcMapClearFn)();
+
+void umcSetMapClearFn(UmcMapClearFn fn);
+int umcMapClear();

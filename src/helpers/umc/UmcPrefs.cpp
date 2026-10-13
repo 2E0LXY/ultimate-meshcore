@@ -53,6 +53,7 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.clock_12h = false;
   p.units_miles = false;
   p.beep_on_msg = true;
+  p.flash_on_msg = false;
 }
 
 bool UmcPrefsStore::isValidPin(const char* pin) {
@@ -96,6 +97,8 @@ void UmcPrefsStore::load(UmcPrefs& p) {
     p.clock_12h = nvs.getBool("clock12", p.clock_12h);
     p.units_miles = nvs.getBool("miles", p.units_miles);
     p.beep_on_msg = nvs.getBool("beep", p.beep_on_msg);
+    p.flash_on_msg = nvs.getBool("flash", p.flash_on_msg);
+    if (nvs.isKey("chscope")) nvs.getString("chscope", p.ch_scopes, sizeof(p.ch_scopes));
     nvs.end();
   }
   if (!isValidPin(p.pin)) {
@@ -138,6 +141,8 @@ bool UmcPrefsStore::save(const UmcPrefs& p) {
   nvs.putBool("clock12", p.clock_12h);
   nvs.putBool("miles", p.units_miles);
   nvs.putBool("beep", p.beep_on_msg);
+  nvs.putBool("flash", p.flash_on_msg);
+  nvs.putString("chscope", p.ch_scopes);
   nvs.end();
   return true;
 #else

@@ -59,6 +59,10 @@ public:
   bool isSetupMode() const { return !_prefs.setup_done; }
   const char* getPin() const { return _prefs.pin; }
   const UmcPrefs& prefs() const { return _prefs; }
+  // The region scope a channel is set to send with, or false when it has none of its own.
+  bool channelScope(const char* channel_name, char* scope, size_t scope_size) const;
+  // Sets (or with scope "-", clears) one channel's scope. False if the table is full.
+  bool setChannelScope(const char* channel_name, const char* scope);
   UmcHost* host() const { return _host; }
   NetworkService* network() const { return _network; }
   UmcUpdater* updater() const { return _updater; }

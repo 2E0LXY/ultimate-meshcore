@@ -395,9 +395,12 @@ void UmcService::formatInfoJson(char* out, size_t out_size) const {
   pos = appendJsonEscaped(out, out_size, pos, _host ? _host->umcBoardName() : "");
   pos += snprintf(&out[pos], out_size - pos, ",\"env\":\"%s\",\"commit\":\"%.7s\"", UmcUpdater::buildEnv(), UmcUpdater::buildCommit());
 #if defined(ESP_PLATFORM)
-  pos += snprintf(&out[pos], out_size - pos, ",\"reset\":\"%s\",\"died_at\":\"%s\",\"heap\":{\"free\":%u,\"max_block\":%u,\"min_free\":%u}",
+  // PSRAM is reported too: a leak there never shows in the internal heap figures
+  pos += snprintf(&out[pos], out_size - pos,
+                  ",\"reset\":\"%s\",\"died_at\":\"%s\",\"heap\":{\"free\":%u,\"max_block\":%u,\"min_free\":%u,"
+                  "\"psram_free\":%u}",
                   resetReasonLabel(esp_reset_reason()), lastBootStage(), ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
-                  ESP.getMinFreeHeap());
+                  ESP.getMinFreeHeap(), (unsigned)ESP.getFreePsram());
 #endif
   pos += snprintf(&out[pos], out_size - pos, ",\"setup\":%s,\"default_pw\":%s,\"features\":[",
                   isSetupMode() ? "true" : "false", isDefaultAdminPassword() ? "true" : "false");
@@ -534,6 +537,63 @@ void UmcService::runCommandsNow(const char* cmds, char* out, size_t out_size) {
 // Desktop / app bridge: the same data as the web API, for a computer connected over USB or
 // Bluetooth. Runs on the loop task. Requests: "info", "routes", "traffic", "scan",
 // "scan refresh", "cli <commands>" (newline-separated). Writes JSON into out.
+bool UmcService::channelScope(const char* channel_name, char* scope, size_t scope_size) const {
+  if (channel_name == nullptr || channel_name[0] == 0 || scope_size == 0) return false;
+  const size_t want = strlen(channel_name);
+  const char* p = _prefs.ch_scopes;
+  while (*p) {
+    const char* eq = strchr(p, '=');
+    if (eq == nullptr) break;
+    const char* end = strchr(eq, ';');
+    if (end == nullptr) end = eq + strlen(eq);
+    if ((size_t)(eq - p) == want && strncmp(p, channel_name, want) == 0) {
+      size_t n = (size_t)(end - eq - 1);
+      if (n >= scope_size) n = scope_size - 1;
+      memcpy(scope, eq + 1, n);
+      scope[n] = 0;
+      return n > 0;
+    }
+    p = *end ? end + 1 : end;
+  }
+  return false;
+}
+
+bool UmcService::setChannelScope(const char* channel_name, const char* scope) {
+  if (channel_name == nullptr || channel_name[0] == 0) return false;
+  if (strchr(channel_name, '=') || strchr(channel_name, ';')) return false;
+  if (scope && (strchr(scope, '=') || strchr(scope, ';'))) return false;
+
+  // rebuild the table without this channel, then add it back with the new scope
+  char rebuilt[sizeof(_prefs.ch_scopes)];
+  size_t pos = 0;
+  rebuilt[0] = 0;
+  const size_t want = strlen(channel_name);
+  const char* p = _prefs.ch_scopes;
+  while (*p) {
+    const char* end = strchr(p, ';');
+    const size_t len = end ? (size_t)(end - p) : strlen(p);
+    const char* eq = (const char*)memchr(p, '=', len);
+    const bool same = eq && (size_t)(eq - p) == want && strncmp(p, channel_name, want) == 0;
+    if (!same && len > 0) {
+      if (pos + len + 2 > sizeof(rebuilt)) return false;
+      if (pos) rebuilt[pos++] = ';';
+      memcpy(&rebuilt[pos], p, len);
+      pos += len;
+      rebuilt[pos] = 0;
+    }
+    p = end ? end + 1 : p + len;
+  }
+  const bool clearing = scope == nullptr || scope[0] == 0 || strcmp(scope, "-") == 0;
+  if (!clearing) {
+    const size_t add = want + 1 + strlen(scope);
+    if (pos + add + 2 > sizeof(rebuilt)) return false;
+    pos += snprintf(&rebuilt[pos], sizeof(rebuilt) - pos, "%s%s=%s", pos ? ";" : "", channel_name, scope);
+  }
+  StrHelper::strncpy(_prefs.ch_scopes, rebuilt, sizeof(_prefs.ch_scopes));
+  UmcPrefsStore::save(_prefs);
+  return true;
+}
+
 bool UmcService::handleBridge(const char* req, char* out, size_t out_size) {
   if (req == nullptr || out == nullptr || out_size < 32) return false;
   if (strcmp(req, "info") == 0) {
@@ -781,6 +841,25 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
   // ---- per-type flood hop caps (Low-Power firmware compatible names) ----
   // ---- touch client options ----
   // Six canned replies, sent from the message composer: "get quick", "set quick3 On my way"
+  // per-channel region scope: "get chscope", "set chscope #northeast eng-ne", "set chscope #x -"
+  if (strcmp(command, "get chscope") == 0) {
+    snprintf(reply, reply_size, "> %s", _prefs.ch_scopes[0] ? _prefs.ch_scopes : "(none - every channel uses the default)");
+    return true;
+  }
+  if (startsWith(command, "set chscope ")) {
+    char chan[40];
+    StrHelper::strncpy(chan, command + 12, sizeof(chan));
+    char* space = strchr(chan, ' ');
+    if (space == nullptr || chan[0] != '#') {
+      snprintf(reply, reply_size, "Err - use set chscope #channel <scope|->");
+      return true;
+    }
+    *space = 0;
+    const char* scope = space + 1;
+    while (*scope == ' ') scope++;
+    snprintf(reply, reply_size, setChannelScope(chan, scope) ? "OK" : "Err - table full or bad name");
+    return true;
+  }
   if (strcmp(command, "get quick") == 0) {
     size_t pos = 0;
     reply[0] = 0;
@@ -791,7 +870,8 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
   }
   if (startsWith(command, "set quick")) {
     const int slot = command[9] - '1';
-    if (slot < 0 || slot >= UMC_QUICK_REPLIES) {
+    // one digit, then a space or the end: "set quick10 x" must not quietly clear reply 1
+    if (slot < 0 || slot >= UMC_QUICK_REPLIES || (command[10] != ' ' && command[10] != 0)) {
       snprintf(reply, reply_size, "Err - use set quick1 .. set quick%d", UMC_QUICK_REPLIES);
       return true;
     }
@@ -809,6 +889,7 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
         {"clock12", &_prefs.clock_12h},
         {"miles", &_prefs.units_miles},
         {"beep", &_prefs.beep_on_msg},
+        {"flash", &_prefs.flash_on_msg},
     };
     for (const auto& f : flags) {
       char get_cmd[24], set_cmd[24];
