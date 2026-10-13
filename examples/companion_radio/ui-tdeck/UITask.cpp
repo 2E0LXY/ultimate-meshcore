@@ -2149,7 +2149,7 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
     case SP_MESSAGING:
       switch (row) {
         case 0: snprintf(label, label_n, "Extra ACKs"); snprintf(value, value_n, "%s", strcmp(umcCli("get multi.acks"), "1") == 0 ? "on" : "off"); break;
-        case 1: snprintf(label, label_n, "Path hash size"); snprintf(value, value_n, "%s byte(s)", umcCli("get path.hash.mode")); break;
+        case 1: snprintf(label, label_n, "Path hash size"); snprintf(value, value_n, "%d byte", atoi(umcCli("get path.hash.mode")) + 1); break;
         case 2: snprintf(label, label_n, "Share my location"); snprintf(value, value_n, "%s", umcCli("get advert.loc")); break;
         case 3: snprintf(label, label_n, "Relay for others"); snprintf(value, value_n, "%s", umcCli("get repeat")); break;
         case 4: snprintf(label, label_n, "Airtime factor"); snprintf(value, value_n, "%s", umcCli("get af")); break;
@@ -2166,7 +2166,12 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
         case 3: snprintf(label, label_n, "Room servers"); snprintf(value, value_n, "%s", umcCli("get autoadd.room")); break;
         case 4: snprintf(label, label_n, "Sensors"); snprintf(value, value_n, "%s", umcCli("get autoadd.sensor")); break;
         case 5: snprintf(label, label_n, "Replace oldest"); snprintf(value, value_n, "%s", umcCli("get autoadd.overwrite")); break;
-        case 6: snprintf(label, label_n, "Max hops"); snprintf(value, value_n, "%s", umcCli("get autoadd.maxhops")); break;
+        case 6: {
+          snprintf(label, label_n, "Max hops");
+          const int mh = atoi(umcCli("get autoadd.maxhops"));
+          if (mh == 0) snprintf(value, value_n, "no limit"); else snprintf(value, value_n, "%d", mh);
+          break;
+        }
         default: snprintf(label, label_n, "< Back"); break;
       }
       break;
