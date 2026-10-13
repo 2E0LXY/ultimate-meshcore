@@ -12,7 +12,7 @@ import aiohttp
 from aiohttp import web
 
 from . import __version__
-from .backends import ProxyBackend, RepeaterSerialBackend
+from .backends import ProxyBackend, RepeaterSerialBackend, normalise_role
 from .companion import CompanionBackend
 from .flash import flash_app
 from .links import (BleFrameLink, SerialFrameLink, SerialTextLink, TcpFrameLink, list_serial_ports, open_serial,
@@ -115,7 +115,8 @@ class State:
         elif t == "web":
             backend = ProxyBackend(target["host"])
             await start_or_close(backend)
-            self.kind = "web"
+            backend.role = normalise_role(backend.info.get("role"), "repeater")
+            self.kind = "web-" + backend.role
             self.label = f"{backend.info.get('name', '')} · {backend.base.split('://', 1)[1]}"
         else:
             raise ValueError("unknown connection type")
@@ -180,8 +181,49 @@ async def connect_serial(port):
     return rep
 
 
-async def discover_network(port=80):
-    """Looks for Ultimate MeshCore devices on this computer's local /24 network."""
+async def probe_app_port(ip, port, timeout=1.2):
+    """Asks a MeshCore app port who it is, by speaking the companion protocol at it.
+
+    Any MeshCore device with its app connection on TCP answers this, whatever firmware it
+    runs, so a stock repeater or client is found as readily as one of ours."""
+    try:
+        fut = asyncio.open_connection(ip, port)
+        reader, writer = await asyncio.wait_for(fut, timeout)
+    except Exception:
+        return None
+    try:
+        # CMD_APP_START: protocol version 3, six reserved bytes, then our name
+        payload = bytes([1, 3, 0, 0, 0, 0, 0, 0]) + b"umc-desktop"
+        writer.write(b"<" + len(payload).to_bytes(2, "little") + payload)
+        await writer.drain()
+
+        head = await asyncio.wait_for(reader.readexactly(3), timeout)
+        if head[0:1] != b">":
+            return None
+        body = await asyncio.wait_for(reader.readexactly(int.from_bytes(head[1:3], "little")), timeout)
+        if not body or body[0] != 5:          # RESP_CODE_SELF_INFO
+            return None
+        # byte 1 is the advert type: 1 chat node, 2 repeater, 3 room server
+        kinds = {1: "companion", 2: "repeater", 3: "room_server", 4: "sensor"}
+        name = body[58:].split(b"\x00")[0].decode("utf-8", "replace") if len(body) > 58 else ""
+        return {"role": kinds.get(body[1], "companion"), "name": name}
+    except Exception:
+        return None
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def discover_network(port=80, app_port=5000):
+    """Looks for MeshCore devices on this computer's local /24 network.
+
+    Two ways in: our own firmware answers a web API on port 80, and any MeshCore device
+    with a TCP app connection answers the companion protocol on port 5000. The first gives
+    the web interface, the second gives full protocol control, and a device offering both
+    is listed once with both noted."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("192.0.2.1", 80))
@@ -190,23 +232,34 @@ async def discover_network(port=80):
     except OSError:
         return []
     net = ipaddress.ip_network(me + "/24", strict=False)
-    found = []
+    found = {}
     sem = asyncio.Semaphore(64)
     timeout = aiohttp.ClientTimeout(total=1.5, connect=0.7)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async def probe(ip):
+            ip = str(ip)
             async with sem:
                 try:
                     async with session.get(f"http://{ip}:{port}/api/info") as r:
                         if r.status == 200:
                             info = await r.json(content_type=None)
                             if info.get("fw") == "UMC":
-                                found.append({"host": str(ip), "name": info.get("name"), "role": info.get("role"),
-                                              "board": info.get("board"), "version": info.get("umc")})
+                                found[ip] = {"host": ip, "name": info.get("name"),
+                                             "role": normalise_role(info.get("role")),
+                                             "board": info.get("board"), "version": info.get("umc"),
+                                             "web": True, "app_port": None}
                 except Exception:
                     pass
+                me_too = await probe_app_port(ip, app_port)
+                if me_too:
+                    entry = found.get(ip, {"host": ip, "name": me_too["name"], "role": me_too["role"],
+                                           "board": "", "version": "", "web": False})
+                    entry["app_port"] = app_port
+                    if not entry.get("name"):
+                        entry["name"] = me_too["name"]
+                    found[ip] = entry
         await asyncio.gather(*(probe(ip) for ip in net.hosts()))
-    return sorted(found, key=lambda d: d["host"])
+    return sorted(found.values(), key=lambda d: tuple(int(p) for p in d["host"].split(".")))
 
 
 def make_app():

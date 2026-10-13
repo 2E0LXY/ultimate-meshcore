@@ -40,7 +40,7 @@ class Job:
 
 
 class CompanionBackend:
-    role = "companion"
+    role = "companion"      # replaced from the device's own advert type once it answers
 
     def __init__(self, link, reconnect=None):
         self.link = link
@@ -252,6 +252,10 @@ class CompanionBackend:
     async def refresh_self(self):
         r = await self.cmd(bytes([CMD_APP_START, 3, 0, 0, 0, 0, 0, 0]) + APP_NAME, expect=5)
         self.me = parse_self_info(r)
+        # The advert type is what the device calls itself, so a repeater or room reached
+        # over its app port is not reported as a plain client.
+        self.role = {1: "companion", 2: "repeater", 3: "room_server", 4: "sensor"}.get(self.me.get("type"),
+                                                                                       "companion")
 
     async def close(self):
         self.closed = True
@@ -383,7 +387,7 @@ class CompanionBackend:
         for k, v in BOARD_ENV.items():
             if board.lower().startswith(k):
                 env = f"umc_{v}_client"
-        return {"fw": "MeshCore", "umc": dev.get("version", "?").lstrip("v"), "api": 1, "name": me.get("name", "radio"), "role": "companion",
+        return {"fw": "MeshCore", "umc": dev.get("version", "?").lstrip("v"), "api": 1, "name": me.get("name", "radio"), "role": self.role,
                 "ver": dev.get("version", ""), "build": dev.get("build", ""), "board": board, "env": env, "commit": "",
                 "setup": False, "default_pw": False, "auth_required": False, "features": [], "link": self.link.kind,
                 "net": {"sta": {"mac": me.get("key", "")[:12]}}}
@@ -435,7 +439,7 @@ class CompanionBackend:
                 "telemetry.env": TELEM.get((me.get("telem", 0) >> 4) & 3),
                 "contacts.manual": "on" if me.get("manual_add", 0) & 1 else "off",
                 "repeat": "on" if dev.get("repeat") else "off", "path.hash.mode": dev.get("path_hash_mode", 0),
-                "ble.pin": dev.get("ble_pin", 0), "ble.activepin": "—", "public.key": me.get("key"), "role": "companion",
+                "ble.pin": dev.get("ble_pin", 0), "ble.activepin": "—", "public.key": me.get("key"), "role": self.role,
                 "ble": "on", "app.tcp": "off", "update.status": "—", "umc.version": "—",
             }
             if key in simple and simple[key] is not None:
