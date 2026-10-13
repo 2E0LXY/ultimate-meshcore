@@ -1,5 +1,7 @@
 package uk.umc.app.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -116,16 +118,46 @@ fun ChannelsScreen() {
     }
 
     scoping?.let { name ->
+        val regions by AppState.regions.collectAsState()
         AlertDialog(
             onDismissRequest = { scoping = null },
             title = { Text("Region scope for $name") },
             text = {
                 Column {
-                    Text("Messages on this channel only travel through repeaters that know this region, e.g. yorkshire. Case-sensitive. Blank = none.")
-                    OutlinedTextField(scopeText, { scopeText = it }, Modifier.fillMaxWidth(), singleLine = true)
+                    Text("Messages on this channel only travel through repeaters that know this region. " +
+                         "Names must match exactly between nodes, so pick one rather than retyping it. Blank = none.")
+                    Spacer(Modifier.height(8.dp))
+                    // the regions this phone knows, the one in use marked
+                    regions.forEach { r ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { scopeText = r }.padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = scopeText == r, onClick = { scopeText = r })
+                            Text(r, Modifier.weight(1f))
+                            TextButton(onClick = { AppState.removeRegion(r) }) { Text("Forget") }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        scopeText, { scopeText = it }, Modifier.fillMaxWidth(), singleLine = true,
+                        label = { Text("Region name") },
+                        supportingText = { Text("lowercase letters, digits and hyphens, up to 29") },
+                        isError = scopeText.isNotBlank() && !AppState.isValidRegion(scopeText.trim()),
+                    )
+                    TextButton(
+                        enabled = scopeText.isNotBlank() && AppState.isValidRegion(scopeText.trim()) &&
+                                  scopeText.trim() !in regions,
+                        onClick = { if (!AppState.addRegion(scopeText)) AppState.say("Could not add that region") },
+                    ) { Text("Remember this region") }
                 }
             },
-            confirmButton = { TextButton(onClick = { AppState.setChannelScope(name, scopeText); scoping = null }) { Text("Save") } },
+            confirmButton = {
+                TextButton(
+                    enabled = scopeText.isBlank() || AppState.isValidRegion(scopeText.trim()),
+                    onClick = { AppState.setChannelScope(name, scopeText); scoping = null },
+                ) { Text("Save") }
+            },
             dismissButton = { TextButton(onClick = { scoping = null }) { Text("Cancel") } },
         )
     }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
@@ -114,12 +115,27 @@ fun ChatScreen(conversation: String, onBack: () -> Unit) {
 
 @Composable
 private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.coroutines.CoroutineScope) {
+    // The same three states the radio's own screen shows, in the same colours: green once
+    // it is acknowledged, amber while that is outstanding, red when it never came.
+    val show by AppState.ackDisplay.collectAsState()
     val status = when (m.status) {
         "sending" -> "sending…"
         "sent" -> if (m.ackCode != null) "sent, waiting" else "sent"
         "delivered" -> "delivered" + (m.roundTripMs?.let { " in ${"%.1f".format(it / 1000.0)} s" } ?: "")
         "failed" -> "not delivered: ${m.error ?: "no answer"}"
         else -> ""
+    }
+    val mark = when (m.status) {
+        "delivered" -> "✓"
+        "failed" -> "✕"
+        "sending", "sent" -> "•"
+        else -> ""
+    }
+    val markColour = when (m.status) {
+        "delivered" -> Color(0xFF2E7D32)
+        "failed" -> Color(0xFFC62828)
+        "sending", "sent" -> Color(0xFFEF6C00)
+        else -> MaterialTheme.colorScheme.outline
     }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp),
@@ -140,9 +156,15 @@ private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.corouti
                 if (!m.outgoing) {
                     add(m.hops?.let { "$it hop" + if (it == 1) "" else "s" } ?: "direct")
                     m.snr?.let { add("SNR $it") }
-                } else if (status.isNotEmpty()) add(status)
+                } else if (status.isNotEmpty() && show == "count") add(status)
             }.joinToString(" · ")
-            Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                if (m.outgoing && show != "off" && mark.isNotEmpty()) {
+                    Text("  $mark", style = MaterialTheme.typography.labelSmall, color = markColour,
+                         fontWeight = FontWeight.Bold)
+                }
+            }
         }
         if (m.status == "failed") {
             TextButton(onClick = { scope.launch { s.sendText(m.conversation, m.text, m) } }) { Text("Retry") }

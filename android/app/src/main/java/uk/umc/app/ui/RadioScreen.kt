@@ -1,5 +1,7 @@
 package uk.umc.app.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
@@ -109,6 +111,24 @@ fun RadioScreen() {
             }
         }
         item {
+            SectionCard("Delivery marks", "How much a message you send says about where it got to. " +
+                        "Green means the other radio acknowledged it, amber is still waiting, red means no answer came.") {
+                val show by AppState.ackDisplay.collectAsState()
+                listOf(
+                    "off" to "Nothing",
+                    "mark" to "A coloured mark",
+                    "count" to "The mark and what happened",
+                ).forEach { (mode, label) ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { AppState.setAckDisplay(mode) }.padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = show == mode, onClick = { AppState.setAckDisplay(mode) })
+                        Text(label)
+                    }
+                }
+            }
+
             SectionCard("Bluetooth pairing", "0 gives a new random PIN at every start, shown on the radio's screen.") {
                 OutlinedTextField(pin, { pin = it }, Modifier.fillMaxWidth(), label = { Text("Fixed PIN (6 digits, or 0)") }, singleLine = true)
                 Button(onClick = {

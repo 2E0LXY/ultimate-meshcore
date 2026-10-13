@@ -40,6 +40,8 @@ object AppState {
         prefs = context.getSharedPreferences("umc", Context.MODE_PRIVATE)
         loadDevices()
         loadScopes()
+        loadRegions()
+        ackDisplay.value = prefs.getString("ackShow", "count") ?: "count"
         val last = prefs.getString("last", null)
         savedDevices.value.firstOrNull { it.key() == last }?.let { connect(it) }
     }
@@ -112,6 +114,52 @@ object AppState {
 
     fun reconnect() {
         target.value?.let { connect(it) }
+    }
+
+    // ---------------------------------------------------------------- delivery marks
+
+    /** How much a sent message says about where it got to: "off", "mark" or "count".
+     *  The same three the radio itself offers, so both ends agree. */
+    val ackDisplay = MutableStateFlow("count")
+
+    fun setAckDisplay(mode: String) {
+        if (mode !in listOf("off", "mark", "count")) return
+        ackDisplay.value = mode
+        prefs.edit().putString("ackShow", mode).apply()
+    }
+
+    // ---------------------------------------------------------------- regions
+
+    /** Region names this phone knows, shared across every channel's scope picker.
+     *  Communities agree these between themselves, so they are typed in, not built in. */
+    val regions = MutableStateFlow(listOf("yorkshire", "eng-ne", "northwest", "uk"))
+
+    /** The mesh only accepts up to 29 bytes of lowercase letters, digits and hyphens, and
+     *  names have to match exactly between nodes for filtering to work at all. */
+    fun isValidRegion(name: String): Boolean =
+        name.isNotEmpty() && name.length <= 29 && name.all { it in 'a'..'z' || it in '0'..'9' || it == '-' }
+
+    fun addRegion(name: String): Boolean {
+        val n = name.trim()
+        if (!isValidRegion(n) || n in regions.value) return false
+        regions.value = regions.value + n
+        saveRegions()
+        return true
+    }
+
+    fun removeRegion(name: String) {
+        regions.value = regions.value.filter { it != name }
+        saveRegions()
+    }
+
+    private fun saveRegions() {
+        prefs.edit().putString("regions", JSONArray(regions.value).toString()).apply()
+    }
+
+    private fun loadRegions() {
+        val raw = prefs.getString("regions", null) ?: return
+        val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return
+        regions.value = (0 until arr.length()).map { arr.getString(it) }
     }
 
     // ---------------------------------------------------------------- region scopes
