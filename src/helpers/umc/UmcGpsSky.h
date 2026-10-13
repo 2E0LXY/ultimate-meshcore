@@ -121,8 +121,8 @@ private:
     if (_count < UMC_GPS_MAX_SATS) _sats[_count++] = sat;
   }
 
-  Sat _sats[UMC_GPS_MAX_SATS];
-  char _buf[96];
+  Sat _sats[UMC_GPS_MAX_SATS] = {};
+  char _buf[96] = {0};
   size_t _len = 0;
   bool _in_sentence = false;
   int _count = 0;

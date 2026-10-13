@@ -131,7 +131,8 @@ void UmcService::formatRoutesJson(char* out, size_t out_size) const {
     pos = appendJsonEscaped(out, out_size, pos, r.name);
     pos += snprintf(out + pos, out_size - pos,
                     ",\"type\":\"%s\",\"hops\":%u,\"hash\":%u,\"path\":\"%s\",\"pin\":\"%s\",\"snr\":%.2f,\"ago\":%ld,\"adverts\":%lu",
-                    UmcRoutes::typeName(r.type), r.path_len / (r.hash_size ? r.hash_size : 1), r.hash_size, path, pin,
+                    UmcRoutes::typeName(r.type), (unsigned)(r.path_len / (r.hash_size ? r.hash_size : 1)),
+                    (unsigned)r.hash_size, path, pin,
                     r.snr4 / 4.0f, routeAgeSecs(r), static_cast<unsigned long>(r.adverts));
     if (r.has_loc) pos += snprintf(out + pos, out_size - pos, ",\"lat\":%.4f,\"lon\":%.4f", r.lat, r.lon);
     pos += snprintf(out + pos, out_size - pos, "}");
@@ -763,7 +764,7 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
     else if (strcmp(dn.key, "display.ip") == 0) u8 = &_prefs.display_ip_s;
     else u8 = &_prefs.display_page_s;
     if (is_get) {
-      snprintf(reply, reply_size, "> %u", u16 ? *u16 : *u8);
+      snprintf(reply, reply_size, "> %u", u16 ? (unsigned)*u16 : (unsigned)*u8);
     } else {
       int v = atoi(command + strlen(set_key));
       if (v < dn.min || v > dn.max) {
@@ -903,7 +904,7 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
     for (int i = 0; i < UmcRoutes::kMaxRoutes && pos + 40 < reply_size; i++) {
       if (!umc_routes.copy(i, r)) continue;
       pos += snprintf(reply + pos, reply_size - pos, "\n%02x%02x%02x %.12s h%u", r.key[0], r.key[1], r.key[2],
-                      r.name[0] ? r.name : "?", r.path_len / (r.hash_size ? r.hash_size : 1));
+                      r.name[0] ? r.name : "?", (unsigned)(r.path_len / (r.hash_size ? r.hash_size : 1)));
     }
     return true;
   }

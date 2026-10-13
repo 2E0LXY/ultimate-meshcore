@@ -151,6 +151,25 @@ static void drawIcon(int x, int y, uint8_t id, uint16_t c, int px) {
   }
 }
 
+// What each kind of node is drawn as, so a glance at the list is enough: repeaters are
+// the infrastructure, rooms are places, sensors report, and everything else is a person.
+static uint8_t kindIcon(uint8_t type) {
+  return type == ADV_TYPE_REPEATER ? IC_TOWER : type == ADV_TYPE_ROOM ? IC_HOUSE
+         : type == ADV_TYPE_SENSOR ? IC_DISH : IC_FACE;
+}
+
+static uint16_t kindColour(uint8_t type) {
+  return type == ADV_TYPE_REPEATER ? C_WARN : type == ADV_TYPE_ROOM ? C_OK
+         : type == ADV_TYPE_SENSOR ? C_ACC : C_ME;
+}
+
+// Green while it is recent, amber for the last day, grey once it is stale.
+static uint16_t ageColour(uint32_t secs) {
+  if (secs < 3600) return C_OK;
+  if (secs < 86400) return C_WARN;
+  return C_DIM;
+}
+
 // The icon a symbol is drawn as. Related symbols share one, so a modest set of art covers
 // the names people actually give their nodes.
 static uint8_t iconForCodepoint(uint32_t cp) {
@@ -1003,9 +1022,7 @@ void UITask::drawContactDetail() {
     _contact_detail = false;
     return;
   }
-  const uint8_t kind_icon = c.type == ADV_TYPE_REPEATER ? IC_TOWER : c.type == ADV_TYPE_ROOM ? IC_HOUSE
-                            : c.type == ADV_TYPE_SENSOR ? IC_DISH : IC_FACE;
-  drawIcon(6, top + 5, kind_icon, C_ACC, 13);
+  drawIcon(6, top + 5, kindIcon(c.type), kindColour(c.type), 13);
   textFClip(24, top + 4, SCR_W - 30, c.name[0] ? c.name : "(no name)", C_TXT, F_MED);
 
   const int LX = 6, VX = 84;
@@ -1015,7 +1032,7 @@ void UITask::drawContactDetail() {
 
   text(LX, y, "Kind", C_DIM);
   text(VX, y, c.type == ADV_TYPE_REPEATER ? "repeater" : c.type == ADV_TYPE_ROOM ? "room"
-              : c.type == ADV_TYPE_SENSOR ? "sensor" : "chat node", C_TXT);
+              : c.type == ADV_TYPE_SENSOR ? "sensor" : "chat node", kindColour(c.type));
   y += lh;
 
   text(LX, y, "Route", C_DIM);
@@ -1106,19 +1123,20 @@ void UITask::drawContacts() {
     if (!contactAt(idx, c)) continue;
     const bool sel = idx == _contact_sel;
     fill(0, y, SCR_W, row_h - 2, sel ? C_ACC : C_CARD);
-    const uint8_t kind_icon = c.type == ADV_TYPE_REPEATER ? IC_TOWER : c.type == ADV_TYPE_ROOM ? IC_HOUSE
-                              : c.type == ADV_TYPE_SENSOR ? IC_DISH : IC_FACE;
-    drawIcon(4, y + 5, kind_icon, sel ? 0xFFFF : C_ACC, 10);
+    drawIcon(4, y + 5, kindIcon(c.type), sel ? 0xFFFF : kindColour(c.type), 10);
     textClip(18, y + 4, 140, c.name[0] ? c.name : "(no name)", sel ? 0xFFFF : C_TXT);
     const char* kind = c.type == ADV_TYPE_REPEATER ? "repeater" : c.type == ADV_TYPE_ROOM ? "room" : c.type == ADV_TYPE_SENSOR ? "sensor" : "chat";
-    text(162, y + 4, kind, C_DIM);
-    if (c.out_path_len == 0xFF) text(228, y + 4, "flood", C_DIM);
+    text(162, y + 4, kind, sel ? 0xFFFF : kindColour(c.type));
+    if (c.out_path_len == 0xFF) text(228, y + 4, "flood", sel ? 0xFFFF : C_WARN);
     else {
       snprintf(buf, sizeof(buf), "%dhop", c.out_path_len & 63);
-      text(228, y + 4, buf, C_DIM);
+      text(228, y + 4, buf, sel ? 0xFFFF : C_OK);        // a known path beats flooding
     }
     char age[12];
-    if (c.last_advert_timestamp && now > c.last_advert_timestamp) text(276, y + 4, shortAge(now - c.last_advert_timestamp, age, sizeof(age)), C_DIM);
+    if (c.last_advert_timestamp && now > c.last_advert_timestamp) {
+      const uint32_t secs = now - c.last_advert_timestamp;
+      text(276, y + 4, shortAge(secs, age, sizeof(age)), sel ? 0xFFFF : ageColour(secs));
+    }
     y += row_h;
   }
   if (total == 0) text(8, top + 36, "Nothing heard yet. Send an advert from Info.", C_DIM);
@@ -1412,8 +1430,10 @@ void UITask::drawHome() {
   double glat, glon;
   const bool fix = selfLocation(glat, glon);
 
-  struct Card { const char* title; char val[12]; char sub[22]; uint16_t col; } cards[6];
+  struct Card { const char* title; char val[12]; char sub[22]; uint16_t col; uint8_t icon; } cards[6];
   memset(cards, 0, sizeof(cards));
+  static const uint8_t kCardIcon[6] = {IC_BOLT, IC_PIN, IC_TOWER, IC_FACE, IC_DISH, IC_GLOBE};
+  for (int i = 0; i < 6; i++) cards[i].icon = kCardIcon[i];
 
   cards[0].title = "BATTERY";
   if (batt) {
@@ -1463,7 +1483,8 @@ void UITask::drawHome() {
     homeCard(i, x, y, w, h);
     fill(x, y, w, h, C_CARD);
     gfx()->drawRect(x, y, w, h, C_LINE);
-    textClip(x + 4, y + 3, w - 6, cards[i].title, C_DIM);
+    drawIcon(x + 4, y + 4, cards[i].icon, cards[i].col, 8);
+    textClip(x + 16, y + 3, w - 18, cards[i].title, C_DIM);
     textFClip(x + 4, y + 15, w - 6, cards[i].val, cards[i].col, F_MED);
     textClip(x + 4, y + 34, w - 6, cards[i].sub, C_DIM);
   }
@@ -1473,9 +1494,14 @@ void UITask::drawRadio() {
   const int top = BODY_Y + 4;
   char buf[80];
 
-  snprintf(buf, sizeof(buf), "%.3f MHz  SF%d  BW%.1f  CR%d  %ddBm", _prefs->freq, _prefs->sf, _prefs->bw, _prefs->cr,
-           _prefs->tx_power_dbm);
-  textClip(4, top, 312, buf, C_TXT);
+  snprintf(buf, sizeof(buf), "%.3f MHz", _prefs->freq);
+  text(4, top, buf, C_ACC);
+  int rx = 4 + textWidth(buf) + 8;
+  snprintf(buf, sizeof(buf), "SF%d BW%.1f CR%d", _prefs->sf, _prefs->bw, _prefs->cr);
+  text(rx, top, buf, C_TXT);
+  rx += textWidth(buf) + 8;
+  snprintf(buf, sizeof(buf), "%d dBm", _prefs->tx_power_dbm);
+  text(rx, top, buf, _prefs->tx_power_dbm > 20 ? C_WARN : C_OK);
 
   // time on air for typical packet sizes at the live radio settings
   snprintf(buf, sizeof(buf), "Airtime  32B %lums  100B %lums  200B %lums", (unsigned long)radio_driver.getEstAirtimeFor(32),
@@ -1727,7 +1753,11 @@ static int currentBand() {
   int sf = 0, cr = 0;
   if (sscanf(umcCli("get radio"), "%f,%f,%d,%d", &f, &bw, &sf, &cr) != 4) return -1;
   for (int i = 0; i < kBandCount; i++) {
-    if (fabsf(kBands[i].freq - f) < 0.01f && fabsf(kBands[i].bw - bw) < 0.1f && kBands[i].sf == sf) return i;
+    // the coding rate matters here: some regions publish two presets that differ only in it
+    if (fabsf(kBands[i].freq - f) < 0.01f && fabsf(kBands[i].bw - bw) < 0.1f && kBands[i].sf == sf &&
+        kBands[i].cr == cr) {
+      return i;
+    }
   }
   return -1;
 }
@@ -2067,7 +2097,16 @@ void UITask::drawSetup() {
     if (on) fill(0, y, SCR_W, row_h, C_CARD);
     setupRow(row, label, sizeof(label), value, sizeof(value));
     const bool danger = _setup_page == SP_DEVICE && row == 2 && _setup_confirm == row;
-    textF(6, y + 6, label, on ? C_TXT : C_DIM, F_SMALL);
+    int lx = 6;
+    if (_setup_page == SP_ROOT) {        // a coloured mark per section, to find them by eye
+      static const uint8_t icons[14] = {IC_RADIO, IC_DISH, IC_GLOBE, IC_BOLT, IC_PIN, IC_PLANE, IC_CHECK,
+                                        IC_TOWER, IC_FACE, IC_PAW, IC_SUN, IC_STAR, IC_HEART, IC_DOT};
+      static const uint16_t cols[14] = {C_ACC, C_WARN, C_OK, C_ME, C_ACC, C_OK, C_TXT,
+                                        C_WARN, C_ME, C_ACC, C_OK, C_DIM, C_WARN, C_ME};
+      if (row < 14) drawIcon(6, y + 6, icons[row], on ? C_TXT : cols[row], 9);
+      lx = 20;
+    }
+    textF(lx, y + 6, label, on ? C_TXT : C_DIM, F_SMALL);
     textFClip(150, y + 6, SCR_W - 156, value, danger ? C_BAD : (on ? C_TXT : C_DIM), F_SMALL);
   }
 
