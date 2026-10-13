@@ -845,6 +845,38 @@ void MyMesh::onContactResponse(const ContactInfo &contact, const uint8_t *data, 
   ) {
     pending_status = 0;
 
+#ifdef UMC_BUILD
+    // The phone app gets the raw numbers; the device's own screen gets a line it can read,
+    // put in the conversation with that node so it sits where the question was asked.
+    // The repeater's own stats structure lives in its firmware, not in ours, so the fields
+    // are read out by offset. This is the layout every 1.x repeater sends.
+    if (len - 4 >= 40) {
+      const uint8_t* s = &data[4];
+      uint16_t batt_mv, tx_queue;
+      int16_t noise, rssi;
+      uint32_t up_secs, sent_flood, sent_direct, recv_flood, recv_direct;
+      memcpy(&batt_mv, s + 0, 2);
+      memcpy(&tx_queue, s + 2, 2);
+      memcpy(&noise, s + 4, 2);
+      memcpy(&rssi, s + 6, 2);
+      memcpy(&up_secs, s + 20, 4);
+      memcpy(&sent_flood, s + 24, 4);
+      memcpy(&sent_direct, s + 28, 4);
+      memcpy(&recv_flood, s + 32, 4);
+      memcpy(&recv_direct, s + 36, 4);
+      char line[160];
+      snprintf(line, sizeof(line),
+               "status: %u.%02uV  up %lud %luh  queue %u  noise %d  last %d dBm\n"
+               "sent %lu flood %lu direct, heard %lu flood %lu direct",
+               batt_mv / 1000, (batt_mv % 1000) / 10,
+               (unsigned long)(up_secs / 86400), (unsigned long)((up_secs % 86400) / 3600),
+               (unsigned)tx_queue, (int)noise, (int)rssi,
+               (unsigned long)sent_flood, (unsigned long)sent_direct,
+               (unsigned long)recv_flood, (unsigned long)recv_direct);
+      umc_chatlog.addDirect(contact.id.pub_key, contact.name, line, getRTCClock()->getCurrentTime(), false, 0, 0, true);
+      if (_ui) _ui->notify();
+    }
+#endif
     int i = 0;
     out_frame[i++] = PUSH_CODE_STATUS_RESPONSE;
     out_frame[i++] = 0; // reserved

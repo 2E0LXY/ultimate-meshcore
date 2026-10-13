@@ -141,6 +141,8 @@ public:
   // does this itself; a message sent from the device's own screen has to say so too, or
   // the reply would never be matched to anything.
   void expectAck(uint32_t ack, ContactInfo* contact);
+  // Whether we are currently logged in to this server, for the screen to show.
+  bool isLoggedInTo(const uint8_t* pub_key) { return hasConnectionTo(pub_key); }
   unsigned long umcFramesRead() const { return _umc_frames_read; }
   NetworkService& getNetwork() { return network; }
   UmcAppLink& getAppLink() { return app_link; }

@@ -6,17 +6,33 @@ import re
 import aiohttp
 
 
+def normalise_role(text, fallback="repeater"):
+    """Turns whatever a device calls itself into one of our three kinds."""
+    if not text:
+        return fallback
+    low = str(text).strip().lower().replace("_", " ")
+    if "room" in low:
+        return "room_server"
+    if "repeater" in low:
+        return "repeater"
+    if "companion" in low or "client" in low or "chat" in low:
+        return "companion"
+    return fallback
+
+
 class RepeaterSerialBackend:
     """Repeater / room server on USB. UMC firmware answers '@umc' bridge requests with the
-    same JSON as its web API; other firmware gets a plain command line."""
+    same JSON as its web API; other firmware gets a plain command line.
 
-    role = "repeater"
+    Which of the two it is comes from the device itself, so the app can offer the right
+    setup: a room server has rooms and a guest password, a repeater does not."""
 
     def __init__(self, link):
         self.link = link
         self.bridge = False
         self.status = "connecting"
         self.plain = {}
+        self.role = "repeater"      # until the device says otherwise
 
     async def start(self):
         await self.link.open()
@@ -24,6 +40,8 @@ class RepeaterSerialBackend:
         try:
             info = json.loads(await self.link.request("info", timeout=4))
             self.bridge = isinstance(info, dict)
+            if self.bridge:
+                self.role = normalise_role(info.get("role"), self.role)
         except Exception:
             self.bridge = False
         if not self.bridge:
@@ -33,6 +51,7 @@ class RepeaterSerialBackend:
             self.plain = {"ver": ver, "name": (await self.link.command("get name")).lstrip("> "),
                           "role": (await self.link.command("get role")).lstrip("> ") or "repeater",
                           "board": (await self.link.command("board")).lstrip("> ")}
+            self.role = normalise_role(self.plain["role"], self.role)
         self.status = "connected"
 
     def _on_close(self, reason):

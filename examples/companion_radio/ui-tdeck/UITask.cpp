@@ -25,7 +25,7 @@ enum SetupPage { SP_ROOT = 0, SP_DEVICE, SP_RADIO, SP_WIFI, SP_WIFI_PICK, SP_BLE
                  SP_CHANNELS, SP_MESSAGING, SP_CONTACTS_CFG, SP_TELEMETRY, SP_CONSOLE, SP_DISPLAY,
                  SP_QUICK, SP_THEME };
 enum SetupEdit { SE_NONE = 0, SE_NAME, SE_SSID, SE_PASSWORD, SE_PIN, SE_REGION, SE_CHANNEL, SE_COMMAND,
-                 SE_QUICK };
+                 SE_QUICK, SE_SERVER_PW };
 
 // ---- layout (320 x 240 landscape) ----
 #define SCR_W 320
@@ -1286,7 +1286,17 @@ void UITask::drawContactDetail() {
   textClip(VX, y, SCR_W - VX - 6, hex, C_TXT);
   y += lh;
 
+  // Repeaters and rooms answer to a login, and can be asked how they are getting on.
+  const bool server = c.type == ADV_TYPE_REPEATER || c.type == ADV_TYPE_ROOM;
   const int by = SCR_H - TAB_H - 26;
+  if (server) {
+    const int ry = by - 26;
+    const bool in = the_mesh.isLoggedInTo(c.id.pub_key);
+    button(2, ry, 74, 22, in ? "Logged in" : "Log in", in);
+    button(80, ry, 74, 22, "Status");
+    button(158, ry, 74, 22, "Telemetry");
+    button(236, ry, 80, 22, "Trace path");
+  }
   button(2, by, 74, 22, "Message");
   button(80, by, 74, 22, "Reset path");
   button(158, by, 74, 22, _forget_confirm == _contact_sel ? "Sure?" : "Forget",
@@ -2300,7 +2310,8 @@ void UITask::drawSetup() {
     fill(0, top, SCR_W, BODY_H, C_BG);
     static const char* what[] = {"", "Node name", "WiFi network", "WiFi password", "Bluetooth PIN",
                                  "Region name: lowercase, digits and hyphens",
-                                 "Channel name (without the #)", "Command", "Quick reply"};
+                                 "Channel name (without the #)", "Command", "Quick reply",
+                                 "Password for this repeater or room"};
     textF(8, top + 12, what[_edit_what], C_DIM, F_SMALL);
     fill(6, top + 32, SCR_W - 12, 28, C_CARD);
     gfx()->drawRect(6, top + 32, SCR_W - 12, 28, C_ACC);
@@ -2756,6 +2767,19 @@ void UITask::setupEditDone() {
         StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
       }
       break;
+    case SE_SERVER_PW: {
+      ContactInfo c;
+      if (contactAt(_contact_sel, c)) {
+        ContactInfo* live = the_mesh.lookupContactByPubKey(c.id.pub_key, PUB_KEY_SIZE);
+        uint32_t timeout;
+        const bool ok = live && the_mesh.sendLogin(*live, _edit_buf, timeout) != MSG_SEND_FAILED;
+        StrHelper::strncpy(_setup_status, ok ? "Login sent" : "Could not send the login",
+                           sizeof(_setup_status));
+        showAlert(ok ? "Login sent" : "Could not send the login", 1800);
+      }
+      _tab = TAB_CONTACTS;                         // back to where the button was
+      break;
+    }
     case SE_QUICK:
       snprintf(cmd, sizeof(cmd), "set quick%d %s", _edit_idx + 1, _edit_buf);
       StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
@@ -2912,6 +2936,48 @@ void UITask::handleTouch(const TouchEvent& ev) {
       return;
     }
     if (hit(ev, 236, by, 80, 22)) { _contact_detail = false; _forget_confirm = -1; _dirty = true; return; }
+
+    const bool server = c.type == ADV_TYPE_REPEATER || c.type == ADV_TYPE_ROOM;
+    if (server) {
+      const int ry = by - 26;
+      ContactInfo* live = the_mesh.lookupContactByPubKey(c.id.pub_key, PUB_KEY_SIZE);
+      if (hit(ev, 2, ry, 74, 22)) {               // log in: the password is typed here
+        _editing = true;
+        _edit_what = SE_SERVER_PW;
+        _edit_secret = true;
+        _edit_buf[0] = 0;
+        _edit_len = 0;
+        _tab = TAB_SETUP;                          // the typing line lives on the Setup tab
+        _dirty = true;
+        return;
+      }
+      if (hit(ev, 80, ry, 74, 22)) {
+        uint32_t tag, timeout;
+        const bool ok = live && the_mesh.sendRequest(*live, REQ_TYPE_GET_STATUS, tag, timeout) != MSG_SEND_FAILED;
+        showAlert(ok ? "Asked for status" : "Could not ask", 1500);
+        return;
+      }
+      if (hit(ev, 158, ry, 74, 22)) {
+        uint32_t tag, timeout;
+        const bool ok = live &&
+                        the_mesh.sendRequest(*live, REQ_TYPE_GET_TELEMETRY_DATA, tag, timeout) != MSG_SEND_FAILED;
+        showAlert(ok ? "Asked for telemetry" : "Could not ask", 1500);
+        return;
+      }
+      if (hit(ev, 236, ry, 80, 22)) {
+        // Path discovery is a flood telemetry request: the answer carries the route back.
+        uint32_t tag, timeout;
+        bool ok = false;
+        if (live) {
+          const uint8_t save = live->out_path_len;
+          live->out_path_len = OUT_PATH_UNKNOWN;   // force it to flood, so the path is learnt
+          ok = the_mesh.sendRequest(*live, REQ_TYPE_GET_TELEMETRY_DATA, tag, timeout) != MSG_SEND_FAILED;
+          live->out_path_len = save;
+        }
+        showAlert(ok ? "Tracing the path" : "Could not trace", 1500);
+        return;
+      }
+    }
     return;
   }
 
