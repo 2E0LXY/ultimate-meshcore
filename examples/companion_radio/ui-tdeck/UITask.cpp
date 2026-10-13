@@ -1639,23 +1639,76 @@ void UITask::drawGps() {
 // is applied through the same command line the web interface uses, so the device and the
 // browser can never disagree.
 
-struct RadioBand { const char* name; float freq; float bw; uint8_t sf; uint8_t cr; };
+// The presets MeshCore publishes for each region, from its own feed at
+// api.meshcore.nz/api/v1/config. Frequency, bandwidth and spreading factor have to match
+// for two radios to hear each other at all; the coding rate travels in the packet header,
+// so a node that differs there is still readable.
+struct RadioBand { const char* name; float freq; float bw; uint8_t sf; uint8_t cr; int8_t hash_mode; };
 static const RadioBand kBands[] = {
-  {"EU/UK 869.6 narrow", 869.618f, 62.5f, 8, 5},
-  {"EU/UK 869.5 medium", 869.525f, 250.0f, 10, 5},
-  {"EU/UK 869.5 long", 869.525f, 250.0f, 11, 5},
-  {"EU 433.65 long", 433.65f, 250.0f, 11, 5},
-  {"Switzerland 869.6", 869.618f, 62.5f, 8, 5},
-  {"Czech 869.4", 869.432f, 62.5f, 7, 5},
-  {"Portugal 433.4", 433.375f, 62.5f, 9, 5},
-  {"USA/Canada 910.5", 910.525f, 62.5f, 7, 5},
-  {"Australia/NZ 915.8", 915.8f, 62.5f, 8, 5},
+  {"EU/UK (Narrow)",         869.618f,  62.5f,  8, 8, -1},
+  {"EU/UK narrow, CR5",      869.618f,  62.5f,  8, 5, -1},
+  {"EU/UK (Deprecated)",     869.525f, 250.0f, 11, 5, -1},
+  {"EU 433 (Long Range)",    433.650f, 250.0f, 11, 5, -1},
+  {"EU 433 (Narrow)",        433.650f,  62.5f,  8, 8, -1},
+  {"Czech Republic",         869.432f,  62.5f,  7, 5,  1},
+  {"Hungary",                869.618f,  62.5f,  7, 5,  1},
+  {"Netherlands",            869.618f,  62.5f,  7, 5, -1},
+  {"Netherlands (Limburg)",  869.618f,  62.5f,  8, 8,  1},
+  {"Portugal 868",           869.618f,  62.5f,  7, 6, -1},
+  {"Portugal 433",           433.375f,  62.5f,  9, 6, -1},
+  {"Slovakia",               869.618f,  62.5f,  7, 5,  1},
+  {"Switzerland",            869.618f,  62.5f,  8, 8, -1},
+  {"USA",                    910.525f,  62.5f,  7, 5, -1},
+  {"USA - S. California",    927.875f,  62.5f,  7, 5,  2},
+  {"Canada",                 910.525f,  62.5f,  7, 5,  2},
+  {"Costa Rica",             910.525f, 125.0f, 11, 5, -1},
+  {"Brazil",                 923.125f,  62.5f,  8, 8, -1},
+  {"Australia",              915.800f, 250.0f, 10, 5, -1},
+  {"Australia (Narrow)",     916.575f,  62.5f,  7, 7, -1},
+  {"Australia (Mid)",        915.075f, 125.0f,  9, 5, -1},
+  {"Australia: SA, WA",      923.125f,  62.5f,  8, 8, -1},
+  {"Australia: QLD",         923.125f,  62.5f,  8, 5, -1},
+  {"New Zealand (Narrow)",   917.375f,  62.5f,  7, 5,  1},
+  {"New Zealand (Gisborne)", 917.375f, 250.0f, 11, 5,  0},
+  {"Vietnam (Narrow)",       920.250f,  62.5f,  8, 5, -1},
+  {"Vietnam (Deprecated)",   920.250f, 250.0f, 11, 5, -1},
 };
 static const int kBandCount = sizeof(kBands) / sizeof(kBands[0]);
 static const int kTxSteps[] = {2, 5, 8, 11, 14, 17, 20, 22};
 static const int kTxCount = sizeof(kTxSteps) / sizeof(kTxSteps[0]);
-static const char* kScopes[] = {"-", "yorkshire", "northwest", "uk"};
+// Region scopes decide which repeaters forward a packet. These are the ones the UK
+// communities publish; "-" leaves messages unscoped.
+static const char* kScopes[] = {"-", "yorkshire", "eng-ne", "northwest", "eng-yh", "uk"};
 static const int kScopeCount = sizeof(kScopes) / sizeof(kScopes[0]);
+
+// Adds a hashtag channel by name. The key is worked out from the name the same way the
+// phone apps do it, so everyone who types "#yorkshire" lands on the same channel. Returns
+// false when it is already there or there is no room for it.
+static bool addHashChannel(const char* name) {
+  char hashed[40];
+  snprintf(hashed, sizeof(hashed), "#%s", name[0] == '#' ? name + 1 : name);
+
+  ChannelDetails existing;
+  int slot = -1;
+  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+    if (!the_mesh.getChannel(i, existing)) break;
+    if (strcmp(existing.name, hashed) == 0) return false;      // already joined
+    if (slot < 0 && existing.name[0] == 0) slot = i;
+  }
+  if (slot < 0) return false;
+
+  ChannelDetails ch;
+  memset(&ch, 0, sizeof(ch));
+  StrHelper::strncpy(ch.name, hashed, sizeof(ch.name));
+  TransportKeyStore temp;
+  TransportKey key;
+  temp.getAutoKeyFor(0, hashed, key);
+  memset(ch.channel.secret, 0, sizeof(ch.channel.secret));
+  memcpy(ch.channel.secret, key.key, 16);                       // 128-bit, as the apps use
+  if (!the_mesh.setChannel(slot, ch)) return false;
+  the_mesh.saveChannels();
+  return true;
+}
 
 // Runs a command and returns the reply with any leading "> " removed.
 static const char* umcCli(const char* cmd) {
@@ -1720,7 +1773,7 @@ int UITask::setupRowCount() const {
     case SP_WIFI: return 5;                    // scan, network, password, connect, back
     case SP_WIFI_PICK: return _wifi_found + 1; // networks, back
     case SP_BLE: return 3;                     // on/off, PIN, back
-    case SP_REGION: return kScopeCount + 1;
+    case SP_REGION: return kScopeCount + 3;
     case SP_GPS: return 2;
     case SP_FW: return 4;                      // version, check, install, back
     case SP_CHANNELS: return MAX_GROUP_CHANNELS > 12 ? 14 : MAX_GROUP_CHANNELS + 2;   // channels, add, back
@@ -1787,7 +1840,12 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
     case SP_RADIO:
       if (row < kBandCount) {
         snprintf(label, label_n, "%s", kBands[row].name);
-        snprintf(value, value_n, "%s", currentBand() == row ? "in use" : "");
+        if (currentBand() == row) {
+          snprintf(value, value_n, "in use");
+        } else {
+          snprintf(value, value_n, "%.3f SF%u CR%u", kBands[row].freq, (unsigned)kBands[row].sf,
+                   (unsigned)kBands[row].cr);
+        }
       } else if (row == kBandCount) {
         snprintf(label, label_n, "TX power");
         snprintf(value, value_n, "%s dBm", umcCli("get tx"));
@@ -1822,6 +1880,16 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
       }
       break;
     case SP_REGION:
+      if (row == kScopeCount) {
+        snprintf(label, label_n, "Yorkshire starter");
+        snprintf(value, value_n, "%s", _setup_confirm == row ? "tap again" : "radio, scope, channels");
+        break;
+      }
+      if (row == kScopeCount + 1) {
+        snprintf(label, label_n, "Repeater commands");
+        snprintf(value, value_n, "region put yorkshire ...");
+        break;
+      }
       if (row < kScopeCount) {
         snprintf(label, label_n, "%s", strcmp(kScopes[row], "-") == 0 ? "No region (whole mesh)" : kScopes[row]);
         snprintf(value, value_n, "%s", strcmp(umcCli("get scope"), kScopes[row]) == 0 ? "in use" : "");
@@ -2066,6 +2134,10 @@ void UITask::setupAction(int row) {
         snprintf(cmd, sizeof(cmd), "set radio %.3f,%.1f,%u,%u", kBands[row].freq, kBands[row].bw,
                  (unsigned)kBands[row].sf, (unsigned)kBands[row].cr);
         StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+        if (kBands[row].hash_mode >= 0) {      // a few regions also agree a path hash size
+          snprintf(cmd, sizeof(cmd), "set path.hash.mode %d", kBands[row].hash_mode);
+          umcCli(cmd);
+        }
       } else if (row == kBandCount) {
         const int now = atoi(umcCli("get tx"));
         int next = kTxSteps[0];
@@ -2131,6 +2203,30 @@ void UITask::setupAction(int row) {
       if (row < kScopeCount) {
         snprintf(cmd, sizeof(cmd), "set scope %s", kScopes[row]);
         StrHelper::strncpy(_setup_status, umcCli(cmd), sizeof(_setup_status));
+      } else if (row == kScopeCount + 1) {
+        // What a Yorkshire repeater operator has to enter on the repeater itself.
+        StrHelper::strncpy(_console_out,
+                           "On each repeater:\nregion put yorkshire\nregion default yorkshire\n"
+                           "region put eng-ne\nregion put northwest\nregion denyf *\nregion save",
+                           sizeof(_console_out));
+        setupOpen(SP_CONSOLE);
+        return;
+      } else if (row == kScopeCount) {
+        // The published MeshCore Yorkshire setup: the shared radio profile, the regional
+        // scope, and the three public channels.
+        if (_setup_confirm != row) {           // it changes the radio, so ask first
+          _setup_confirm = row;
+          StrHelper::strncpy(_setup_status, "Tap again: this retunes the radio", sizeof(_setup_status));
+          break;
+        }
+        _setup_confirm = -1;
+        umcCli("set radio 869.618,62.5,8,8");
+        umcCli("set scope yorkshire");
+        int added = 0;
+        for (const char* name : {"yorkshire", "northwest", "northeast"}) {
+          if (addHashChannel(name)) added++;
+        }
+        snprintf(_setup_status, sizeof(_setup_status), "UK narrow, scope yorkshire, %d channels", added);
       } else {
         setupOpen(SP_ROOT);
         return;
@@ -2335,29 +2431,11 @@ void UITask::setupEditDone() {
       break;
     case SE_CHANNEL:
       if (_edit_len > 0) {
-        // a hashtag channel: its key is worked out from the name, the same way the apps do
-        ChannelDetails ch;
-        memset(&ch, 0, sizeof(ch));
-        char hashed[40];
-        snprintf(hashed, sizeof(hashed), "#%s", _edit_buf[0] == '#' ? _edit_buf + 1 : _edit_buf);
-        StrHelper::strncpy(ch.name, hashed, sizeof(ch.name));
-        TransportKeyStore temp;
-        TransportKey key;
-        temp.getAutoKeyFor(0, hashed, key);
-        memset(ch.channel.secret, 0, sizeof(ch.channel.secret));
-        memcpy(ch.channel.secret, key.key, 16);   // 128-bit, as the apps use
-        int slot = -1;
-        ChannelDetails existing;
-        for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
-          if (!the_mesh.getChannel(i, existing) || existing.name[0] == 0) { slot = i; break; }
-        }
-        if (slot < 0) {
-          StrHelper::strncpy(_setup_status, "No free channel slots", sizeof(_setup_status));
-        } else if (the_mesh.setChannel(slot, ch)) {
-          the_mesh.saveChannels();
-          snprintf(_setup_status, sizeof(_setup_status), "Added %s", hashed);
+        if (addHashChannel(_edit_buf)) {
+          snprintf(_setup_status, sizeof(_setup_status), "Added #%s",
+                   _edit_buf[0] == '#' ? _edit_buf + 1 : _edit_buf);
         } else {
-          StrHelper::strncpy(_setup_status, "Could not add that channel", sizeof(_setup_status));
+          StrHelper::strncpy(_setup_status, "Already joined, or no free slots", sizeof(_setup_status));
         }
       }
       break;
