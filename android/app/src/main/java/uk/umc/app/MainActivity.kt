@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Settings
@@ -26,6 +27,7 @@ import uk.umc.app.link.LinkState
 import uk.umc.app.ui.*
 
 private enum class Tab(val label: String, val icon: ImageVector) {
+    DASHBOARD("Home", Icons.Filled.Home),
     CHATS("Messages", Icons.Filled.Chat),
     CONTACTS("Contacts", Icons.Filled.Group),
     CHANNELS("Channels", Icons.Filled.Tag),
@@ -60,9 +62,10 @@ class MainActivity : ComponentActivity() {
 fun UmcApp() {
     val dark = androidx.compose.foundation.isSystemInDarkTheme()
     MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
-        var tab by remember { mutableStateOf(Tab.CHATS) }
+        var tab by remember { mutableStateOf(Tab.DASHBOARD) }
         var openChat by remember { mutableStateOf<String?>(null) }
         var showConnect by remember { mutableStateOf(false) }
+        var showLook by remember { mutableStateOf(false) }
         val snackbar = remember { SnackbarHostState() }
         val toast by AppState.toast.collectAsState()
         val state by AppState.linkState.collectAsState()
@@ -76,7 +79,9 @@ fun UmcApp() {
             }
         }
 
+        Backdrop {
         Scaffold(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
                 TopAppBar(
@@ -101,8 +106,8 @@ fun UmcApp() {
                 NavigationBar {
                     Tab.entries.forEach { t ->
                         NavigationBarItem(
-                            selected = tab == t && openChat == null && !showConnect,
-                            onClick = { tab = t; openChat = null; showConnect = false },
+                            selected = tab == t && openChat == null && !showConnect && !showLook,
+                            onClick = { tab = t; openChat = null; showConnect = false; showLook = false },
                             icon = { Icon(t.icon, contentDescription = t.label) },
                             label = { Text(t.label, style = MaterialTheme.typography.labelSmall) },
                         )
@@ -114,7 +119,17 @@ fun UmcApp() {
                 when {
                     showConnect -> ConnectScreen()
                     openChat != null -> ChatScreen(openChat!!) { openChat = null }
+                    showLook -> LookScreen()
                     else -> when (tab) {
+                        Tab.DASHBOARD -> DashboardScreen { where ->
+                            when (where) {
+                                "chats" -> tab = Tab.CHATS
+                                "contacts" -> tab = Tab.CONTACTS
+                                "map" -> tab = Tab.MAP
+                                "radio" -> tab = Tab.RADIO
+                                "look" -> showLook = true
+                            }
+                        }
                         Tab.CHATS -> ChatsScreen { openChat = it }
                         Tab.CONTACTS -> ContactsScreen(onMessage = { openChat = it }, onMap = { tab = Tab.MAP })
                         Tab.CHANNELS -> ChannelsScreen()
@@ -124,6 +139,7 @@ fun UmcApp() {
                     }
                 }
             }
+        }
         }
     }
 }

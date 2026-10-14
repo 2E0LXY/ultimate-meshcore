@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import uk.umc.app.ui.Background
 import uk.umc.app.link.BleLink
 import uk.umc.app.link.Link
 import uk.umc.app.link.LinkKind
@@ -41,6 +42,7 @@ object AppState {
         loadDevices()
         loadScopes()
         loadRegions()
+        loadLook()
         ackDisplay.value = prefs.getString("ackShow", "count") ?: "count"
         val last = prefs.getString("last", null)
         savedDevices.value.firstOrNull { it.key() == last }?.let { connect(it) }
@@ -114,6 +116,35 @@ object AppState {
 
     fun reconnect() {
         target.value?.let { connect(it) }
+    }
+
+    // ---------------------------------------------------------------- how it looks
+
+    val background = MutableStateFlow(Background.SYSTEM)
+    val backgroundColour = MutableStateFlow(0)          // which entry of backgroundPalette
+    val backgroundPhoto = MutableStateFlow<String?>(null)   // content URI of a chosen picture
+
+    fun setBackground(kind: Background) {
+        background.value = kind
+        prefs.edit().putString("bg", kind.name).apply()
+    }
+
+    fun setBackgroundColour(index: Int) {
+        backgroundColour.value = index
+        prefs.edit().putInt("bgColour", index).apply()
+    }
+
+    fun setBackgroundPhoto(uri: String?) {
+        backgroundPhoto.value = uri
+        prefs.edit().putString("bgPhoto", uri).apply()
+        if (uri != null) setBackground(Background.PHOTO)
+    }
+
+    private fun loadLook() {
+        background.value = runCatching { Background.valueOf(prefs.getString("bg", "SYSTEM") ?: "SYSTEM") }
+            .getOrDefault(Background.SYSTEM)
+        backgroundColour.value = prefs.getInt("bgColour", 0)
+        backgroundPhoto.value = prefs.getString("bgPhoto", null)
     }
 
     // ---------------------------------------------------------------- delivery marks
