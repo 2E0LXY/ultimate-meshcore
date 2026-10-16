@@ -17,6 +17,36 @@ import uk.umc.app.link.LinkState
 class MeshError(message: String) : Exception(message)
 
 /** A message as the app shows it. */
+/**
+ * A packet the radio heard, as it came off the air.
+ *
+ * The radio pushes one of these for every packet it receives, whether or not it was meant
+ * for us, which is what makes a picture of the channel possible.
+ */
+data class HeardPacket(
+    val at: Long,                    // when we were told, device clock
+    val snr: Double,
+    val rssi: Int,
+    val kind: String,                // ADV, MSG, ACK, TRC, PTH, GRP, REQ, RSP or RAW
+    val size: Int,
+    val flood: Boolean,
+)
+
+/** The radio's own view of its channel: noise, airtime and what it has sent and heard. */
+data class RadioStats(
+    val noiseFloor: Int,
+    val lastRssi: Int,
+    val lastSnr: Double,
+    val txAirSecs: Long,
+    val rxAirSecs: Long,
+    val upSecs: Long,
+    val sentFlood: Long,
+    val sentDirect: Long,
+    val recvFlood: Long,
+    val recvDirect: Long,
+    val recvErrors: Long,
+)
+
 data class ChatMessage(
     val id: Long,
     val conversation: String,        // "ch:<idx>" or "c:<key prefix>"
@@ -45,6 +75,10 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
     val contacts = MutableStateFlow<List<Contact>>(emptyList())
     val channels = MutableStateFlow<List<Channel>>(emptyList())
     val messages = MutableStateFlow<List<ChatMessage>>(emptyList())
+
+    /** The last few minutes of packets the radio heard, newest last. */
+    val heard = MutableStateFlow<List<HeardPacket>>(emptyList())
+    val radioStats = MutableStateFlow<RadioStats?>(null)
     val pendingAdverts = MutableStateFlow<List<Contact>>(emptyList())
     val events = MutableSharedFlow<String>(extraBufferCapacity = 32)
     val newMessages = MutableSharedFlow<ChatMessage>(extraBufferCapacity = 32)
@@ -250,9 +284,67 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
                 }
                 scope.launch { refreshContacts() }
             }
+            Push.LOG_RX_DATA -> noteHeard(f)
             Push.PATH_UPDATED, Push.CONTACT_DELETED -> scope.launch { refreshContacts() }
             Push.CONTACTS_FULL -> scope.launch { events.emit("The radio's contact list is full") }
         }
+    }
+
+/**
+     * A packet the radio heard. The first byte of the raw packet carries its routing and
+     * payload type, which is enough to say what kind of traffic it was.
+     */
+    private fun noteHeard(f: ByteArray) {
+        if (f.size < 4) return
+        val snr = (f[1].toInt()) / 4.0
+        val rssi = f[2].toInt()
+        val header = f[3].toInt() and 0xFF
+        val route = header and 0x03                  // 0 and 1 flood, 2 and 3 direct
+        val payload = (header shr 2) and 0x0F
+        // these are the firmware's own payload types, in its order
+        val kind = when (payload) {
+            0 -> "REQ"
+            1 -> "RSP"
+            2 -> "MSG"
+            3 -> "ACK"
+            4 -> "ADV"
+            5 -> "GRP"
+            6 -> "GDAT"
+            7 -> "ANON"
+            8 -> "PATH"
+            9 -> "TRACE"
+            10 -> "PART"
+            11 -> "CTRL"
+            else -> "RAW"
+        }
+        val p = HeardPacket(System.currentTimeMillis(), snr, rssi, kind, f.size - 3, route == 1 || route == 0)
+        // an hour of traffic is plenty to draw, and keeps the list from growing without end
+        heard.value = (heard.value + p).takeLast(600)
+    }
+
+    /** Asks the radio for its own radio and packet counters. */
+    suspend fun refreshRadioStats() {
+        val radio = request(byteArrayOf(Cmd.GET_STATS.toByte(), 1), Resp.STATS, timeoutMs = 6000)
+        val packets = request(byteArrayOf(Cmd.GET_STATS.toByte(), 2), Resp.STATS, timeoutMs = 6000)
+        val core = request(byteArrayOf(Cmd.GET_STATS.toByte(), 0), Resp.STATS, timeoutMs = 6000)
+        if (radio.size < 14 || packets.size < 30 || core.size < 9) return
+        val r = FrameReader(radio, 2)
+        val noise = r.i16()
+        val lastRssi = r.i8()
+        val lastSnr = r.i8() / 4.0
+        val txAir = r.u32()
+        val rxAir = r.u32()
+        val c = FrameReader(core, 2)
+        c.u16()                                       // battery, already shown elsewhere
+        val up = c.u32()
+        val p = FrameReader(packets, 2)
+        p.u32(); p.u32()                              // totals, we want the breakdown
+        radioStats.value = RadioStats(
+            noiseFloor = noise, lastRssi = lastRssi, lastSnr = lastSnr,
+            txAirSecs = txAir, rxAirSecs = rxAir, upSecs = up,
+            sentFlood = p.u32(), sentDirect = p.u32(), recvFlood = p.u32(), recvDirect = p.u32(),
+            recvErrors = p.u32(),
+        )
     }
 
     private fun handleIncomingMessage(f: ByteArray) {
