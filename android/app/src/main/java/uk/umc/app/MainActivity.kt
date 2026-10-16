@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Tag
@@ -34,6 +35,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     CHANNELS("Channels", Icons.Filled.Tag),
     MAP("Map", Icons.Filled.Map),
     SPECTRUM("Spectrum", Icons.Filled.ShowChart),
+    GPS("GPS", Icons.Filled.MyLocation),
     RADIO("Radio", Icons.Filled.Settings),
     DEVICE("Device", Icons.Filled.Wifi),
 }
@@ -137,6 +139,7 @@ fun UmcApp() {
                         Tab.CHANNELS -> ChannelsScreen()
                         Tab.MAP -> MapScreen()
                         Tab.SPECTRUM -> SpectrumScreen()
+                        Tab.GPS -> GpsScreen()
                         Tab.RADIO -> RadioScreen()
                         Tab.DEVICE -> UmcDeviceScreen()
                     }
