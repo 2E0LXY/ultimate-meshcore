@@ -1,6 +1,20 @@
 package uk.umc.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -138,20 +152,106 @@ private fun ContactSheet(
         }
     }
 
-    ModalBottomSheet(onDismissRequest = onClose) {
-        Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(c.name, style = MaterialTheme.typography.titleLarge)
-            Text("${c.typeName} · ${pathLabel(c)}", color = MaterialTheme.colorScheme.outline)
-            if (c.hops > 0) {
-                Text("Route: " + s.routeHops(c).joinToString(" → ") { h -> s.hopName(h).ifEmpty { h } + " ($h)" },
-                    style = MaterialTheme.typography.bodySmall)
-            }
-            Text(c.publicKey, style = MaterialTheme.typography.labelSmall)
-            if (c.lat != 0.0 || c.lon != 0.0) Text("Location %.4f, %.4f".format(c.lat, c.lon))
+    val me by s.self.collectAsState()
+    val away = remember(c, me) {
+        val m = me
+        if (m == null || (c.lat == 0.0 && c.lon == 0.0) || (m.lat == 0.0 && m.lon == 0.0)) null
+        else distanceKm(m.lat, m.lon, c.lat, c.lon)
+    }
 
+    ModalBottomSheet(onDismissRequest = onClose) {
+        Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // who it is: the name, what kind of node, how far off and how it is reached
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape)
+                        .background(kindTint(c.type).copy(alpha = 0.25f)),
+                    contentAlignment = androidx.compose.ui.Alignment.Center,
+                ) {
+                    Text(
+                        c.name.take(2).uppercase().ifEmpty { "?" },
+                        style = MaterialTheme.typography.titleMedium, color = kindTint(c.type),
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(c.name, style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        listOfNotNull(
+                            c.typeName,
+                            pathLabel(c),
+                            away?.let { if (it < 1) "%.0f m away".format(it * 1000) else "%.1f km away".format(it) },
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                IconButton(onClick = { run("Saving…") { s.setFavourite(c, !c.favourite); "Saved." } }) {
+                    Icon(
+                        if (c.favourite) Icons.Filled.Star else Icons.Filled.StarBorder, "Favourite",
+                        tint = if (c.favourite) Color(0xFFF9A825) else MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+
+            // the five things worth reaching for, as their own row
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QuickAction(Modifier.weight(1f), Icons.Filled.Chat, "Message") {
+                    onMessage("c:${c.prefix}"); onClose()
+                }
+                QuickAction(Modifier.weight(1f), Icons.Filled.Insights, "Telemetry") {
+                    run("Asking for telemetry…") {
+                        val tl = s.telemetry(c)
+                        if (tl.isEmpty()) "No telemetry shared with you."
+                        else tl.joinToString("\n") { "${it.name} (ch ${it.channel}): ${it.value}" }
+                    }
+                }
+                QuickAction(Modifier.weight(1f), Icons.Filled.Route, "Path") {
+                    run("Discovering…") { s.discoverPath(c) }
+                }
+                QuickAction(Modifier.weight(1f), Icons.Filled.Place, "Map") { onMap(c); onClose() }
+                QuickAction(Modifier.weight(1f), Icons.Filled.Share, "Share") {
+                    run("Sharing…") { s.shareContact(c); "Shared with radios in direct range." }
+                }
+            }
+
+            // what is known about it
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GlassCard(Modifier.weight(1f)) {
+                    Column {
+                        Text("LAST HEARD", style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.outline)
+                        Text(
+                            if (c.lastAdvert > 0) ago(System.currentTimeMillis() / 1000 - c.lastAdvert) + " ago"
+                            else "not yet",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                }
+                GlassCard(Modifier.weight(1f)) {
+                    Column {
+                        Text("ROUTE", style = MaterialTheme.typography.labelSmall,
+                             color = MaterialTheme.colorScheme.outline)
+                        Text(pathLabel(c), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+            if (c.hops > 0) {
+                Text(
+                    "Via " + s.routeHops(c).joinToString(" → ") { h -> s.hopName(h).ifEmpty { h } },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (c.lat != 0.0 || c.lon != 0.0) {
+                Text("%.4f, %.4f".format(c.lat, c.lon), style = MaterialTheme.typography.bodySmall,
+                     color = MaterialTheme.colorScheme.outline)
+            }
+            Text(c.publicKey, style = MaterialTheme.typography.labelSmall,
+                 color = MaterialTheme.colorScheme.outline)
+
+            Text("More", style = MaterialTheme.typography.labelMedium,
+                 color = MaterialTheme.colorScheme.outline)
             FlowButtons(
                 listOfNotNull(
-                    "Message" to { onMessage("c:${c.prefix}"); onClose() },
                     if (c.type != uk.umc.app.proto.ADV_TYPE_CHAT) ("Log in" to { askPassword = true }) else null,
                     if (c.type != uk.umc.app.proto.ADV_TYPE_CHAT) ("Status" to {
                         run("Asking for status…") {
@@ -167,12 +267,6 @@ private fun ContactSheet(
                             }
                         }
                     }) else null,
-                    "Telemetry" to {
-                        run("Asking for telemetry…") {
-                            val t = s.telemetry(c)
-                            if (t.isEmpty()) "No telemetry shared with you." else t.joinToString("\n") { "${it.name} (ch ${it.channel}): ${it.value}" }
-                        }
-                    },
                     "Trace path" to {
                         run("Tracing…") {
                             val t = s.trace(c)
@@ -180,14 +274,9 @@ private fun ContactSheet(
                                 .joinToString("\n") + (t.finalSnr?.let { "\nback here: SNR $it" } ?: "")
                         }
                     },
-                    "Discover path" to { run("Discovering…") { s.discoverPath(c) } },
                     "Set route" to { routing = true },
                     "Reset path" to { run("Resetting…") { s.resetPath(c); "Path reset - the next message finds a new route." } },
-                    "Share" to { run("Sharing…") { s.shareContact(c); "Shared with radios in direct range." } },
                     "Export" to { run("Exporting…") { val uri = s.exportContact(c); onShare(uri); uri } },
-                    (if (c.favourite) "Unfavourite" else "Favourite") to {
-                        run("Saving…") { s.setFavourite(c, !c.favourite); "Saved." }
-                    },
                     "Remove" to { run("Removing…") { s.removeContact(c); "Removed." } },
                     if (c.type != uk.umc.app.proto.ADV_TYPE_CHAT) ("Admin console" to { console = true }) else null,
                 )
@@ -249,6 +338,39 @@ private fun ContactSheet(
             dismissButton = { TextButton(onClick = { routing = false }) { Text("Cancel") } },
         )
     }
+}
+
+/** A big, obvious action with its own icon. */
+@Composable
+private fun QuickAction(modifier: Modifier, icon: ImageVector, label: String, onClick: () -> Unit) {
+    Column(
+        modifier.clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .clickable { onClick() }
+            .padding(vertical = 10.dp),
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(4.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+/** The colour a kind of node is drawn in, matching the radio's own screen. */
+private fun kindTint(type: Int): Color = when (type) {
+    uk.umc.app.proto.ADV_TYPE_REPEATER -> Color(0xFFEF6C00)
+    uk.umc.app.proto.ADV_TYPE_ROOM -> Color(0xFF2E7D32)
+    uk.umc.app.proto.ADV_TYPE_SENSOR -> Color(0xFF1E88E5)
+    else -> Color(0xFF7E57C2)
+}
+
+/** Great-circle distance in kilometres. */
+private fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val r = 6371.0
+    val p = Math.PI / 180
+    val a = 0.5 - Math.cos((lat2 - lat1) * p) / 2 +
+        Math.cos(lat1 * p) * Math.cos(lat2 * p) * (1 - Math.cos((lon2 - lon1) * p)) / 2
+    return 2 * r * Math.asin(Math.sqrt(a))
 }
 
 @Composable
