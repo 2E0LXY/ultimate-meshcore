@@ -1,68 +1,43 @@
 package uk.umc.app.ui
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
-import android.location.Location
-import android.location.LocationManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 import uk.umc.app.AppState
 
 /**
- * Where the radio thinks it is, where this phone is, and how to tell one from the other.
+ * Where the radio is, and what that puts within reach.
  *
- * The radio's position is whatever it has been given or found; the phone's is only read
- * when you ask for it, so the app never requests a location you did not want to share.
+ * Everything here comes from the radio itself - this phone's own location is never read,
+ * so the app needs no location permission.
  */
 @Composable
 fun GpsScreen() {
     val s by AppState.session.collectAsState()
     val session = s ?: return NotConnected()
     val me by session.self.collectAsState()
-    val ctx = LocalContext.current
+    val contacts by session.contacts.collectAsState()
     val scope = rememberCoroutineScope()
 
-    var phone by remember { mutableStateOf<Location?>(null) }
-    var asked by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    var lat by remember { mutableStateOf("") }
+    var lon by remember { mutableStateOf("") }
 
-    fun readPhonePosition() {
-        val granted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
-        if (!granted) return
-        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val best = runCatching {
-            lm.getProviders(true).mapNotNull { p ->
-                @Suppress("MissingPermission")
-                lm.getLastKnownLocation(p)
-            }.maxByOrNull { it.time }
-        }.getOrNull()
-        phone = best
-        if (best == null) AppState.say("No position from this phone yet - try again outdoors")
-    }
+    val set = me?.let { it.lat != 0.0 || it.lon != 0.0 } ?: false
 
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        asked = true
-        if (ok) readPhonePosition() else AppState.say("Location permission refused")
-    }
-
-    val radioSet = me?.let { it.lat != 0.0 || it.lon != 0.0 } ?: false
-    val apart = remember(phone, me) {
+    // every node that shares a position, nearest first
+    val placed = remember(contacts, me) {
         val m = me
-        val p = phone
-        if (m == null || p == null || !radioSet) null
-        else distanceBetween(m.lat, m.lon, p.latitude, p.longitude)
+        if (m == null || !set) emptyList()
+        else contacts.filter { it.lat != 0.0 || it.lon != 0.0 }
+            .map { it to distanceBetween(m.lat, m.lon, it.lat, it.lon) }
+            .sortedBy { it.second }
     }
 
     LazyColumn(
@@ -73,17 +48,23 @@ fun GpsScreen() {
         item {
             GlassCard(Modifier.fillMaxWidth()) {
                 Column {
-                    Text("RADIO", style = MaterialTheme.typography.labelSmall,
+                    Text("RADIO POSITION", style = MaterialTheme.typography.labelSmall,
                          color = MaterialTheme.colorScheme.outline)
                     Text(
-                        if (radioSet) "%.5f, %.5f".format(me!!.lat, me!!.lon) else "No position",
+                        if (set) "%.5f, %.5f".format(me!!.lat, me!!.lon) else "Not set",
                         style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        if (radioSet) "What it tells the mesh when it adverts"
-                        else "Nothing to advertise, and the map has nowhere to centre",
+                        if (set) "What it tells the mesh, and where the map centres"
+                        else "Without one the map has nowhere to centre and distances cannot be worked out",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
                     )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = {
+                        lat = me?.lat?.takeIf { set }?.toString() ?: ""
+                        lon = me?.lon?.takeIf { set }?.toString() ?: ""
+                        editing = true
+                    }) { Text(if (set) "Change it" else "Set it") }
                 }
             }
         }
@@ -91,81 +72,99 @@ fun GpsScreen() {
         item {
             GlassCard(Modifier.fillMaxWidth()) {
                 Column {
-                    Text("THIS PHONE", style = MaterialTheme.typography.labelSmall,
+                    Text("SHARING", style = MaterialTheme.typography.labelSmall,
                          color = MaterialTheme.colorScheme.outline)
-                    val p = phone
                     Text(
-                        if (p != null) "%.5f, %.5f".format(p.latitude, p.longitude) else "Not read",
-                        style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                        if (me?.advertLocPolicy == 0) "Kept to yourself" else "Sent with adverts",
+                        style = MaterialTheme.typography.titleMedium,
                     )
-                    if (p != null) {
-                        Text(
-                            "± %.0f m · %s".format(p.accuracy, agoMillis(p.time)),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
-                        )
-                    } else {
-                        Text(
-                            "The app only asks for this when you tap below.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = {
-                            val granted = ContextCompat.checkSelfPermission(
-                                ctx, Manifest.permission.ACCESS_FINE_LOCATION,
-                            ) == PackageManager.PERMISSION_GRANTED
-                            if (granted) readPhonePosition() else ask.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                        }) { Text(if (phone == null) "Read my position" else "Read again") }
+                    Text(
+                        if (me?.advertLocPolicy == 0)
+                            "Others cannot place this node on their map."
+                        else "Others can place this node on their map.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+        }
 
-                        phone?.let { p2 ->
-                            Button(onClick = {
-                                scope.launch {
-                                    runCatching { session.setLocation(p2.latitude, p2.longitude) }
-                                        .onSuccess { AppState.say("Sent to the radio") }
-                                        .onFailure { AppState.say(it.message ?: "failed") }
-                                }
-                            }) { Text("Give it to the radio") }
+        item {
+            Text(
+                if (placed.isEmpty()) "Nodes nearby" else "Nodes nearby (${placed.size})",
+                style = MaterialTheme.typography.titleSmall,
+            )
+        }
+
+        if (placed.isEmpty()) {
+            item {
+                GlassCard(Modifier.fillMaxWidth()) {
+                    Text(
+                        if (!set) "Set this radio's position to see how far away the others are."
+                        else "No node has shared a position yet.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+        } else {
+            placed.forEach { (c, metres) ->
+                item {
+                    GlassCard(Modifier.fillMaxWidth()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(c.name, style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "${c.typeName} · ${pathLabel(c)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline,
+                                )
+                            }
+                            Text(
+                                if (metres < 1000) "%.0f m".format(metres) else "%.1f km".format(metres / 1000),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
                         }
                     }
                 }
             }
         }
+    }
 
-        if (apart != null) {
-            item {
-                GlassCard(Modifier.fillMaxWidth()) {
-                    Column {
-                        Text("APART", style = MaterialTheme.typography.labelSmall,
-                             color = MaterialTheme.colorScheme.outline)
-                        Text(
-                            if (apart < 1000) "%.0f m".format(apart) else "%.1f km".format(apart / 1000),
-                            style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            if (apart < 50) "The radio is with you"
-                            else "The radio's saved position is not where this phone is",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
-                        )
-                    }
-                }
-            }
-        }
-
-        item {
-            GlassCard(Modifier.fillMaxWidth()) {
+    if (editing) {
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Radio position") },
+            text = {
                 Column {
-                    Text("Sharing", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        when (me?.advertLocPolicy) {
-                            0 -> "Position is not included in adverts."
-                            else -> "Position goes out with adverts, so others can map this node."
-                        },
+                        "Degrees, as a decimal. South and west are negative.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
                     )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(lat, { lat = it }, Modifier.fillMaxWidth(), singleLine = true,
+                                      label = { Text("Latitude") })
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(lon, { lon = it }, Modifier.fillMaxWidth(), singleLine = true,
+                                      label = { Text("Longitude") })
                 }
-            }
-        }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val la = lat.trim().toDoubleOrNull()
+                    val lo = lon.trim().toDoubleOrNull()
+                    if (la == null || lo == null || la < -90 || la > 90 || lo < -180 || lo > 180) {
+                        AppState.say("Latitude -90 to 90, longitude -180 to 180")
+                    } else {
+                        editing = false
+                        scope.launch {
+                            runCatching { session.setLocation(la, lo) }
+                                .onSuccess { AppState.say("Position saved") }
+                                .onFailure { AppState.say(it.message ?: "failed") }
+                        }
+                    }
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } },
+        )
     }
 }
 
