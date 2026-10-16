@@ -17,18 +17,21 @@ import sys
 
 # What each environment needs of the chip it is written to. A mismatch here is the
 # difference between a working radio and one stuck in a boot loop.
+# How many megabytes of PSRAM each build expects. Both boards report theirs as "Embedded",
+# so the word is no use for telling them apart: the size is, and getting it wrong is what
+# leaves a board unable to start.
 BOARDS = {
-    "umc_lilygo_tdeck_client": {"psram": "octal", "note": "T-Deck, 8 MB octal PSRAM"},
-    "umc_heltec_v3_client": {"psram": "none", "note": "Heltec V3, no PSRAM"},
-    "umc_heltec_v3_repeater": {"psram": "none", "note": "Heltec V3, no PSRAM"},
-    "umc_heltec_v4_oled_client": {"psram": "embedded", "note": "Heltec V4, 2 MB embedded PSRAM"},
-    "umc_heltec_v4_oled_repeater": {"psram": "embedded", "note": "Heltec V4, 2 MB embedded PSRAM"},
-    "umc_heltec_v4_tft_client": {"psram": "embedded", "note": "Heltec V4 TFT"},
-    "umc_heltec_v4_tft_repeater": {"psram": "embedded", "note": "Heltec V4 TFT"},
-    "umc_heltec_v4_r8_oled_client": {"psram": "embedded", "note": "Heltec V4 R8"},
-    "umc_heltec_v4_r8_oled_repeater": {"psram": "embedded", "note": "Heltec V4 R8"},
-    "umc_heltec_v4_r8_tft_client": {"psram": "embedded", "note": "Heltec V4 R8 TFT"},
-    "umc_heltec_v4_r8_tft_repeater": {"psram": "embedded", "note": "Heltec V4 R8 TFT"},
+    "umc_lilygo_tdeck_client": {"psram_mb": 8, "note": "T-Deck, 8 MB PSRAM"},
+    "umc_heltec_v3_client": {"psram_mb": 0, "note": "Heltec V3, no PSRAM"},
+    "umc_heltec_v3_repeater": {"psram_mb": 0, "note": "Heltec V3, no PSRAM"},
+    "umc_heltec_v4_oled_client": {"psram_mb": 2, "note": "Heltec V4 OLED, 2 MB PSRAM"},
+    "umc_heltec_v4_oled_repeater": {"psram_mb": 2, "note": "Heltec V4 OLED, 2 MB PSRAM"},
+    "umc_heltec_v4_tft_client": {"psram_mb": 2, "note": "Heltec V4 TFT, 2 MB PSRAM"},
+    "umc_heltec_v4_tft_repeater": {"psram_mb": 2, "note": "Heltec V4 TFT, 2 MB PSRAM"},
+    "umc_heltec_v4_r8_oled_client": {"psram_mb": 2, "note": "Heltec V4 R8 OLED, 2 MB PSRAM"},
+    "umc_heltec_v4_r8_oled_repeater": {"psram_mb": 2, "note": "Heltec V4 R8 OLED, 2 MB PSRAM"},
+    "umc_heltec_v4_r8_tft_client": {"psram_mb": 2, "note": "Heltec V4 R8 TFT, 2 MB PSRAM"},
+    "umc_heltec_v4_r8_tft_repeater": {"psram_mb": 2, "note": "Heltec V4 R8 TFT, 2 MB PSRAM"},
 }
 
 
@@ -45,13 +48,9 @@ def identify(port):
     if not mac:
         return None
     feat = features.group(1) if features else ""
-    if "Embedded PSRAM" in feat:
-        psram = "embedded"
-    elif "PSRAM" in feat:
-        psram = "octal"
-    else:
-        psram = "none"
-    return {"mac": mac.group(1).lower(), "features": feat, "psram": psram}
+    size = re.search(r"PSRAM\s*(\d+)\s*MB", feat, re.I)
+    return {"mac": mac.group(1).lower(), "features": feat,
+            "psram_mb": int(size.group(1)) if size else 0}
 
 
 def list_ports():
@@ -91,9 +90,10 @@ def main():
     if args.expect_mac and found["mac"] != args.expect_mac.lower():
         sys.exit(f"Refusing: that is {found['mac']}, not {args.expect_mac.lower()}.")
 
-    if found["psram"] != want["psram"] and not args.force:
+    if found["psram_mb"] != want["psram_mb"] and not args.force:
         sys.exit(
-            f"Refusing: this build wants {want['psram']} PSRAM and the board has {found['psram']}.\n"
+            f"Refusing: this build wants {want['psram_mb']} MB of PSRAM and the board has "
+            f"{found['psram_mb']} MB.\n"
             "Writing it would leave the board unable to start. Use --force only if you are sure."
         )
 
