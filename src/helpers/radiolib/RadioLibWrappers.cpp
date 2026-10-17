@@ -99,6 +99,8 @@ void RadioLibWrapper::loop() {
   if (state == STATE_RX && _num_floor_samples < NUM_NOISE_FLOOR_SAMPLES) {
     if (!isReceivingPacket()) {
       int rssi = getCurrentRSSI();
+      if (rssi < _burst_lo) _burst_lo = rssi;
+      if (rssi > _burst_hi) _burst_hi = rssi;
       if (rssi < _noise_floor + SAMPLING_THRESHOLD) {  // only consider samples below current floor + sampling THRESHOLD
         _num_floor_samples++;
         _floor_sample_sum += rssi;
@@ -110,6 +112,13 @@ void RadioLibWrapper::loop() {
       _noise_floor = -120;    // clamp to lower bound of -120dBi
     }
     _floor_sample_sum = 0;
+    if (_burst_hi >= _burst_lo) {          // publish the spread of this burst
+      _pub_lo = _burst_lo;
+      _pub_hi = _burst_hi;
+      _pub_seq++;
+    }
+    _burst_lo = 32767;
+    _burst_hi = -32768;
 
     #ifdef MESH_DEBUG_NOISE_FLOOR
     MESH_DEBUG_PRINTLN("RadioLibWrapper: noise_floor = %d", (int)_noise_floor);

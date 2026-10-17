@@ -4,6 +4,12 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.3
+
+- ✅ T-Deck: tap a repeater in **Who** for its own page: **Status** (log in, then battery, uptime, noise, packet counts), **Path** (route, per-hop **trace**, set or clear the route) and **Admin** (any repeater command, quick buttons and a list of the usual ones)
+- ✅ T-Deck: the **Radio** trace is auto-scaled with the driver's own low/mean/high per noise-floor burst, so small ripples show; heard packets are dots on it
+- ✅ T-Deck: the newest message no longer sits behind the composer
+
 ## Done in 0.1.2
 
 - ✅ T-Deck: smaller 7pt body font, with the Home and Radio tabs re-laid out so nothing overlaps or is cut off on the 320x240 screen

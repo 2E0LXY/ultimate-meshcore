@@ -7,7 +7,7 @@ By **Daren Loxley 2E0LXY**
 
 [**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest firmware**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) · [**📱 Android app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) · [**🖥 Windows / Linux app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest)
 
-> **Status: 0.1.2 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
+> **Status: 0.1.3 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
 
 ![Repeater dashboard](docs/images/repeater-dashboard.png)
 
@@ -253,6 +253,7 @@ The messenger also works on a phone browser:
 - **Touch interface** on the 320x240 screen, with the keyboard and trackball. Tabs for home, messages, contacts, map, **GPS**, radio, **setup** and info.
 - **GPS screen**: fix, satellites used and seen, position, altitude and the receiver found, with a **sky view** plotting each satellite where it is in the sky, coloured by signal strength.
 - **Home dashboard**: clock and date, sunrise and sunset from your position, channel-busy, and cards for battery, GPS, nodes, messages, last signal and links. Tap a card to open its tab.
+- **Repeater tools**: tap a repeater in People to log in, read its status, trace its route hop by hop, set or reset the route, and run any of its commands.
 - **Radio tab**: live radio settings, airtime per packet, NOW / FLOOR / PEAK / MARGIN meters and a two-minute RSSI spectrum.
 - **Offline maps from the SD card**, with your position and contacts plotted. `scripts/umc_make_map_tiles.py` builds the tiles.
 - Without tiles, contacts are plotted by range and bearing, with distance rings.

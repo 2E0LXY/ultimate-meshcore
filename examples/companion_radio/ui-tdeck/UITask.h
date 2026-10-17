@@ -11,6 +11,7 @@
 #include "../AbstractUITask.h"
 #include "../NodePrefs.h"
 #include "TDeckInput.h"
+#include "RepeaterAdmin.h"
 #include "UmcTiles.h"
 
 // Touch interface for the LilyGo T-Deck / T-Deck Plus running the Ultimate MeshCore Client.
@@ -65,6 +66,21 @@ private:
   void drawCompose();
   void drawQuickPanel();
   void drawContactDetail();
+  void drawRepeater();
+  void openRepeater(int contact_idx);
+  void closeRepeater();
+  void repeaterTick();
+  bool repeaterTouch(const TouchEvent& ev);
+  bool repeaterKey(char c);
+  void repListScroll(int d);
+  void repLogin(const char* pw);
+  void repStatus();
+  void repCli(const char* cmd);
+  void repTrace();
+  void repSetRoute(const char* text);
+  void repEditStart(int what, const char* prompt, const char* preset, bool secret);
+  void repEditDone();
+  void repRun(int idx);
   void applyTheme();
   int drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when,
                  bool show_who, const UmcChatLog::Entry* entry = NULL);
@@ -144,6 +160,24 @@ private:
   unsigned long _flash_until = 0;   // when a new-message flash ends
   int _edit_idx = 0;                // which quick reply is being typed into
 
+  // repeater page (Who tab): log in, status, route and trace, and the repeater's own command line
+  RepeaterAdmin _rep;
+  bool _rep_open = false;
+  int _rep_page = 0;                // 0 status, 1 path, 2 admin
+  bool _rep_list = false;           // the list of repeater commands is showing
+  int _rep_list_scroll = 0;
+  int _rep_confirm = -1;            // a button waiting for a second tap (reboot ...)
+  unsigned long _rep_confirm_until = 0;
+  bool _rep_edit = false;           // typing a password, command or route
+  int _rep_edit_what = 0;           // 0 password, 1 command, 2 route
+  bool _rep_edit_secret = false;
+  int _rep_secret_from = 9999;      // characters from here on are shown as stars
+  char _rep_prompt[56] = {0};
+  char _rep_buf[72] = {0};
+  int _rep_len = 0;
+  uint32_t _rep_rev_seen = 0;
+  unsigned long _rep_next_tick = 0;
+
   // map view
   int _zoom = 12;
   double _centre_lat = 0, _centre_lon = 0;
@@ -151,9 +185,13 @@ private:
   int _map_marker_sel = -1;
 
   // radio tab: one RSSI sample per second (about two minutes of history) and channel-busy estimate
+  // one entry per noise-floor burst (about every 2 s): the lowest, mean and highest reading
   static const int RSSI_HIST = 120;
-  int8_t _rssi_hist[RSSI_HIST] = {0};
+  int8_t _rssi_lo[RSSI_HIST] = {0};
+  int8_t _rssi_mid[RSSI_HIST] = {0};
+  int8_t _rssi_hi[RSSI_HIST] = {0};
   uint8_t _rssi_n = 0, _rssi_head = 0;
+  uint16_t _rssi_seq = 0;
   unsigned long _next_rssi = 0, _next_fast = 0;
   unsigned long _busy_t = 0, _busy_rx = 0, _busy_tx = 0;
   int _busy_pct = -1;        // -1 until the first 15 s window has completed

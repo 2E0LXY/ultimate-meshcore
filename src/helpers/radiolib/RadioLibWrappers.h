@@ -20,6 +20,10 @@ protected:
   bool _cad_enabled;
   uint16_t _num_floor_samples;
   int32_t _floor_sample_sum;
+  // lowest and highest RSSI reading in the noise-floor burst under way, and in the last one
+  int16_t _burst_lo = 32767, _burst_hi = -32768;
+  int16_t _pub_lo = 0, _pub_hi = 0;
+  uint16_t _pub_seq = 0;
   uint8_t _preamble_sf;
 
   void idle();
@@ -59,6 +63,9 @@ public:
   virtual int16_t performChannelScan();
 
   int getNoiseFloor() const override { return _noise_floor; }
+  // The spread (dBm) of the last noise-floor burst, and a counter that changes with each one.
+  // It costs nothing: the driver was already reading every one of these values.
+  void getRssiBurst(int& lo, int& hi, uint16_t& seq) const { lo = _pub_lo; hi = _pub_hi; seq = _pub_seq; }
   void triggerNoiseFloorCalibrate(int threshold) override;
   void setCADEnabled(bool enable) override { _cad_enabled = enable; }
   void resetAGC() override;

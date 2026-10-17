@@ -697,6 +697,8 @@ void UITask::loop() {
     else if (tb == 'R') _tab = (Tab)((_tab + 1) % TAB_COUNT);
     else if (_tab == TAB_MSGS) {
       _msg_scroll = tb == 'U' ? _msg_scroll + 1 : max(0, _msg_scroll - 1);
+    } else if (_tab == TAB_CONTACTS && _rep_open) {
+      if (_rep_list) repListScroll(tb == 'U' ? -1 : 1);
     } else if (_tab == TAB_CONTACTS) {
       const int total = contactCount();
       if (total > 0) {
@@ -725,9 +727,10 @@ void UITask::loop() {
   if (ev.pressed || ev.released || (ev.down && (ev.dx || ev.dy))) handleTouch(ev);
 
   if (millis() >= _next_rssi) {
-    _next_rssi = millis() + 1000;
+    _next_rssi = millis() + 250;
     sampleRadio();
   }
+  repeaterTick();
   if (_tab == TAB_RADIO && millis() >= _next_fast) {
     _next_fast = millis() + 2000;
     _dirty = true;
@@ -868,7 +871,7 @@ void UITask::draw() {
   switch (_tab) {
     case TAB_HOME: drawHome(); break;
     case TAB_MSGS: drawMessages(); break;
-    case TAB_CONTACTS: _contact_detail ? drawContactDetail() : drawContacts(); break;
+    case TAB_CONTACTS: _rep_open ? drawRepeater() : (_contact_detail ? drawContactDetail() : drawContacts()); break;
     case TAB_MAP: drawMap(); break;
     case TAB_GPS: drawGps(); break;
     case TAB_RADIO: drawRadio(); break;
@@ -1115,7 +1118,9 @@ void UITask::drawThemePage() {
 void UITask::drawMessages() {
   applyTheme();
   const int top = BODY_Y + 2;
-  const int list_h = BODY_H - COMPOSE_H - 4;
+  // the list ends where the composer (and the reply bar, when there is one) begins
+  const int list_bottom = SCR_H - TAB_H - COMPOSE_H - (_reply_to[0] ? 12 : 0) - 2;
+  const int list_h = list_bottom - (top + 17);
 
   // who we are writing to
   fill(0, top, SCR_W, 16, TH.card);
@@ -1127,7 +1132,7 @@ void UITask::drawMessages() {
   fill(0, top + 17, SCR_W, list_h, TH.bg);
 
   // newest at the bottom, working upwards
-  int y = top + 17 + list_h;
+  int y = list_bottom;
   const int first = umc_chatlog.count() - 1 - _msg_scroll;
   _msg_rows = 0;
   for (int i = first; i >= 0 && y > top + 28; i--) {
@@ -1157,7 +1162,7 @@ void UITask::drawMessages() {
     text(8, top + 40, "No messages yet.", TH.dim);
     text(8, top + 54, "Type below and press Enter to send.", TH.dim);
   } else if (_msg_sel < 0) {
-    text(6, top + 17 + list_h - 11, "Tap a message to reply to it", TH.dim);
+    text(6, list_bottom - 11, "Tap a message to reply to it", TH.dim);
   }
   if (_quick_open) drawQuickPanel();
   drawCompose();
@@ -1297,7 +1302,7 @@ void UITask::drawContactDetail() {
     button(158, ry, 74, 22, "Telemetry");
     button(236, ry, 80, 22, "Trace path");
   }
-  button(2, by, 74, 22, "Message");
+  button(2, by, 74, 22, c.type == ADV_TYPE_REPEATER ? "Admin" : "Message");
   button(80, by, 74, 22, "Reset path");
   button(158, by, 74, 22, _forget_confirm == _contact_sel ? "Sure?" : "Forget",
          _forget_confirm == _contact_sel);
@@ -1345,7 +1350,9 @@ void UITask::drawContacts() {
   // actions for the selected contact
   const int by = SCR_H - TAB_H - 26;
   if (_contact_sel >= 0 && _contact_sel < total) {
-    button(2, by, 74, 22, "Message");
+    ContactInfo sel_c;
+    const bool sel_rep = contactAt(_contact_sel, sel_c) && sel_c.type == ADV_TYPE_REPEATER;
+    button(2, by, 74, 22, sel_rep ? "Admin" : "Message");
     button(80, by, 74, 22, "Show map");
     button(158, by, 74, 22, "Share");
     button(236, by, 80, 22, "Details");
@@ -1560,11 +1567,18 @@ static const UmcTraffic::Entry* lastReceived() {
 }
 
 void UITask::sampleRadio() {
-  // The noise floor the radio driver already measures. Reading the radio over SPI from
-  // here would fight the screen and SD card for the same bus and stall the whole device.
+  // The driver already reads the radio many times in each noise-floor burst and keeps the
+  // lowest and highest. Taking those costs nothing; reading the radio from here would fight
+  // the screen and SD card for the same bus and stall the whole device.
+  int lo, hi;
+  uint16_t seq;
+  radio_driver.getRssiBurst(lo, hi, seq);
   const int nf = radio_driver.getNoiseFloor();
-  if (nf) {
-    _rssi_hist[_rssi_head] = (int8_t)clampi(nf, -140, 0);
+  if (seq != _rssi_seq && nf) {
+    _rssi_seq = seq;
+    _rssi_lo[_rssi_head] = (int8_t)clampi(lo, -140, 0);
+    _rssi_mid[_rssi_head] = (int8_t)clampi(nf, -140, 0);
+    _rssi_hi[_rssi_head] = (int8_t)clampi(hi, -140, 0);
     _rssi_head = (_rssi_head + 1) % RSSI_HIST;
     if (_rssi_n < RSSI_HIST) _rssi_n++;
   }
@@ -1729,12 +1743,12 @@ void UITask::drawRadio() {
            (unsigned long)radio_driver.getEstAirtimeFor(100), (unsigned long)radio_driver.getEstAirtimeFor(200));
   textClip(4, top + 15, 312, buf, C_DIM);
 
-  // history statistics
+  // history statistics: newest burst, and the highest reading in the whole window
   int peak = -140, now_r = -140;
   for (int i = 0; i < _rssi_n; i++) {
-    const int v = _rssi_hist[(_rssi_head + RSSI_HIST - 1 - i) % RSSI_HIST];
-    if (i == 0) now_r = v;
-    if (v > peak) peak = v;
+    const int idx = (_rssi_head + RSSI_HIST - 1 - i) % RSSI_HIST;
+    if (i == 0) now_r = _rssi_hi[idx];
+    if (_rssi_hi[idx] > peak) peak = _rssi_hi[idx];
   }
   const int floor_db = radio_driver.getNoiseFloor() ? radio_driver.getNoiseFloor() : -120;
   const UmcTraffic::Entry* last_rx = lastReceived();
@@ -1768,17 +1782,76 @@ void UITask::drawRadio() {
   text(248, y, buf, C_TXT);
   y += 22;
 
-  // live spectrum: the last two minutes of RSSI, one bar per second
+  // live trace: every burst is a column from its lowest to its highest reading, with the
+  // mean (the noise floor) as a white tick. The scale follows the data so small ripples fill
+  // the panel. Heard packets are dots at their own RSSI; our own transmissions are red ticks.
   const int sx = 4, sh = 56, sw = RSSI_HIST * 2;
   fill(sx, y, sw, sh, C_CARD);
   gfx()->drawRect(sx - 1, y - 1, sw + 2, sh + 2, C_LINE);
+  // The scale follows the data: from just under the lowest reading to a little over the 90th
+  // percentile of the highs, so one loud burst does not squash everything else. Anything
+  // above the top is clipped to it.
+  int lo_s = 0;
+  int bins[141] = {0};
   for (int i = 0; i < _rssi_n; i++) {
-    const int v = _rssi_hist[(_rssi_head + RSSI_HIST - _rssi_n + i) % RSSI_HIST];
-    const int bh = clampi((v + 130) * sh / 90, 1, sh);
-    fill(sx + (RSSI_HIST - _rssi_n + i) * 2, y + sh - bh, 2, bh, v > floor_db + 10 ? C_WARN : C_ACC);
+    const int idx = (_rssi_head + RSSI_HIST - _rssi_n + i) % RSSI_HIST;
+    if (_rssi_lo[idx] < lo_s) lo_s = _rssi_lo[idx];
+    bins[clampi(_rssi_hi[idx], -140, 0) + 140]++;
   }
-  text(sx + sw + 6, y, "-40", C_DIM);
-  text(sx + sw + 6, y + sh - 11, "-130", C_DIM);
+  int hi_s = floor_db + 18;
+  if (_rssi_n > 0) {
+    const int want = (_rssi_n * 9 + 9) / 10;
+    int run = 0;
+    for (int v = 0; v <= 140; v++) {
+      run += bins[v];
+      if (run >= want) { hi_s = v - 140 + 4; break; }
+    }
+  } else {
+    lo_s = floor_db - 6;
+  }
+  lo_s -= 2;
+  if (hi_s - lo_s < 24) {                                   // never flatter than 24 dB tall
+    const int mid = (hi_s + lo_s) / 2;
+    lo_s = mid - 12;
+    hi_s = mid + 12;
+  }
+  if (hi_s > -10) { lo_s -= hi_s + 10; hi_s = -10; }
+  const int span = hi_s - lo_s;
+  auto ypix = [&](int v) { return y + sh - 1 - clampi((v - lo_s) * (sh - 1) / span, 0, sh - 1); };
+
+  for (int g = ((lo_s / 10) - 1) * 10; g <= hi_s; g += 10) {   // a dotted line every 10 dB
+    if (g <= lo_s || g >= hi_s) continue;
+    const int gy = ypix(g);
+    for (int gx = sx; gx < sx + sw; gx += 4) gfx()->drawPixel(gx, gy, C_LINE);
+  }
+  for (int i = 0; i < _rssi_n; i++) {
+    const int idx = (_rssi_head + RSSI_HIST - _rssi_n + i) % RSSI_HIST;
+    const int x = sx + (RSSI_HIST - _rssi_n + i) * 2;
+    const int top_y = ypix(_rssi_hi[idx]);
+    const int bot_y = ypix(_rssi_lo[idx]);
+    const int over = _rssi_hi[idx] - _rssi_mid[idx];         // how far the burst rose above the floor
+    const uint16_t col = over < 3 ? C_ACC : over < 8 ? 0x07FF : over < 15 ? C_OK : over < 25 ? C_WARN : C_BAD;
+    fill(x, top_y, 2, bot_y - top_y + 1, col);
+    fill(x, ypix(_rssi_mid[idx]), 2, 1, 0xFFFF);
+  }
+  // packets, one pixel a second back from now
+  const unsigned long now_ms = millis();
+  for (int i = 0; i < umc_traffic.count(); i++) {
+    const UmcTraffic::Entry* e = umc_traffic.get(i);
+    if (e == NULL) continue;
+    const unsigned long age_s = (now_ms - e->ms) / 1000;
+    if (age_s >= (unsigned long)sw) break;
+    const int px = sx + sw - 1 - (int)age_s;
+    if (e->tx) {
+      fill(px, y + sh - 4, 1, 4, C_BAD);
+    } else {
+      fill(px - 1, ypix(e->rssi) - 1, 3, 3, 0xFFFF);
+    }
+  }
+  snprintf(buf, sizeof(buf), "%d", hi_s);
+  text(sx + sw + 6, y, buf, C_DIM);
+  snprintf(buf, sizeof(buf), "%d", lo_s);
+  text(sx + sw + 6, y + sh - 11, buf, C_DIM);
   if (_busy_pct >= 0) {
     snprintf(buf, sizeof(buf), "busy %d%%", _busy_pct);
     text(sx + sw + 6, y + 20, buf, C_TXT);
@@ -2907,11 +2980,21 @@ void UITask::handleTouch(const TouchEvent& ev) {
     return;
   }
 
+  if (_tab == TAB_CONTACTS && _rep_open) {
+    repeaterTouch(ev);
+    return;
+  }
+
   if (_tab == TAB_CONTACTS && _contact_detail) {
     const int by = SCR_H - TAB_H - 26;
     ContactInfo c;
     if (!contactAt(_contact_sel, c)) { _contact_detail = false; _dirty = true; return; }
-    if (hit(ev, 2, by, 74, 22)) { selectContact(_contact_sel); _tab = TAB_MSGS; _dirty = true; return; }
+    if (hit(ev, 2, by, 74, 22)) {
+      if (c.type == ADV_TYPE_REPEATER) { _contact_detail = false; openRepeater(_contact_sel); }
+      else { selectContact(_contact_sel); _tab = TAB_MSGS; }
+      _dirty = true;
+      return;
+    }
     if (hit(ev, 80, by, 74, 22)) {
       ContactInfo* live = the_mesh.lookupContactByPubKey(c.id.pub_key, PUB_KEY_SIZE);
       if (live) { the_mesh.resetPathTo(*live); showAlert("Path reset", 1500); }
@@ -2987,7 +3070,12 @@ void UITask::handleTouch(const TouchEvent& ev) {
     const int total = contactCount();
     ContactInfo c;
     if (_contact_sel >= 0 && _contact_sel < total && contactAt(_contact_sel, c)) {
-      if (hit(ev, 2, by, 74, 22)) { selectContact(_contact_sel); _tab = TAB_MSGS; _dirty = true; return; }
+      if (hit(ev, 2, by, 74, 22)) {
+      if (c.type == ADV_TYPE_REPEATER) { _contact_detail = false; openRepeater(_contact_sel); }
+      else { selectContact(_contact_sel); _tab = TAB_MSGS; }
+      _dirty = true;
+      return;
+    }
       if (hit(ev, 80, by, 74, 22)) {
         if (c.gps_lat || c.gps_lon) {
           _centre_lat = c.gps_lat / 1e6; _centre_lon = c.gps_lon / 1e6; _follow_self = false; _tab = TAB_MAP;
@@ -3003,6 +3091,13 @@ void UITask::handleTouch(const TouchEvent& ev) {
     if (ev.released && ev.y >= top && ev.y < SCR_H - TAB_H - 28) {
       const int idx = _contact_scroll + (ev.y - top) / row_h;
       if (idx >= 0 && idx < total) {
+        ContactInfo tapped;
+        if (contactAt(idx, tapped) && tapped.type == ADV_TYPE_REPEATER) {   // a repeater: straight to its page
+          _contact_sel = idx;
+          openRepeater(idx);
+          _dirty = true;
+          return;
+        }
         if (idx == _contact_sel) _contact_detail = true;   // a second tap opens the detail
         _contact_sel = idx;
         _dirty = true;
@@ -3115,6 +3210,10 @@ void UITask::handleTouch(const TouchEvent& ev) {
 }
 
 void UITask::handleKey(char c) {
+  if (_tab == TAB_CONTACTS && _rep_open) {
+    repeaterKey(c);
+    return;
+  }
   if (_tab == TAB_SETUP) {
     if (_editing) {
       if (c == 8 || c == 127) {                   // backspace
@@ -3201,3 +3300,5 @@ void UITask::sendCompose() {
   _msg_scroll = 0;
   _dirty = true;
 }
+
+#include "RepeaterUI.inc"

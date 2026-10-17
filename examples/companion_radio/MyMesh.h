@@ -96,6 +96,10 @@ struct AdvertPath {
   uint8_t path[MAX_PATH_SIZE];
 };
 
+#ifdef UMC_BUILD
+#include <helpers/umc/UmcRepeaterTap.h>
+#endif
+
 class MyMesh : public BaseChatMesh, public DataStoreHost
 #ifdef UMC_BUILD
              , public UmcHost
@@ -146,6 +150,15 @@ public:
   unsigned long umcFramesRead() const { return _umc_frames_read; }
   NetworkService& getNetwork() { return network; }
   UmcAppLink& getAppLink() { return app_link; }
+
+  // On-device tools (the T-Deck screens): while a repeater page is open, the replies it asked for
+  // come to the screen instead of the app link.
+  void setRepeaterTap(UmcRepeaterTap* tap) { _repeater_tap = tap; }
+  // Trace out along a contact's route and back, like the web messenger does. Returns 0 when sent,
+  // 1 no route known, 2 a direct neighbour (nothing to trace), 3 id size not supported, 4 busy.
+  int umcSendTrace(const ContactInfo& c, uint32_t& tag, uint32_t& est_timeout);
+  // Set the route used for direct messages to a contact (count 0 clears it: flood next time).
+  bool umcSetRoute(ContactInfo& c, const uint8_t* hops, int count, int hash_size);
 
   // UmcHost
   void umcCommand(const char* command, char* reply, size_t reply_size) override;
@@ -290,6 +303,7 @@ private:
   char* _bridge_buf = NULL;   // desktop app bridge reply, read back in chunks
   uint16_t _bridge_len = 0;
   UmcAppLink app_link;
+  UmcRepeaterTap* _repeater_tap = nullptr;
   BaseSerialInterface* _umc_all_serial = NULL;  // the MultiSerialInterface (apps)
   BaseSerialInterface* _umc_ble = NULL;
   bool _umc_ble_on = true;

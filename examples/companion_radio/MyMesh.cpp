@@ -647,6 +647,9 @@ void MyMesh::onMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t 
 void MyMesh::onCommandDataRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
                                const char *text) {
   markConnectionActive(from); // in case this is from a server, and we have a connection
+#ifdef UMC_BUILD
+  if (_repeater_tap && _repeater_tap->onCommandReply(from, text)) return;   // answer to a command typed on the device
+#endif
   queueMessage(from, TXT_TYPE_CLI_DATA, pkt, sender_timestamp, NULL, 0, text);
 }
 
@@ -805,6 +808,9 @@ uint8_t MyMesh::onContactRequest(const ContactInfo &contact, uint32_t sender_tim
 }
 
 void MyMesh::onContactResponse(const ContactInfo &contact, const uint8_t *data, uint8_t len) {
+#ifdef UMC_BUILD
+  if (_repeater_tap && _repeater_tap->onContactResponse(contact, data, len)) return;   // an on-device page asked
+#endif
   uint32_t tag;
   memcpy(&tag, data, 4);
 
@@ -983,6 +989,11 @@ void MyMesh::onRawDataRecv(mesh::Packet *packet) {
 
 void MyMesh::onTraceRecv(mesh::Packet *packet, uint32_t tag, uint32_t auth_code, uint8_t flags,
                          const uint8_t *path_snrs, const uint8_t *path_hashes, uint8_t path_len) {
+#ifdef UMC_BUILD
+  if (_repeater_tap &&
+      _repeater_tap->onTrace(tag, path_hashes, path_snrs, path_len, flags, (int8_t)(packet->getSNR() * 4)))
+    return;   // a trace started from the device
+#endif
   uint8_t path_sz = flags & 0x03;  // NEW v1.11+
   if (12 + path_len + (path_len >> path_sz) + 1 > sizeof(out_frame)) {
     MESH_DEBUG_PRINTLN("onTraceRecv(), path_len is too long: %d", (uint32_t)path_len);
@@ -1010,6 +1021,43 @@ void MyMesh::onTraceRecv(mesh::Packet *packet, uint32_t tag, uint32_t auth_code,
     MESH_DEBUG_PRINTLN("onTraceRecv(), data received while app offline");
   }
 }
+
+#ifdef UMC_BUILD
+int MyMesh::umcSendTrace(const ContactInfo &c, uint32_t &tag, uint32_t &est_timeout) {
+  if (c.out_path_len == OUT_PATH_UNKNOWN) return 1;
+  const int hops = c.out_path_len & 63;
+  const int hsz = 1 + (c.out_path_len >> 6);
+  if (hops == 0) return 2;
+  if (hsz != 1 && hsz != 2) return 3;
+  if ((hops * 2 - 1) * hsz > MAX_PATH_SIZE) return 3;
+  // out along the route and back the same way: a,b,c,b,a
+  uint8_t route[MAX_PATH_SIZE];
+  int n = 0;
+  for (int i = 0; i < hops; i++) { memcpy(&route[n], &c.out_path[i * hsz], hsz); n += hsz; }
+  for (int i = hops - 2; i >= 0; i--) { memcpy(&route[n], &c.out_path[i * hsz], hsz); n += hsz; }
+  const uint8_t flags = (hsz == 2) ? 1 : 0;
+  tag = getRTCClock()->getCurrentTimeUnique();
+  auto pkt = createTrace(tag, 0, flags);
+  if (!pkt) return 4;
+  sendDirect(pkt, route, n);
+  const uint32_t t = _radio->getEstAirtimeFor(pkt->payload_len + pkt->path_len + 2);
+  est_timeout = calcDirectTimeoutMillisFor(t, n >> flags);
+  return 0;
+}
+
+bool MyMesh::umcSetRoute(ContactInfo &c, const uint8_t *hops, int count, int hash_size) {
+  if (count <= 0) {
+    c.out_path_len = OUT_PATH_UNKNOWN;
+  } else {
+    if (hash_size < 1 || hash_size > 3 || count > 63 || count * hash_size > (int)sizeof(c.out_path)) return false;
+    c.out_path_len = (uint8_t)((count & 63) | ((hash_size - 1) << 6));
+    memset(c.out_path, 0, sizeof(c.out_path));
+    memcpy(c.out_path, hops, count * hash_size);
+  }
+  dirty_contacts_expiry = futureMillis(LAZY_CONTACTS_WRITE_DELAY);
+  return true;
+}
+#endif
 
 uint32_t MyMesh::calcFloodTimeoutMillisFor(uint32_t pkt_airtime_millis) const {
   return SEND_TIMEOUT_BASE_MILLIS + (FLOOD_SEND_TIMEOUT_FACTOR * pkt_airtime_millis);
