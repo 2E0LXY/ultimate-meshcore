@@ -35,6 +35,10 @@
 #include <helpers/NetworkService.h>
 #include <helpers/web/WebService.h>
 #ifdef UMC_BUILD
+#include <helpers/umc/UmcHealth.h>
+#if defined(UMC_BUILD) && defined(UMC_NIMBLE)
+  #include <helpers/esp32/SerialNimBLEInterface.h>
+#endif
 #include <helpers/umc/UmcService.h>
 #include <helpers/umc/UmcTraffic.h>
 #include <helpers/umc/UmcRoutes.h>
@@ -321,6 +325,7 @@ public:
   void formatStatsReply(char *reply, size_t reply_size) override;
   void formatRadioStatsReply(char *reply, size_t reply_size) override;
   void formatRfReply(char *reply, size_t reply_size) override;
+  bool healthCommand(const char *command, char *reply, size_t reply_size) override;
   void formatPacketStatsReply(char *reply, size_t reply_size) override;
   void formatMemoryReply(char *reply, size_t reply_size) override;
   bool purgeSdCard(char* reply, size_t reply_size);
@@ -357,6 +362,14 @@ public:
   void onTraceRecv(mesh::Packet* packet, uint32_t tag, uint32_t auth_code, uint8_t flags, const uint8_t* path_snrs,
                    const uint8_t* path_hashes, uint8_t path_len) override;
   void umcAppFrame(UmcAppServer& server, int client, const uint8_t* frame, size_t len) override;
+  void umcBleStatus(char* out, size_t out_size) const override;
+#if defined(UMC_BUILD) && defined(UMC_NIMBLE)
+  void umcBleLoop();
+  SerialNimBLEInterface* _ble = nullptr;     // created the first time Bluetooth is switched on
+  bool _ble_on = false;                      // what has been applied
+  bool _ble_idle_off = false;                // switched off because nobody connected for a while
+  unsigned long _ble_idle_since = 0;
+#endif
   void umcConsoleKey(uint8_t* key) const;
   bool umcIsConsoleKey(const uint8_t* key, size_t n) const;
 #endif

@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "../BaseSerialInterface.h"
+
 class UmcService;
 class WiFiServer;
 class WiFiClient;
@@ -14,7 +16,9 @@ class WiFiClient;
 // handed to UmcHost::umcAppFrame() which answers through send()/queueMessage().
 class UmcAppServer {
 public:
-  static constexpr int kMaxClients = 3;
+  static constexpr int kMaxClients = 3;          // WiFi (TCP) clients
+  static constexpr int kBleSlot = kMaxClients;   // a Bluetooth link takes the slot after them
+  static constexpr int kSlots = kMaxClients + 1;
   static constexpr size_t kMaxFrame = 176;  // MAX_FRAME_SIZE
   static constexpr int kQueueLen = 6;
 
@@ -27,11 +31,14 @@ public:
   // Returns the next queued frame length (0 if none).
   size_t popMessage(int client, uint8_t* out);
 
-  bool isLoggedIn(int client) const { return client >= 0 && client < kMaxClients && _clients[client].logged_in; }
+  bool isLoggedIn(int client) const { return client >= 0 && client < kSlots && _clients[client].logged_in; }
   bool isAdmin(int client) const { return isLoggedIn(client) && _clients[client].admin; }
   void setLogin(int client, bool logged_in, bool admin);
-  uint8_t appVersion(int client) const { return (client >= 0 && client < kMaxClients) ? _clients[client].app_ver : 0; }
-  void setAppVersion(int client, uint8_t v) { if (client >= 0 && client < kMaxClients) _clients[client].app_ver = v; }
+  uint8_t appVersion(int client) const { return (client >= 0 && client < kSlots) ? _clients[client].app_ver : 0; }
+  void setAppVersion(int client, uint8_t v) { if (client >= 0 && client < kSlots) _clients[client].app_ver = v; }
+  // Bluetooth: frames come and go through this link instead of a socket. Pairing with the PIN
+  // is what authenticates it, so a Bluetooth app is logged in as admin once it is connected.
+  void attachBle(BaseSerialInterface* ble) { _ble = ble; }
   int connectedCount() const;
   uint16_t port() const { return _port; }
   // 0 = keep idle app sessions open (companion firmware: apps may sit silent for hours)
@@ -56,10 +63,13 @@ private:
   void start();
   void stop();
   void drop(int i);
+  void pollBle();
 
   UmcService& _umc;
   WiFiServer* _server;
   uint16_t _port;
-  Client _clients[kMaxClients];
+  Client _clients[kSlots];
   unsigned long _idle_drop_ms;
+  BaseSerialInterface* _ble = nullptr;
+  bool _ble_was_connected = false;
 };

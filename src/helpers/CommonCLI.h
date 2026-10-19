@@ -243,6 +243,8 @@ public:
   virtual void formatStatsReply(char *reply, size_t reply_size) = 0;
   virtual void formatRadioStatsReply(char *reply, size_t reply_size) = 0;
   // The recent spread of the noise floor. Only builds that keep the history provide it.
+  // stats-life, safety ..., radio watchdog ... Returns false when this build has none of them.
+  virtual bool healthCommand(const char *command, char *reply, size_t reply_size) { return false; }
   virtual void formatRfReply(char *reply, size_t reply_size) { strncpy(reply, "not available on this build", reply_size - 1); reply[reply_size - 1] = 0; }
   virtual void formatPacketStatsReply(char *reply, size_t reply_size) = 0;
   virtual void formatMemoryReply(char *reply, size_t reply_size) = 0;

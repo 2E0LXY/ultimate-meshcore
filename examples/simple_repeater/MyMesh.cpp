@@ -1,4 +1,7 @@
 #include "MyMesh.h"
+#ifdef UMC_BUILD
+  #include <helpers/umc/UmcAppServer.h>
+#endif
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -1631,6 +1634,71 @@ void MyMesh::formatRadioStatsReply(char *reply, size_t reply_size) {
   StatsFormatHelper::formatRadioStats(reply, reply_size, _radio, radio_driver, getTotalAirTime(), getReceiveAirTime());
 }
 
+#if defined(UMC_BUILD) && defined(UMC_NIMBLE)
+// Bluetooth follows the `ble` setting. While it is off nothing is allocated: the stack is only
+// created the first time it is switched on, and released again when it is switched off.
+// After `ble.idle` minutes with nobody connected it switches itself off until `set ble` is
+// turned off and on again.
+void MyMesh::umcBleLoop() {
+  const UmcPrefs &p = umc.prefs();
+  if (!p.ble_enabled) _ble_idle_off = false;
+  const bool want = p.ble_enabled && !_ble_idle_off;
+  if (want && !_ble_on) {
+    if (_ble == nullptr) {
+      _ble = new SerialNimBLEInterface();
+      char name[32];
+      snprintf(name, sizeof(name), "%.20s", _prefs.node_name);
+      const size_t pl = strlen(p.pin);
+      const uint32_t pin = (uint32_t)strtoul(p.pin + (pl > 6 ? pl - 6 : 0), nullptr, 10);   // six digits
+      _ble->begin("MeshCore-UMC-", name, pin);
+      umc.appServer()->attachBle(_ble);
+    } else {
+      _ble->resume();
+    }
+    _ble->enable();
+    _ble_on = true;
+    _ble_idle_since = millis();
+    umc_health.note("bluetooth on");
+  } else if (!want && _ble_on) {
+    _ble->disable();
+    _ble->suspend();                                      // gives the memory back
+    _ble_on = false;
+    umc_health.note(_ble_idle_off ? "bluetooth off (idle)" : "bluetooth off");
+  }
+  if (_ble_on) {
+    if (_ble->isConnected()) _ble_idle_since = millis();
+    else if (p.ble_idle_off_min != 0 && millis() - _ble_idle_since > (unsigned long)p.ble_idle_off_min * 60000UL)
+      _ble_idle_off = true;                               // switched off on the next pass
+  }
+}
+#endif
+
+void MyMesh::umcBleStatus(char *out, size_t out_size) const {
+#if defined(UMC_BUILD) && defined(UMC_NIMBLE)
+  const UmcPrefs &p = umc.prefs();
+  if (!p.ble_enabled) snprintf(out, out_size, "off (set ble on to enable)");
+  else if (_ble_idle_off) snprintf(out, out_size, "off after %u min idle (turn it off and on again)", (unsigned)p.ble_idle_off_min);
+  else if (_ble_on && _ble != nullptr && _ble->isConnected()) snprintf(out, out_size, "connected");
+  else if (_ble_on) snprintf(out, out_size, "advertising as MeshCore-UMC-%.20s, idle off after %u min", _prefs.node_name, (unsigned)p.ble_idle_off_min);
+  else snprintf(out, out_size, "starting");
+#else
+  snprintf(out, out_size, "not available on this build");
+#endif
+}
+
+bool MyMesh::healthCommand(const char *command, char *reply, size_t reply_size) {
+  if (strncmp(command, "radio watchdog", 14) == 0) {
+    const char *arg = command + 14;
+    while (*arg == ' ') arg++;
+    if (strcmp(arg, "off") == 0) radio_driver.setWatchdog(false);
+    else if (strcmp(arg, "on") == 0) radio_driver.setWatchdog(true);
+    snprintf(reply, reply_size, "radio watchdog %s, %u recoveries (off/on lasts until reboot)",
+             radio_driver.watchdogEnabled() ? "on" : "off", (unsigned)radio_driver.getWatchdogResets());
+    return true;
+  }
+  return umc_health.command(command, reply, reply_size);
+}
+
 // "RF 64 bursts: floor -113, lows to -121, highs to -71 | last highs: -108 -107 ..."
 void MyMesh::formatRfReply(char *reply, size_t reply_size) {
   const int n = radio_driver.getRssiRingCount();
@@ -3179,6 +3247,9 @@ void MyMesh::loop() {
 #endif
 #ifdef UMC_BUILD
   umc.loop();
+#if defined(UMC_NIMBLE)
+  umcBleLoop();
+#endif
   static unsigned long next_routes_save = 10UL * 60UL * 1000UL;
   if (millis() > next_routes_save) {   // flash-friendly: at most every 10 minutes, only when changed
     next_routes_save = millis() + 10UL * 60UL * 1000UL;

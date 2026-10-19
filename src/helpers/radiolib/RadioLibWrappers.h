@@ -28,6 +28,11 @@ protected:
   static const int RSSI_RING = 64;
   int8_t _ring_lo[RSSI_RING], _ring_mid[RSSI_RING], _ring_hi[RSSI_RING];
   uint8_t _ring_n = 0, _ring_head = 0;
+  // radio watchdog: no completed noise burst for two minutes while listening means the receiver
+  // has stalled (or the floor reading is stuck); restart reception the way resetAGC() does
+  bool _wd_enabled = true;
+  uint16_t _wd_resets = 0, _wd_last_seq = 0;
+  unsigned long _wd_last_ok = 0;
   uint8_t _preamble_sf;
 
   void idle();
@@ -72,6 +77,9 @@ public:
   void getRssiBurst(int& lo, int& hi, uint16_t& seq) const { lo = _pub_lo; hi = _pub_hi; seq = _pub_seq; }
   // How many bursts are remembered (up to 64), and one of them: i = 0 is the newest.
   int getRssiRingCount() const { return _ring_n; }
+  uint16_t getWatchdogResets() const { return _wd_resets; }
+  bool watchdogEnabled() const { return _wd_enabled; }
+  void setWatchdog(bool on) { _wd_enabled = on; }
   bool getRssiRing(int i, int& lo, int& mid, int& hi) const {
     if (i < 0 || i >= _ring_n) return false;
     const int idx = (_ring_head + RSSI_RING - 1 - i) % RSSI_RING;

@@ -43,4 +43,9 @@ public:
   // One MeshCore companion-protocol frame received from an app on TCP port 5000.
   // Reply with server.send(); the default rejects everything as unsupported.
   virtual void umcAppFrame(UmcAppServer& server, int client, const uint8_t* frame, size_t len);
+
+  // One line about Bluetooth for `get ble.status`; hosts without it say so.
+  virtual void umcBleStatus(char* out, size_t out_size) const {
+    if (out_size > 0) out[0] = 0;
+  }
 };

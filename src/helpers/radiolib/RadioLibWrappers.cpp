@@ -95,7 +95,30 @@ void RadioLibWrapper::resetAGC() {
   _floor_sample_sum = 0;
 }
 
+#ifdef UMC_BUILD
+extern "C" void umc_health_note(const char* text);
+#endif
+
 void RadioLibWrapper::loop() {
+  // watchdog: bursts complete about every two seconds while the receiver is working
+  const unsigned long wd_now = millis();
+  if (state != STATE_RX || _wd_last_seq != _pub_seq) {
+    _wd_last_ok = wd_now;
+    _wd_last_seq = _pub_seq;
+  } else if (_wd_enabled && wd_now - _wd_last_ok > 120000UL) {
+    _wd_last_ok = wd_now;                               // try again in two minutes, not every loop
+    if ((state & STATE_INT_READY) == 0 && !isReceivingPacket()) {
+      doResetAGC();
+      state = STATE_IDLE;                               // startReceive() again
+      _noise_floor = 0;
+      _num_floor_samples = 0;
+      _floor_sample_sum = 0;
+      _wd_resets++;
+#ifdef UMC_BUILD
+      umc_health_note("radio watchdog: receiver restarted");
+#endif
+    }
+  }
   if (state == STATE_RX && _num_floor_samples < NUM_NOISE_FLOOR_SAMPLES) {
     if (!isReceivingPacket()) {
       int rssi = getCurrentRSSI();

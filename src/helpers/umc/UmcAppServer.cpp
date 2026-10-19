@@ -53,20 +53,22 @@ void UmcAppServer::drop(int i) {
 }
 
 void UmcAppServer::setLogin(int client, bool logged_in, bool admin) {
-  if (client < 0 || client >= kMaxClients) return;
+  if (client < 0 || client >= kSlots) return;
   _clients[client].logged_in = logged_in;
   _clients[client].admin = logged_in && admin;
 }
 
 int UmcAppServer::connectedCount() const {
   int n = 0;
-  for (const auto& c : _clients) n += c.sock != nullptr ? 1 : 0;
+  for (int i = 0; i < kMaxClients; i++) n += _clients[i].sock != nullptr ? 1 : 0;
+  if (_ble != nullptr && _ble->isConnected()) n++;
   return n;
 }
 
 bool UmcAppServer::send(int client, const uint8_t* data, size_t len) {
 #if defined(ESP_PLATFORM)
-  if (client < 0 || client >= kMaxClients || len > kMaxFrame) return false;
+  if (client < 0 || client >= kSlots || len > kMaxFrame) return false;
+  if (client == kBleSlot) return _ble != nullptr && _ble->isConnected() && _ble->writeFrame(data, len) == len;
   WiFiClient* s = _clients[client].sock;
   if (s == nullptr || !s->connected()) return false;
   uint8_t frame[kMaxFrame + 3];
@@ -92,7 +94,7 @@ bool UmcAppServer::send(int client, const uint8_t* data, size_t len) {
 }
 
 void UmcAppServer::queueMessage(int client, const uint8_t* data, size_t len) {
-  if (client < 0 || client >= kMaxClients || len > kMaxFrame) return;
+  if (client < 0 || client >= kSlots || len > kMaxFrame) return;
   Client& c = _clients[client];
   if (c.q_count == kQueueLen) {  // drop oldest
     c.q_head = (c.q_head + 1) % kQueueLen;
@@ -107,7 +109,7 @@ void UmcAppServer::queueMessage(int client, const uint8_t* data, size_t len) {
 }
 
 size_t UmcAppServer::popMessage(int client, uint8_t* out) {
-  if (client < 0 || client >= kMaxClients) return 0;
+  if (client < 0 || client >= kSlots) return 0;
   Client& c = _clients[client];
   if (c.q_count == 0) return 0;
   size_t len = c.q_len[c.q_head];
@@ -117,7 +119,34 @@ size_t UmcAppServer::popMessage(int client, uint8_t* out) {
   return len;
 }
 
+// A Bluetooth app: every write is one frame (no length header). It is connected only after
+// pairing with the PIN, so it is logged in as admin from the moment it connects.
+void UmcAppServer::pollBle() {
+#if defined(ESP_PLATFORM)
+  if (_ble == nullptr || !_ble->isEnabled()) {
+    _ble_was_connected = false;
+    return;
+  }
+  uint8_t frame[kMaxFrame + 1];
+  for (int n = 0; n < 2; n++) {                      // also keeps advertising and sending alive
+    const size_t len = _ble->checkRecvFrame(frame);
+    if (len == 0) break;
+    if (len > kMaxFrame) continue;
+    _clients[kBleSlot].last_rx_ms = millis();
+    if (_umc.host() != nullptr) _umc.host()->umcAppFrame(*this, kBleSlot, frame, len);
+  }
+  const bool connected = _ble->isConnected();
+  if (connected != _ble_was_connected) {
+    memset(&_clients[kBleSlot], 0, sizeof(Client));    // a new link starts clean, a lost one leaves nothing
+    if (connected) setLogin(kBleSlot, true, true);
+    UMC_LOGF("[UMC] Bluetooth app %s\n", connected ? "connected" : "disconnected");
+    _ble_was_connected = connected;
+  }
+#endif
+}
+
 void UmcAppServer::loop(bool enabled) {
+  pollBle();
 #if defined(ESP_PLATFORM)
   if (!enabled) {
     stop();

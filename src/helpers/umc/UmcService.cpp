@@ -1,3 +1,4 @@
+#include "UmcHealth.h"
 #include "UmcService.h"
 #include "UmcLog.h"
 
@@ -188,6 +189,7 @@ UmcService::UmcService()
 void UmcService::begin(UmcHost* host, NetworkService* network) {
   _host = host;
   _network = network;
+  umc_health.begin();
   UmcPrefsStore::load(_prefs);
 #if defined(ESP_PLATFORM)
   _mb_lock = xSemaphoreCreateMutex();
@@ -269,6 +271,8 @@ void UmcService::loop() {
 #if defined(ESP_PLATFORM)
   esp_task_wdt_reset();
 #endif
+  if (_host != nullptr) umc_health.setEpoch(_host->umcEpoch());
+  umc_health.loop(millis(), umc_traffic.rxTotal(), umc_traffic.txTotal());
   processMailbox();
   if (_ota_prepare) {
     _ota_prepare = false;
@@ -681,6 +685,7 @@ bool UmcService::factoryReset() {
 
 bool UmcService::handleCommand(const char* command, char* reply, size_t reply_size) {
   if (command == nullptr || reply == nullptr || reply_size == 0) return false;
+  if (umc_health.command(command, reply, reply_size)) return true;
   const NetworkService* net_c = _network;
   NetworkService* net = _network;
 
@@ -811,6 +816,13 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
       UmcPrefsStore::save(_prefs);
       snprintf(reply, reply_size, "OK - reboot to apply");
     }
+    return true;
+  }
+  if (strcmp(command, "get ble.status") == 0) {
+    char line[96];
+    if (_host != nullptr) _host->umcBleStatus(line, sizeof(line));
+    else line[0] = 0;
+    snprintf(reply, reply_size, "> %s", line[0] ? line : "not available on this build");
     return true;
   }
   if (strcmp(command, "get ble.idle") == 0) {

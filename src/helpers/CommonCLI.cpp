@@ -502,6 +502,10 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       _callbacks->formatPacketStatsReply(reply, 160);
     } else if (memcmp(command, "stats-radio", 11) == 0 && (command[11] == 0 || command[11] == ' ')) {
       _callbacks->formatRadioStatsReply(reply, 160);
+    } else if ((memcmp(command, "stats-life", 10) == 0 || memcmp(command, "radio watchdog", 14) == 0 ||
+                (memcmp(command, "safety", 6) == 0 && (command[6] == 0 || command[6] == ' '))) &&
+               _callbacks->healthCommand(command, reply, 160)) {
+      // answered
     } else if (memcmp(command, "stats-rf", 8) == 0 && (command[8] == 0 || command[8] == ' ')) {
       _callbacks->formatRfReply(reply, 160);
     } else if (memcmp(command, "stats-core", 10) == 0 && (command[10] == 0 || command[10] == ' ')) {

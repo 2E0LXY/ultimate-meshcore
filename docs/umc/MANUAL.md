@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.5** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.6** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -434,6 +434,9 @@ The repeater learns a **route table** from every advert it hears. Each advert ca
 - `get traffic`: total packets and the last 16 packets with age, type, route (F flood / D direct), hops, RSSI and SNR.
 - `stats-core`, `stats-radio`, `stats-packets`: JSON statistics. `clear stats` resets them.
 - `stats-rf`: the recent spread of the noise floor as one line: how many bursts were measured, the current floor, the lowest low and highest high, and the last eight highs. The OLED has a **NOISE** page that draws the same history.
+- `stats-life`: how the device has behaved over its whole life: boots, abnormal restarts (crash, watchdog, brown-out), total uptime, its longest run, and packets carried, with the date it was first seen when the clock was set. Saved every ten minutes, so a power cut loses at most that. `stats-life clear` starts again.
+- `safety log [N]`, `safety tail`, `safety state`, `safety clear`: a short log kept across reboots: every boot with the reason for it and how long the run before it lasted, plus watchdog recoveries and Bluetooth being switched on or off. `safety state` shows the reset reason, free and lowest memory, and uptime. After a crash, `safety log` says which kind and how long the repeater had run.
+- `radio watchdog [on|off]`: if no noise-floor burst has completed for two minutes while the radio is listening, the receiver has stalled; it is restarted the same way an AGC reset does, and the count and the event are recorded. The command shows how many recoveries there have been. `off` and `on` last until the next reboot.
 - `log start|stop|erase` and `log` (USB): a packet log stored on the device.
 
 Packet types: ADVERT (node announcements), CHAN (channel message), MSG (direct message), ACK, PATH, REQ/RESP (requests and responses such as logins and stats), ANON, TRACE, CTRL (control/discovery), MULTI, RAW.
@@ -716,6 +719,8 @@ Tile servers have usage policies — OpenStreetMap's are fine for a small person
 
 ### 21.9 Memory on the Heltec V3
 
+**Bluetooth on a repeater** (Heltec V4 builds). Off until you turn it on with `set ble on` (web console, telnet or serial); while it is off nothing is allocated. The device then advertises as **MeshCore-UMC-<name>**; pair with the **last six digits of the device PIN** (the PIN shown in setup). Pairing authenticates it, so a connected app has admin rights. It speaks the repeater subset of the companion protocol: device info, statistics, time, name, radio, advert, and the repeater command line. After `ble.idle` minutes (default as set by `set ble.idle`) with nobody connected it switches itself off to free the memory; turn `set ble` off and on again to bring it back. `get ble.status` says which state it is in. *Not yet tested with the apps.*
+
 The V3 has no PSRAM, so the client uses the lightweight **NimBLE** Bluetooth stack, which leaves room for WiFi and the web interface. During an **internet firmware update** check or download, Bluetooth pauses for a few seconds to free memory, then comes back on its own. A phone app connected over Bluetooth reconnects afterwards. The V3 client stores up to 350 contacts, 40 channels and 64 messages waiting for an app.
 
 ---
@@ -871,6 +876,10 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `start ota` | Legacy OTA hotspot |
 | `stats-core`, `stats-radio`, `stats-packets` | Statistics (JSON) |
 | `stats-rf` | Recent noise-floor spread (one line) |
+| `stats-life` / `stats-life clear` | Lifetime boots, abnormal restarts, uptime and packets |
+| `safety log [N]` / `tail` / `state` / `clear` | Events kept across reboots; reset reason and memory |
+| `radio watchdog [on\|off]` | Receiver watchdog status and recoveries |
+| `set ble on\|off` / `get ble.status` / `set ble.idle <min>` | Bluetooth on repeaters (Heltec V4 builds) |
 | `get/set telemetry.base\|loc\|env deny\|contacts\|all` | Who may request telemetry *(C)* |
 | `get/set telnet on\|off` | Telnet command line |
 | `get/set app.tcp on\|off`, `get app.status` | MeshCore app connection on TCP port 5000 |

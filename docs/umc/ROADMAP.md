@@ -4,6 +4,13 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.6
+
+- ✅ Repeater: `stats-life` (lifetime boots, abnormal restarts, uptime, packets; saved every ten minutes)
+- ✅ Repeater: `safety log|tail|state|clear` (every boot with its reset reason and the length of the run before it; watchdog and Bluetooth events; kept across reboots). No core dump yet
+- ✅ Repeater: radio watchdog (receiver restarted when no noise burst completes for two minutes), `radio watchdog [on|off]`
+- ✅ Repeater: Bluetooth on the Heltec V4 builds (`set ble on`, pairing with the last six digits of the PIN, idle auto-off, no memory used while off) — hardware test pending
+
 ## Done in 0.1.5
 
 - ✅ Repeater: `stats-rf` (the recent spread of the noise floor, readable from the T-Deck's repeater page) and a **NOISE** page on the OLED: a trace of the last few minutes, each column from the lowest to the highest reading of a noise-floor burst, with a dot at the mean
@@ -66,7 +73,7 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 | # | Item | Source | Status |
 |---|---|---|---|
 | 3.1 | Repeater companion-protocol server on TCP 5000 + WebSocket 8765 (device info, stats, time, name, radio, adverts, CLI via `MESHCM` contact) so apps/meshcore_py/Home Assistant connect over LAN | meshcomod | ✅ (console contact: login, status, telemetry, neighbours, CLI) |
-| 3.2 | **Bluetooth** on repeaters: NUS service advertised as `MeshCore-UMC-<name>`, same protocol subset + CLI, PIN pairing, idle auto-off | new (spec) | 📋 |
+| 3.2 | **Bluetooth** on repeaters: NUS service advertised as `MeshCore-UMC-<name>`, same protocol subset + CLI, PIN pairing, idle auto-off | new (spec) | ✅ Heltec V4 builds (hardware test pending) |
 | 3.3 | Web Bluetooth / Web Serial "UMC Config" page (no WiFi needed) | new | 📋 |
 | 3.4 | BitChat `#mesh` bridge over BLE | MeshCore-BitChat | 📋 |
 | 3.5 | Home Assistant MQTT discovery (sensors: battery, noise, packets, neighbours) | jmead, Offband | 📋 |
@@ -77,10 +84,10 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 |---|---|---|---|
 | 4.1 | OTA rollback: mark new image valid only after a healthy run; otherwise boot the previous slot | Offband | ✅ |
 | 4.2 | SafeBoot low-battery boot guard (V3.2 ADC polarity autodetect) | Offband | 📋 |
-| 4.3 | Crash/safety log persisted across reboots, viewable in the web UI | Offband | 📋 |
+| 4.3 | Crash/safety log persisted across reboots, viewable in the web UI | Offband | ✅ CLI (`safety …`); web page and core dump 📋 |
 | 4.4 | UDP syslog forwarding window (`caplog forward`) | Offband | 📋 |
-| 4.5 | Persistent lifetime statistics (boots, packets, uptime) | CubeCellMeshCore | 📋 |
-| 4.6 | Radio watchdog (reset radio if RX stalls) | agessaman | 📋 |
+| 4.5 | Persistent lifetime statistics (boots, packets, uptime) | CubeCellMeshCore | ✅ (`stats-life`) |
+| 4.6 | Radio watchdog (reset radio if RX stalls) | agessaman | ✅ (`radio watchdog`) |
 | 4.7 | Heap monitor + automatic recovery restart on prolonged low memory | agessaman, EastMesh | 📋 |
 
 ## 5. Mesh features
