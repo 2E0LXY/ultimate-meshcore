@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.4** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.5** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -433,6 +433,7 @@ The repeater learns a **route table** from every advert it hears. Each advert ca
 - **Live traffic** page: the last 16 packets (direction, type, flood/direct, hops, RSSI, SNR, size), totals and packets per minute, with RX/TX and type filters and pause. Refreshes every 3 s.
 - `get traffic`: total packets and the last 16 packets with age, type, route (F flood / D direct), hops, RSSI and SNR.
 - `stats-core`, `stats-radio`, `stats-packets`: JSON statistics. `clear stats` resets them.
+- `stats-rf`: the recent spread of the noise floor as one line: how many bursts were measured, the current floor, the lowest low and highest high, and the last eight highs. The OLED has a **NOISE** page that draws the same history.
 - `log start|stop|erase` and `log` (USB): a packet log stored on the device.
 
 Packet types: ADVERT (node announcements), CHAN (channel message), MSG (direct message), ACK, PATH, REQ/RESP (requests and responses such as logins and stats), ANON, TRACE, CTRL (control/discovery), MULTI, RAW.
@@ -869,6 +870,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `setperm <pubkey> [0-3]` | Access permissions *(R)* |
 | `start ota` | Legacy OTA hotspot |
 | `stats-core`, `stats-radio`, `stats-packets` | Statistics (JSON) |
+| `stats-rf` | Recent noise-floor spread (one line) |
 | `get/set telemetry.base\|loc\|env deny\|contacts\|all` | Who may request telemetry *(C)* |
 | `get/set telnet on\|off` | Telnet command line |
 | `get/set app.tcp on\|off`, `get app.status` | MeshCore app connection on TCP port 5000 |

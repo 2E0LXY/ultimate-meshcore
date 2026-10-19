@@ -320,6 +320,7 @@ public:
   void removeNeighbor(const uint8_t* pubkey, int key_len) override;
   void formatStatsReply(char *reply, size_t reply_size) override;
   void formatRadioStatsReply(char *reply, size_t reply_size) override;
+  void formatRfReply(char *reply, size_t reply_size) override;
   void formatPacketStatsReply(char *reply, size_t reply_size) override;
   void formatMemoryReply(char *reply, size_t reply_size) override;
   bool purgeSdCard(char* reply, size_t reply_size);

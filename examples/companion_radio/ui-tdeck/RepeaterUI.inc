@@ -46,6 +46,7 @@ static const RepCmd kRepCmds[] = {
   {"stats-core", "core statistics", 0},
   {"stats-radio", "radio statistics", 0},
   {"stats-packets", "packet statistics", 0},
+  {"stats-rf", "recent noise floor spread", 0},
   {"get public.key", "its public key", 0},
   {"password ", "change the admin password", 1},
   {"set guest.password ", "set the guest password", 1},

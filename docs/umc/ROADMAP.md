@@ -4,6 +4,10 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.5
+
+- ✅ Repeater: `stats-rf` (the recent spread of the noise floor, readable from the T-Deck's repeater page) and a **NOISE** page on the OLED: a trace of the last few minutes, each column from the lowest to the highest reading of a noise-floor burst, with a dot at the mean
+
 ## Done in 0.1.4
 
 - ✅ T-Deck: chat bubbles are smaller (6pt text, tighter padding, shorter headings), so more of a conversation fits on the screen

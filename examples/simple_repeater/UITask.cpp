@@ -61,7 +61,7 @@ void UITask::begin(NodePrefs* node_prefs, const char* build_date, const char* fi
 #include <helpers/umc/UmcVersion.h>
 
 namespace {
-constexpr int kUmcSettingsPages = 4;            // radio, mesh, network, status
+constexpr int kUmcSettingsPages = 5;            // radio, noise, mesh, network, status
 constexpr unsigned long kManualHoldMs = 30000;  // button browsing pauses the cycle
 }
 
@@ -133,7 +133,53 @@ void UITask::renderPage(int page) {
       break;
     }
     case 1: {
-      header("MESH", 1, kUmcSettingsPages);
+      // The noise floor over the last few minutes: each column runs from the lowest to the
+      // highest reading in one burst (about every 2 s), with a dot at the mean.
+      header("NOISE", 1, kUmcSettingsPages);
+      const int n = radio_driver.getRssiRingCount();
+      if (n == 0) {
+        _display->setCursor(0, 24);
+        _display->print("measuring...");
+        break;
+      }
+      const int w = _display->width();
+      const int cols = w / 2;                          // two pixels a burst
+      const int top = 14, h = 34;
+      int lo_s = 0, hi_s = -200, floor_now = 0, lo_all = 0, hi_all = -200;
+      const int show = n < cols ? n : cols;
+      for (int i = 0; i < show; i++) {
+        int lo, mid, hi;
+        radio_driver.getRssiRing(i, lo, mid, hi);
+        if (i == 0) floor_now = mid;
+        if (lo < lo_s) lo_s = lo;
+        if (hi > hi_s) hi_s = hi;
+      }
+      lo_all = lo_s;
+      hi_all = hi_s;
+      if (hi_s > floor_now + 30) hi_s = floor_now + 30;      // one loud burst must not flatten the rest
+      lo_s -= 1;
+      hi_s += 1;
+      if (hi_s - lo_s < 20) hi_s = lo_s + 20;
+      auto ypix = [&](int v) {
+        int p = (v - lo_s) * (h - 1) / (hi_s - lo_s);
+        if (p < 0) p = 0;
+        if (p > h - 1) p = h - 1;
+        return top + h - 1 - p;
+      };
+      for (int i = 0; i < show; i++) {
+        int lo, mid, hi;
+        radio_driver.getRssiRing(i, lo, mid, hi);
+        const int x = w - 2 - i * 2;                   // newest at the right
+        const int y_hi = ypix(hi), y_lo = ypix(lo);
+        _display->fillRect(x, y_hi, 1, y_lo - y_hi + 1);
+        _display->fillRect(x, ypix(mid), 2, 1);
+      }
+      snprintf(tmp, sizeof(tmp), "%d/%d/%d dBm", lo_all, floor_now, hi_all);
+      _display->setCursor(0, 54); _display->print(tmp);
+      break;
+    }
+    case 2: {
+      header("MESH", 2, kUmcSettingsPages);
       _display->drawTextEllipsized(0, 14, _display->width(), _node_prefs->node_name);
       snprintf(tmp, sizeof(tmp), "Repeat %s  hops %d", _node_prefs->disable_fwd ? "OFF" : "on", _node_prefs->flood_max);
       _display->setCursor(0, 24); _display->print(tmp);
@@ -146,8 +192,8 @@ void UITask::renderPage(int page) {
       _display->setCursor(0, 54); _display->print(tmp);
       break;
     }
-    case 2: {
-      header("WIFI", 2, kUmcSettingsPages);
+    case 3: {
+      header("WIFI", 3, kUmcSettingsPages);
       if (net == nullptr) break;
       if (net->isWifiConnected()) {
         _display->drawTextEllipsized(0, 14, _display->width(), WiFi.SSID().c_str());
@@ -166,7 +212,7 @@ void UITask::renderPage(int page) {
       break;
     }
     default: {
-      header("STATUS", 3, kUmcSettingsPages);
+      header("STATUS", 4, kUmcSettingsPages);
       unsigned long up = millis() / 1000;
       snprintf(tmp, sizeof(tmp), "Up %lud %02luh %02lum", up / 86400, (up % 86400) / 3600, (up % 3600) / 60);
       _display->setCursor(0, 14); _display->print(tmp);

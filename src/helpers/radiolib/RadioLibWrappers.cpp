@@ -116,6 +116,11 @@ void RadioLibWrapper::loop() {
       _pub_lo = _burst_lo;
       _pub_hi = _burst_hi;
       _pub_seq++;
+      _ring_lo[_ring_head] = (int8_t)(_burst_lo < -128 ? -128 : _burst_lo > 127 ? 127 : _burst_lo);
+      _ring_mid[_ring_head] = (int8_t)(_noise_floor < -128 ? -128 : _noise_floor > 127 ? 127 : _noise_floor);
+      _ring_hi[_ring_head] = (int8_t)(_burst_hi < -128 ? -128 : _burst_hi > 127 ? 127 : _burst_hi);
+      _ring_head = (_ring_head + 1) % RSSI_RING;
+      if (_ring_n < RSSI_RING) _ring_n++;
     }
     _burst_lo = 32767;
     _burst_hi = -32768;

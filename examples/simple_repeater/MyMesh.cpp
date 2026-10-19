@@ -1631,6 +1631,30 @@ void MyMesh::formatRadioStatsReply(char *reply, size_t reply_size) {
   StatsFormatHelper::formatRadioStats(reply, reply_size, _radio, radio_driver, getTotalAirTime(), getReceiveAirTime());
 }
 
+// "RF 64 bursts: floor -113, lows to -121, highs to -71 | last highs: -108 -107 ..."
+void MyMesh::formatRfReply(char *reply, size_t reply_size) {
+  const int n = radio_driver.getRssiRingCount();
+  if (n == 0) {
+    snprintf(reply, reply_size, "RF: no bursts measured yet");
+    return;
+  }
+  int lo_min = 0, hi_max = -200, floor_now = 0;
+  for (int i = 0; i < n; i++) {
+    int lo, mid, hi;
+    radio_driver.getRssiRing(i, lo, mid, hi);
+    if (i == 0) floor_now = mid;
+    if (lo < lo_min) lo_min = lo;
+    if (hi > hi_max) hi_max = hi;
+  }
+  int len = snprintf(reply, reply_size, "RF %d bursts: floor %d, lows to %d, highs to %d | last:", n, floor_now, lo_min,
+                     hi_max);
+  for (int i = 0; i < n && i < 8 && len > 0 && len + 6 < (int)reply_size; i++) {
+    int lo, mid, hi;
+    radio_driver.getRssiRing(i, lo, mid, hi);
+    len += snprintf(reply + len, reply_size - len, " %d", hi);
+  }
+}
+
 void MyMesh::formatPacketStatsReply(char *reply, size_t reply_size) {
   StatsFormatHelper::formatPacketStats(reply, reply_size, radio_driver, getNumSentFlood(), getNumSentDirect(),
                                        getNumRecvFlood(), getNumRecvDirect());

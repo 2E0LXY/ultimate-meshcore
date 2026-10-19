@@ -24,6 +24,10 @@ protected:
   int16_t _burst_lo = 32767, _burst_hi = -32768;
   int16_t _pub_lo = 0, _pub_hi = 0;
   uint16_t _pub_seq = 0;
+  // the last bursts, oldest first once full: lowest, mean (the noise floor) and highest reading
+  static const int RSSI_RING = 64;
+  int8_t _ring_lo[RSSI_RING], _ring_mid[RSSI_RING], _ring_hi[RSSI_RING];
+  uint8_t _ring_n = 0, _ring_head = 0;
   uint8_t _preamble_sf;
 
   void idle();
@@ -66,6 +70,16 @@ public:
   // The spread (dBm) of the last noise-floor burst, and a counter that changes with each one.
   // It costs nothing: the driver was already reading every one of these values.
   void getRssiBurst(int& lo, int& hi, uint16_t& seq) const { lo = _pub_lo; hi = _pub_hi; seq = _pub_seq; }
+  // How many bursts are remembered (up to 64), and one of them: i = 0 is the newest.
+  int getRssiRingCount() const { return _ring_n; }
+  bool getRssiRing(int i, int& lo, int& mid, int& hi) const {
+    if (i < 0 || i >= _ring_n) return false;
+    const int idx = (_ring_head + RSSI_RING - 1 - i) % RSSI_RING;
+    lo = _ring_lo[idx];
+    mid = _ring_mid[idx];
+    hi = _ring_hi[idx];
+    return true;
+  }
   void triggerNoiseFloorCalibrate(int threshold) override;
   void setCADEnabled(bool enable) override { _cad_enabled = enable; }
   void resetAGC() override;
