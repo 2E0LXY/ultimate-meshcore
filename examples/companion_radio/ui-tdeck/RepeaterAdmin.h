@@ -150,7 +150,7 @@ public:
   void tick(unsigned long now) {
     if (login == LG_SENT && (long)(now - login_deadline) > 0) {
       login = LG_FAIL;
-      say("No answer from the repeater (out of range?)");
+      say("No answer: wrong password, or out of range");
     }
     if (status_wait && (long)(now - status_deadline) > 0) {
       status_wait = false;

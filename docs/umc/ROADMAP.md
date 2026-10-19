@@ -4,6 +4,10 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.4
+
+- ✅ T-Deck: chat bubbles are smaller (6pt text, tighter padding, shorter headings), so more of a conversation fits on the screen
+
 ## Done in 0.1.3
 
 - ✅ T-Deck: tap a repeater in **Who** for its own page: **Status** (log in, then battery, uptime, noise, packet counts), **Path** (route, per-hop **trace**, set or clear the route) and **Admin** (any repeater command, quick buttons and a list of the usual ones)

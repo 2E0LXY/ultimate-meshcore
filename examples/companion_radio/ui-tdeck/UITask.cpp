@@ -8,6 +8,7 @@
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
 #include "FreeSans7pt7b.h"
+#include "FreeSans6pt7b.h"
 #include <helpers/ui/ST7789LCDDisplay.h>
 
 #include "../MyMesh.h"
@@ -95,6 +96,7 @@ static void fill(int x, int y, int w, int h, uint16_t c) { gfx()->fillRect(x, y,
 // ---------------------------------------------------------------------------------------
 // Typography. Every screen uses one family in three sizes, so nothing is drawn with the
 // blocky 5x7 built-in font any more.
+static const GFXfont* const F_TINY = &FreeSans6pt7b;       // chat bubbles
 static const GFXfont* const F_SMALL = &FreeSans7pt7b;      // lists, labels, values, buttons
 static const GFXfont* const F_MED = &FreeSansBold12pt7b;   // the figure a card is about
 static const GFXfont* const F_BIG = &FreeSansBold24pt7b;   // the clock
@@ -321,7 +323,7 @@ static int richDraw(int x, int y, const char* s, uint16_t c, const GFXfont* font
   char buf[160];
   foldUtf8(s, buf, sizeof(buf));
   const int asc = fontAscent(font);
-  const int ih = asc >= 28 ? 26 : asc >= 15 ? 16 : 12;     // icons match the letter height
+  const int ih = asc >= 28 ? 26 : asc >= 15 ? 16 : asc <= 8 ? 9 : 12;     // icons match the letter height
   // the body face is 7pt: sit it 1px low so it stays centred in rows drawn for a taller one
   const int base = y + asc + (font == F_SMALL ? 1 : 0);
   const int limit = x + max_w;
@@ -949,23 +951,23 @@ void UITask::applyTheme() {
 // person shares one heading.
 int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when,
                        bool show_who, const UmcChatLog::Entry* entry) {
-  const int avatar = mine ? 0 : 18;                  // the column the incoming avatar sits in
-  const int max_w = SCR_W - 76 - avatar;
-  const int pad = 5;
-  const int line_h = 12;
+  const int avatar = mine ? 0 : 14;                  // the column the incoming avatar sits in
+  const int max_w = SCR_W - 44 - avatar;
+  const int pad = 4;
+  const int line_h = 11;
   const int inner = max_w - pad * 2;
 
   // wrap on spaces
-  char lines[5][48];
+  char lines[6][64];
   int line_count = 0;
   const char* p = body;
-  while (*p && line_count < 5) {
+  while (*p && line_count < 6) {
     int take = strlen(p);
     if (take > (int)sizeof(lines[0]) - 1) take = sizeof(lines[0]) - 1;
     char probe[sizeof(lines[0])];
     memcpy(probe, p, take);
     probe[take] = 0;
-    while (take > 1 && textWidth(probe) > inner) probe[--take] = 0;    // trim to the width
+    while (take > 1 && textFWidth(probe, F_TINY) > inner) probe[--take] = 0;    // trim to the width
     if (p[take] != 0) {
       int brk = take;
       while (brk > 6 && p[brk] != ' ') brk--;                          // back to a space
@@ -981,28 +983,28 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
 
   int widest = 0;
   for (int i = 0; i < line_count; i++) {
-    const int w = textWidth(lines[i]);
+    const int w = textFWidth(lines[i], F_TINY);
     if (w > widest) widest = w;
   }
   const int bw = widest + pad * 2;
-  const int bh = line_count * line_h + pad * 2;
+  const int bh = line_count * line_h + 3;
   const int bx = mine ? SCR_W - bw - 6 : 6 + avatar;
   const int by = y_bottom - bh;
 
   const uint16_t fill_c = mine ? TH.mine : TH.theirs;
-  gfx()->fillRoundRect(bx, by, bw, bh, 6, fill_c);
+  gfx()->fillRoundRect(bx, by, bw, bh, 5, fill_c);
   // square off the corner nearest the sender, the way a chat app does
-  if (mine) gfx()->fillRect(bx + bw - 6, by + bh - 6, 6, 6, fill_c);
-  else gfx()->fillRect(bx, by + bh - 6, 6, 6, fill_c);
+  if (mine) gfx()->fillRect(bx + bw - 5, by + bh - 5, 5, 5, fill_c);
+  else gfx()->fillRect(bx, by + bh - 5, 5, 5, fill_c);
   if (selected) gfx()->drawRoundRect(bx - 2, by - 2, bw + 4, bh + 4, 8, TH.accent == fill_c ? 0xFFFF : TH.accent);
 
   const uint16_t tc = mine ? TH.mine_text : TH.theirs_text;
-  for (int i = 0; i < line_count; i++) textClip(bx + pad, by + pad + i * line_h, inner, lines[i], tc);
+  for (int i = 0; i < line_count; i++) textFClip(bx + pad, by + 2 + i * line_h, inner, lines[i], tc, F_TINY);
 
-  if (!show_who) return by - 3;
+  if (!show_who) return by - 2;
 
   // the heading above the run: who it was from, when, and a tick on our own messages
-  const int hy = by - 12;
+  const int hy = by - 9;
   char stamp[24];
   if (when) {
     DateTime dt(when);
@@ -1039,33 +1041,33 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
         char count[12];
         // a direct message has the one acknowledgement; a channel message has relays
         snprintf(count, sizeof(count), "%ux", entry->relays > 0 ? (unsigned)entry->relays : 1u);
-        const int cw = textWidth(count);
-        text(x - cw, hy, count, col);
+        const int cw = textFWidth(count, F_TINY);
+        textF(x - cw, hy, count, col, F_TINY);
         x -= cw + 3;
       }
       drawIcon(x - 9, hy + 1, mark, col, 8);
       x -= 12;
     }
-    const int sw = textWidth(stamp);
-    text(x - sw, hy, stamp, TH.dim);
+    const int sw = textFWidth(stamp, F_TINY);
+    textF(x - sw, hy, stamp, TH.dim, F_TINY);
   } else {
     // a round avatar with the sender's initial, coloured from the name so it stays the same
     uint8_t hash = 0;
     for (const char* q = who; *q; q++) hash = hash * 31 + (uint8_t)*q;
     static const uint16_t kAvatar[6] = {0xF4E1, 0x3C1E, 0x9E6C, 0xAABE, 0x15D4, 0xF1EB};
     const uint16_t ac = kAvatar[hash % 6];
-    gfx()->fillCircle(12, by + bh - 8, 8, ac);
+    gfx()->fillCircle(9, by + bh - 7, 6, ac);
     char initial[2] = {(char)toupper((unsigned char)who[0]), 0};
     if (initial[0] < 0x20 || initial[0] > 0x7E) initial[0] = '?';
-    text(12 - textWidth(initial) / 2, by + bh - 13, initial, 0x0000);
+    textF(9 - textFWidth(initial, F_TINY) / 2, by + bh - 11, initial, 0x0000, F_TINY);
 
     char head[40];
     snprintf(head, sizeof(head), "%s", who);
-    const int hw = textWidth(head);
-    textClip(6 + avatar, hy, SCR_W - 90, head, TH.dim);
-    if (stamp[0]) text(6 + avatar + (hw > SCR_W - 90 ? SCR_W - 90 : hw) + 6, hy, stamp, TH.dim);
+    const int hw = textFWidth(head, F_TINY);
+    textFClip(6 + avatar, hy, SCR_W - 90, head, TH.dim, F_TINY);
+    if (stamp[0]) textF(6 + avatar + (hw > SCR_W - 90 ? SCR_W - 90 : hw) + 6, hy, stamp, TH.dim, F_TINY);
   }
-  return hy - 3;
+  return hy - 2;
 }
 
 // A small sample of the chat, for picking a theme by eye rather than by name.
@@ -1122,13 +1124,6 @@ void UITask::drawMessages() {
   const int list_bottom = SCR_H - TAB_H - COMPOSE_H - (_reply_to[0] ? 12 : 0) - 2;
   const int list_h = list_bottom - (top + 17);
 
-  // who we are writing to
-  fill(0, top, SCR_W, 16, TH.card);
-  char hdr[48];
-  snprintf(hdr, sizeof(hdr), "To: %s%s", _to_channel ? "#" : "", _to_name);
-  textClip(4, top + 4, SCR_W - 60, hdr, TH.text);
-  button(SCR_W - 52, top, 50, 16, "change");
-
   fill(0, top + 17, SCR_W, list_h, TH.bg);
 
   // newest at the bottom, working upwards
@@ -1164,6 +1159,12 @@ void UITask::drawMessages() {
   } else if (_msg_sel < 0) {
     text(6, list_bottom - 11, "Tap a message to reply to it", TH.dim);
   }
+  // who we are writing to - drawn last, so a bubble scrolling off the top goes behind it
+  fill(0, top, SCR_W, 16, TH.card);
+  char hdr[48];
+  snprintf(hdr, sizeof(hdr), "To: %s%s", _to_channel ? "#" : "", _to_name);
+  textClip(4, top + 4, SCR_W - 60, hdr, TH.text);
+  button(SCR_W - 52, top, 50, 16, "change");
   if (_quick_open) drawQuickPanel();
   drawCompose();
 }
