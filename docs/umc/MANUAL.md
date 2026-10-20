@@ -492,7 +492,27 @@ Choose the **non-merged** `.bin` for your board and firmware type and press **Up
 
 See [§3.1](#31-web-flasher-easiest).
 
-### 18.4 Legacy OTA hotspot
+### 18.4 Recovering a board that will not start
+
+A board with a **blank screen**, or stuck on **"Please wait..."**, after an update has usually lost something an app-only update does not put back. Check it from a computer with `esptool` (the board's USB port shows as a COM port or `/dev/ttyACM0`):
+
+| Check | Command | If it fails |
+|---|---|---|
+| Is there a bootloader and partition table? | `esptool --chip esp32s3 --port COMx read-flash 0x0 0x8002 head.bin`, then look: byte 0 must be `E9`, and the two bytes at `0x8000` must be `AA 50`. All `FF` means the flash was erased. | Do a **full install**: write the merged `.bin` at `0x0` (below). |
+| Is the app there? | `esptool --chip esp32s3 --port COMx verify-flash 0x10000 firmware.bin` | Write the app `.bin` at `0x10000`. |
+
+**Full install (erased or unknown board).** Use the **merged** file for your board and role, from the release page or the web flasher's *erase* option:
+
+```
+esptool --chip esp32s3 --port COMx -b 921600 write-flash 0x0 firmware-merged.bin
+```
+
+- A merged image rewrites the bootloader, partition table, boot selector and app. **It also clears the settings area, so the board gets a new identity and forgets its WiFi and passwords.** Set them again afterwards (`set wifi.ssid`, `set wifi.pwd`, `password`, ...).
+- An **app-only** update (the `.bin` without `-merged`, written at `0x10000`) keeps identity and settings, but only works on a board that already has a bootloader.
+- Do not erase the whole flash and then write only the app. That leaves nothing that can start, with a blank screen. The Desktop app now refuses an app-only update to a board that looks erased, and says so.
+- To enter download mode by hand: hold **BOOT**, tap **RESET**, release **BOOT**. Release BOOT before the final reset, or the board stays in download mode and shows a blank screen.
+
+### 18.5 Legacy OTA hotspot
 
 `start ota` opens a `MeshCore-OTA` hotspot with an upload page at `http://192.168.4.1/update`, as on standard MeshCore.
 
@@ -746,6 +766,7 @@ The V3 has no PSRAM, so the client uses the lightweight **NimBLE** Bluetooth sta
 | **`.local` name doesn't open** | Some Android phones and older Windows don't support mDNS. Use the IP address from the display or `get wifi.status`. |
 | **Sign-in refused: default password** | Set a new admin password over USB: `password <new>`. |
 | **Repeater hears nothing** | Check the antenna. Try `set agc.reset.interval 4`. Confirm the radio preset matches your mesh. |
+| **Blank screen, or stuck on “Please wait...” after an update** | The flash may have been erased. Follow [§18.4](#184-recovering-a-board-that-will-not-start). |
 | **Clock wrong after power cut** | Normal on the V3 (no clock battery). It fixes itself on WiFi, or press **Set clock from this browser**. |
 | **Region traffic not matching others** | Names are case-sensitive: check spelling and capitals with neighbouring repeater owners. |
 | **“Location only allowed from secure origins”** | Browsers block GPS on plain HTTP pages. Use **Set location from map…** and paste coordinates. |
