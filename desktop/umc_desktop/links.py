@@ -5,6 +5,7 @@ Companion radios speak the MeshCore app protocol. Over USB and TCP each frame is
 Over Bluetooth each write / notification is one frame.
 """
 import asyncio
+import json
 import threading
 
 import serial
@@ -200,6 +201,14 @@ class SerialTextLink(Link):
 
     # A plain reply can run over several lines (the region tree, neighbours, ...). Only the first
     # line carries the "  -> " marker, so keep taking lines until the device goes quiet.
+    @staticmethod
+    def _is_json(text):
+        try:
+            json.loads(text)
+            return True
+        except ValueError:
+            return False
+
     def _plain_arm(self):
         if self._plain_timer is not None:
             self._plain_timer.cancel()
@@ -216,9 +225,14 @@ class SerialTextLink(Link):
             line, _, rest = self.buf.partition(b"\n")
             self.buf = bytearray(rest)
             text = line.decode("utf-8", "replace").rstrip("\r")
-            if text.startswith("@umc {") or text.startswith("@umc ["):
+            at = text.find("@umc ")
+            if at >= 0 and text[at + 5:at + 6] in ("{", "[") and self._is_json(text[at + 5:]):
+                # the marker may follow a log line printed on the same row
                 if self.waiter and not self.waiter.done():
-                    self.waiter.set_result(text[5:])
+                    self.waiter.set_result(text[at + 5:])
+            elif self.waiter and not self.waiter.done() and text[:1] in ("{", "[") and self._is_json(text):
+                # a log line can land between the marker and the JSON, leaving the JSON on its own row
+                self.waiter.set_result(text)
             elif text.startswith("  -> "):
                 if self.plain_waiter and not self.plain_waiter.done():
                     self._plain_lines = [text[5:]]

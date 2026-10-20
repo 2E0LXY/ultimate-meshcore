@@ -33,17 +33,28 @@ class RepeaterSerialBackend:
         self.status = "connecting"
         self.plain = {}
         self.role = "repeater"      # until the device says otherwise
+        self.bridge_error = ""
 
     async def start(self):
         await self.link.open()
         self.link.on_close = self._on_close
-        try:
-            info = json.loads(await self.link.request("info", timeout=4))
-            self.bridge = isinstance(info, dict)
-            if self.bridge:
-                self.role = normalise_role(info.get("role"), self.role)
-        except Exception:
-            self.bridge = False
+        # The board can still be starting up, or busy printing, when we first ask. Try a few
+        # times before settling for the plain command line, which hides most of the settings pages.
+        self.bridge = False
+        for attempt in range(3):
+            try:
+                info = json.loads(await self.link.request("info", timeout=5))
+                if isinstance(info, dict):
+                    self.bridge = True
+                    self.bridge_error = ""
+                    self.role = normalise_role(info.get("role"), self.role)
+                    break
+                self.bridge_error = "the bridge answer was not an object"
+            except asyncio.TimeoutError:
+                self.bridge_error = "no answer to the bridge request"
+            except Exception as err:
+                self.bridge_error = f"the bridge answer was unreadable ({err})"
+            await asyncio.sleep(1.0)
         if not self.bridge:
             ver = await self.link.command("ver")
             if not ver:
@@ -74,7 +85,8 @@ class RepeaterSerialBackend:
                 p = self.plain
                 info = {"fw": "MeshCore", "umc": p["ver"].lstrip("> v"), "api": 1, "name": p["name"], "role": p["role"].replace(" ", "_"),
                         "ver": p["ver"], "board": p["board"], "env": "", "setup": False, "default_pw": False,
-                        "auth_required": False, "features": [], "net": {}}
+                        "auth_required": False, "features": [], "net": {}, "bridge": False,
+                        "bridge_error": self.bridge_error}
             info["link"] = "usb"
             return 200, info
         if path == "/api/cli":
