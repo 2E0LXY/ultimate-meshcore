@@ -4,6 +4,10 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.7
+
+- ✅ Repeater: fixed a reboot loop when Bluetooth was switched on (the Setup wizard can do it). The WiFi driver aborts if Bluetooth exists while WiFi power saving is off; Bluetooth now forces modem sleep, is created before WiFi starts, only at boot (`set ble on` takes effect after a reboot), and a start-up that crashes the board is skipped on the next boot instead of looping
+
 ## Done in 0.1.6
 
 - ✅ Repeater: `stats-life` (lifetime boots, abnormal restarts, uptime, packets; saved every ten minutes)

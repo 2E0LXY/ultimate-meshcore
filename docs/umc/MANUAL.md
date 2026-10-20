@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.6** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.7** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -739,7 +739,7 @@ Tile servers have usage policies — OpenStreetMap's are fine for a small person
 
 ### 21.9 Memory on the Heltec V3
 
-**Bluetooth on a repeater** (Heltec V4 builds). Off until you turn it on with `set ble on` (web console, telnet or serial); while it is off nothing is allocated. The device then advertises as **MeshCore-UMC-<name>**; pair with the **last six digits of the device PIN** (the PIN shown in setup). Pairing authenticates it, so a connected app has admin rights. It speaks the repeater subset of the companion protocol: device info, statistics, time, name, radio, advert, and the repeater command line. After `ble.idle` minutes (default as set by `set ble.idle`) with nobody connected it switches itself off to free the memory; turn `set ble` off and on again to bring it back. `get ble.status` says which state it is in. *Not yet tested with the apps.*
+**Bluetooth on a repeater** (Heltec V4 builds). Off until you turn it on with `set ble on` (web console, telnet or serial) **and reboot**: Bluetooth is only created at start-up, before WiFi starts, and while it is off nothing is allocated. While it is on, WiFi is forced to modem sleep (the chip requires this; a repeater set to `powersave none` would otherwise crash). The device then advertises as **MeshCore-UMC-<name>**; pair with the **last six digits of the device PIN** (the PIN shown in setup). Pairing authenticates it, so a connected app has admin rights. It speaks the repeater subset of the companion protocol: device info, statistics, time, name, radio, advert, and the repeater command line. After `ble.idle` minutes (default as set by `set ble.idle`) with nobody connected it switches itself off to free the memory; turn `set ble` off and on again to bring it back. `get ble.status` says which state it is in. If starting Bluetooth ever crashes the board, the next boot skips it (`get ble.status` says so) instead of looping; turn `set ble` off and on again, and reboot, to retry. *Not yet tested with the apps.*
 
 The V3 has no PSRAM, so the client uses the lightweight **NimBLE** Bluetooth stack, which leaves room for WiFi and the web interface. During an **internet firmware update** check or download, Bluetooth pauses for a few seconds to free memory, then comes back on its own. A phone app connected over Bluetooth reconnects afterwards. The V3 client stores up to 350 contacts, 40 channels and 64 messages waiting for an app.
 

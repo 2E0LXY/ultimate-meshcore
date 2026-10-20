@@ -368,6 +368,11 @@ public:
   SerialNimBLEInterface* _ble = nullptr;     // created the first time Bluetooth is switched on
   bool _ble_on = false;                      // what has been applied
   bool _ble_idle_off = false;                // switched off because nobody connected for a while
+  bool _ble_pass_done = false;               // the first pass (before WiFi starts) has run
+  bool _ble_guard_checked = false;
+  bool _ble_guard_armed = false;             // a start-up is under way and has not yet proved itself
+  bool _ble_blocked = false;                 // the last start-up crashed the board, so it is skipped
+  bool _ble_waiting_reboot = false;          // switched on while running: starts after the next reboot
   unsigned long _ble_idle_since = 0;
 #endif
   void umcConsoleKey(uint8_t* key) const;

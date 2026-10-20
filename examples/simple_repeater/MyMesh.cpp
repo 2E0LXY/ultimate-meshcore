@@ -1,4 +1,7 @@
 #include "MyMesh.h"
+#if defined(UMC_BUILD) && defined(UMC_NIMBLE)
+#include <Preferences.h>
+#endif
 #ifdef UMC_BUILD
   #include <helpers/umc/UmcAppServer.h>
 #endif
@@ -1635,35 +1638,78 @@ void MyMesh::formatRadioStatsReply(char *reply, size_t reply_size) {
 }
 
 #if defined(UMC_BUILD) && defined(UMC_NIMBLE)
-// Bluetooth follows the `ble` setting. While it is off nothing is allocated: the stack is only
-// created the first time it is switched on, and released again when it is switched off.
+// Bluetooth follows the `ble` setting, with two rules learned the hard way:
+//  - It is only ever *created* on the first pass of the main loop, before WiFi has started.
+//    Creating it after WiFi is up aborts inside the radio coexistence layer, and with the
+//    setting saved that meant a reboot loop. Switching it on while running therefore takes
+//    effect after the next reboot (as `set ble on` says); switching it off just stops it.
+//  - WiFi must use modem sleep while Bluetooth exists: with power saving off the WiFi driver
+//    aborts ("Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled"). The
+//    companion does the same (setMinPowerSave) when it has Bluetooth.
+//  - A start-up that crashes the board is remembered (in flash, before the attempt and cleared
+//    once WiFi and Bluetooth have run together for 30 s), and skipped on the next boot, so it
+//    can never become a reboot loop. Turning `ble` off and on again clears the block.
 // After `ble.idle` minutes with nobody connected it switches itself off until `set ble` is
 // turned off and on again.
+static void bleGuardSet(uint8_t v) {
+  Preferences g;
+  if (g.begin("umcble", false)) {
+    g.putUChar("g", v);
+    g.end();
+  }
+}
+
 void MyMesh::umcBleLoop() {
   const UmcPrefs &p = umc.prefs();
-  if (!p.ble_enabled) _ble_idle_off = false;
-  const bool want = p.ble_enabled && !_ble_idle_off;
-  if (want && !_ble_on) {
-    if (_ble == nullptr) {
-      _ble = new SerialNimBLEInterface();
-      char name[32];
-      snprintf(name, sizeof(name), "%.20s", _prefs.node_name);
-      const size_t pl = strlen(p.pin);
-      const uint32_t pin = (uint32_t)strtoul(p.pin + (pl > 6 ? pl - 6 : 0), nullptr, 10);   // six digits
-      _ble->begin("MeshCore-UMC-", name, pin);
-      umc.appServer()->attachBle(_ble);
-    } else {
-      _ble->resume();
+  const bool boot_pass = !_ble_pass_done;                 // before the network has started
+  _ble_pass_done = true;
+  if (!_ble_guard_checked) {                              // did the last start-up crash the board?
+    _ble_guard_checked = true;
+    Preferences g;
+    if (g.begin("umcble", false)) {                       // read-write so a missing namespace is created, not logged as an error
+      if (g.getUChar("g", 0) == 1) {
+        _ble_blocked = true;
+        umc_health.note("bluetooth start crashed the board - skipped");
+      }
+      g.end();
     }
-    _ble->enable();
-    _ble_on = true;
-    _ble_idle_since = millis();
-    umc_health.note("bluetooth on");
+    if (_ble_blocked) bleGuardSet(0);                     // one skipped boot; the block lasts until `ble` is toggled
+  }
+  if (!p.ble_enabled) {
+    _ble_idle_off = false;
+    _ble_blocked = false;
+    _ble_waiting_reboot = false;
+  }
+  const bool want = p.ble_enabled && !_ble_idle_off && !_ble_blocked;
+  if (want && !_ble_on) {
+    if (_ble == nullptr && !boot_pass) {
+      _ble_waiting_reboot = true;                         // too late to create it safely
+    } else {
+      if (_ble == nullptr) {
+        network.setMinPowerSave(1);                       // before WiFi starts; coexistence needs modem sleep
+        bleGuardSet(1);                                   // cleared again once it has proved itself
+        _ble_guard_armed = true;
+        _ble = new SerialNimBLEInterface();
+        char name[32];
+        snprintf(name, sizeof(name), "%.20s", _prefs.node_name);
+        const size_t pl = strlen(p.pin);
+        const uint32_t pin = (uint32_t)strtoul(p.pin + (pl > 6 ? pl - 6 : 0), nullptr, 10);   // six digits
+        _ble->begin("MeshCore-UMC-", name, pin);
+        umc.appServer()->attachBle(_ble);
+      }
+      _ble->enable();
+      _ble_on = true;
+      _ble_idle_since = millis();
+      umc_health.note("bluetooth on");
+    }
   } else if (!want && _ble_on) {
-    _ble->disable();
-    _ble->suspend();                                      // gives the memory back
+    _ble->disable();                                      // stopped, but kept allocated until the next reboot
     _ble_on = false;
     umc_health.note(_ble_idle_off ? "bluetooth off (idle)" : "bluetooth off");
+  }
+  if (_ble_guard_armed && millis() > 30000UL) {           // WiFi and Bluetooth have run together: it is safe
+    _ble_guard_armed = false;
+    bleGuardSet(0);
   }
   if (_ble_on) {
     if (_ble->isConnected()) _ble_idle_since = millis();
@@ -1677,6 +1723,8 @@ void MyMesh::umcBleStatus(char *out, size_t out_size) const {
 #if defined(UMC_BUILD) && defined(UMC_NIMBLE)
   const UmcPrefs &p = umc.prefs();
   if (!p.ble_enabled) snprintf(out, out_size, "off (set ble on to enable)");
+  else if (_ble_blocked) snprintf(out, out_size, "off: starting it crashed the board last time (set ble off, then on, and reboot to retry)");
+  else if (_ble_waiting_reboot) snprintf(out, out_size, "will start after the next reboot");
   else if (_ble_idle_off) snprintf(out, out_size, "off after %u min idle (turn it off and on again)", (unsigned)p.ble_idle_off_min);
   else if (_ble_on && _ble != nullptr && _ble->isConnected()) snprintf(out, out_size, "connected");
   else if (_ble_on) snprintf(out, out_size, "advertising as MeshCore-UMC-%.20s, idle off after %u min", _prefs.node_name, (unsigned)p.ble_idle_off_min);
@@ -3241,15 +3289,15 @@ void MyMesh::loop() {
 #ifdef UMC_BUILD
   network_required = true;  // UMC web UI / setup AP / telnet need the radio up
 #endif
+#if defined(UMC_BUILD) && defined(UMC_NIMBLE)
+  umcBleLoop();      // first, so Bluetooth is created before WiFi starts (see umcBleLoop)
+#endif
   network.loop(network_required);
 #if WITH_WEB_PANEL
   web.loop();
 #endif
 #ifdef UMC_BUILD
   umc.loop();
-#if defined(UMC_NIMBLE)
-  umcBleLoop();
-#endif
   static unsigned long next_routes_save = 10UL * 60UL * 1000UL;
   if (millis() > next_routes_save) {   // flash-friendly: at most every 10 minutes, only when changed
     next_routes_save = millis() + 10UL * 60UL * 1000UL;
