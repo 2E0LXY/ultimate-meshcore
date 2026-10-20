@@ -188,6 +188,8 @@ class SerialTextLink(Link):
         self.buf = bytearray()
         self.waiter = None
         self.plain_waiter = None
+        self._plain_lines = None    # a plain reply being collected: its first line, then any more
+        self._plain_timer = None
         self.lock = asyncio.Lock()
 
     async def open(self):
@@ -195,6 +197,18 @@ class SerialTextLink(Link):
         if self.ser is None:
             self.ser = await loop.run_in_executor(None, open_serial, self.port)
         self.reader = SerialReader(self.ser, loop, self._feed, lambda e: self._closed_by_peer(e))
+
+    # A plain reply can run over several lines (the region tree, neighbours, ...). Only the first
+    # line carries the "  -> " marker, so keep taking lines until the device goes quiet.
+    def _plain_arm(self):
+        if self._plain_timer is not None:
+            self._plain_timer.cancel()
+        self._plain_timer = asyncio.get_running_loop().call_later(0.3, self._plain_done)
+
+    def _plain_done(self):
+        lines, self._plain_lines, self._plain_timer = self._plain_lines, None, None
+        if lines is not None and self.plain_waiter and not self.plain_waiter.done():
+            self.plain_waiter.set_result("\n".join(lines))
 
     def _feed(self, data):
         self.buf += data
@@ -207,7 +221,11 @@ class SerialTextLink(Link):
                     self.waiter.set_result(text[5:])
             elif text.startswith("  -> "):
                 if self.plain_waiter and not self.plain_waiter.done():
-                    self.plain_waiter.set_result(text[5:])
+                    self._plain_lines = [text[5:]]
+                    self._plain_arm()
+            elif self._plain_lines is not None and text.strip() and not text.startswith(("[", "@umc")):
+                self._plain_lines.append(text)      # the next line of the same reply
+                self._plain_arm()
 
     async def request(self, req, timeout=8.0):
         if len(req) > 150:
@@ -243,6 +261,8 @@ class SerialTextLink(Link):
 
     async def close(self):
         await super().close()
+        if self._plain_timer is not None:
+            self._plain_timer.cancel()
         if self.reader:
             self.reader.stop()
         try:
