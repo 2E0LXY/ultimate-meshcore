@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {buildProvisionCommands, RADIO_PRESETS, redactCommand} from "../flasher/provision.mjs";
+import {
+  buildProvisionCommands, isDangerousCommand, normaliseCliReplies, RADIO_PRESETS, redactCommand,
+} from "../flasher/provision.mjs";
 
 test("the published radio list matches the firmware's complete preset list", () => {
   assert.equal(RADIO_PRESETS.length, 27);
@@ -28,7 +30,17 @@ test("redacts all supported password commands without hiding their names", () =>
   assert.equal(redactCommand("set wifi.pwd2 password123"), "set wifi.pwd2 ••••••••");
   assert.equal(redactCommand("set ap.password password123"), "set ap.password ••••••••");
   assert.equal(redactCommand("set bridge.peer.secret private"), "set bridge.peer.secret ••••••••");
+  assert.equal(redactCommand("set pin 12345678"), "set pin ••••••••");
+  assert.equal(redactCommand("set prv.key abcdef"), "set prv.key ••••••••");
   assert.equal(redactCommand("set name Example"), "set name Example");
+});
+
+test("normalises full CLI output and identifies disruptive Web Client commands", () => {
+  assert.deepEqual(normaliseCliReplies('["line one","line two"]'), ["line one", "line two"]);
+  assert.deepEqual(normaliseCliReplies('"OK"'), ["OK"]);
+  assert.equal(isDangerousCommand("reboot"), true);
+  assert.equal(isDangerousCommand("factory reset"), true);
+  assert.equal(isDangerousCommand("get radio"), false);
 });
 
 test("rejects destructive commands and ambiguous secrets", () => {

@@ -4,6 +4,11 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.10
+
+- ✅ Persistent USB Web Client on the flasher page for installed repeaters and clients, with automatic bridge detection, device summary, common actions and access to every CLI function
+- ✅ Reuses the open Web Client connection to complete first-boot setup; adds command history, full multi-line replies, secret redaction, disconnect handling and confirmations for disruptive commands
+
 ## Done in 0.1.9
 
 - ✅ Web Flasher first-boot provisioning over USB: WiFi, complete radio-area preset list, region scopes, identity, passwords, location, timezone, PIN, hostname, TX and airtime limits, plus safe advanced CLI settings

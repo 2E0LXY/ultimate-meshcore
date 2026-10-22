@@ -51,6 +51,7 @@ export const TIMEZONES = [
 const utf8 = new TextEncoder();
 const textDecoder = new TextDecoder();
 const blocked = /^(?:factory\s+reset|erase|reboot|poweroff|start\s+ota|setup\s+start|update\s+install)(?:\s|$)/i;
+const dangerous = /^(?:factory\s+reset|erase|reboot|poweroff|start\s+ota|setup\s+start|setup\s+done|update\s+install|ota\s+(?:rollback|install)|region\s+(?:remove|clear))(?:\s|$)/i;
 
 function oneLine(value, label, maxBytes = 140) {
   const v = String(value ?? "").trim();
@@ -157,9 +158,18 @@ export function buildProvisionCommands(config, role = "repeater") {
 
 export function redactCommand(command) {
   return command.replace(
-    /^((?:password|set\s+\S*(?:password|pwd|secret)\S*))\s+.*/i,
+    /^((?:password|login|set\s+(?:pin|prv\.key|private\.key|\S*(?:password|pwd|secret)\S*)))\s+.*/i,
     "$1 ••••••••",
   );
+}
+
+export function isDangerousCommand(command) {
+  return dangerous.test(String(command ?? "").trim());
+}
+
+export function normaliseCliReplies(raw) {
+  const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  return (Array.isArray(parsed) ? parsed : [parsed]).map(value => String(value ?? ""));
 }
 
 class ProvisionLink {
@@ -307,10 +317,10 @@ class ProvisionLink {
     return role === "client" ? this.clientRequest(request, ms) : this.textRequest(request, ms);
   }
 
-  async waitUntilReady(role, status) {
+  async waitUntilReady(role, status, attempts = 12) {
     let lastError;
-    for (let attempt = 1; attempt <= 12; attempt++) {
-      status(`Waiting for firmware USB bridge… attempt ${attempt}/12`);
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      status(`Waiting for ${role} USB bridge… attempt ${attempt}/${attempts}`);
       try {
         if (role === "client") await this.clientHandshake(2200);
         const raw = await this.request(role, "info", 2200);
@@ -323,9 +333,12 @@ class ProvisionLink {
   }
 
   async runCommand(role, command) {
+    return (await this.runCommands(role, command))[0] ?? "";
+  }
+
+  async runCommands(role, command) {
     const raw = await this.request(role, `cli ${command}`, 6000);
-    const replies = JSON.parse(raw);
-    return Array.isArray(replies) ? String(replies[0] ?? "") : String(replies);
+    return normaliseCliReplies(raw);
   }
 
   async close() {
@@ -359,14 +372,157 @@ function setStatus(message, kind = "") {
   element.textContent = message; element.className = `status ${kind}`;
 }
 
+let clientLink = null;
+let clientRole = null;
+let clientInfo = null;
+let clientBusy = false;
+const clientHistory = [];
+let clientHistoryIndex = 0;
+
+function setClientState(message, kind = "") {
+  const state = document.getElementById("clientState");
+  state.textContent = message;
+  state.className = `pill ${kind}`;
+}
+
+function setClientControls(connected, busy = false) {
+  clientBusy = busy;
+  document.getElementById("clientConnect").disabled = connected || busy || !("serial" in navigator);
+  document.getElementById("clientDisconnect").disabled = !connected || busy;
+  document.getElementById("clientRefresh").disabled = !connected || busy;
+  document.getElementById("clientQuick").disabled = !connected || busy;
+  document.getElementById("clientQuickRun").disabled = !connected || busy;
+  document.getElementById("clientCommand").disabled = !connected || busy;
+  document.getElementById("clientRun").disabled = !connected || busy;
+  document.getElementById("applySetup").disabled = busy || !("serial" in navigator);
+}
+
+function appendClientLog(prefix, value) {
+  const log = document.getElementById("clientLog");
+  const time = new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+  const text = `${time}  ${prefix}${String(value ?? "")}\n`;
+  log.textContent = log.textContent.startsWith("USB Web Client ready.") ? text : log.textContent + text;
+  if (log.textContent.length > 50000) log.textContent = log.textContent.slice(-40000);
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderClientInfo(info, role) {
+  const details = document.getElementById("clientDetails");
+  details.replaceChildren();
+  const entries = [
+    info?.name || "Unnamed node",
+    info?.board || "Unknown board",
+    role === "client" ? "Ultimate MeshCore Client" : "Repeater",
+    `UMC ${info?.umc || "unknown"}`,
+    info?.setup ? "Setup incomplete" : "Setup complete",
+  ];
+  for (const value of entries) {
+    const item = document.createElement("span");
+    item.className = "pill"; item.textContent = value; details.appendChild(item);
+  }
+  details.hidden = false;
+}
+
+async function detectClient(link) {
+  const preferred = selectedRole();
+  const roles = preferred === "client" ? ["client", "repeater"] : ["repeater", "client"];
+  let lastError;
+  for (const role of roles) {
+    try {
+      const info = await link.waitUntilReady(role, message => setClientState(message), role === preferred ? 4 : 8);
+      return {role, info};
+    } catch (error) { lastError = error; }
+  }
+  throw lastError || new Error("This device did not answer as an Ultimate MeshCore repeater or client.");
+}
+
+async function connectClient() {
+  if (clientLink || clientBusy) return;
+  let link;
+  try {
+    setClientControls(false, true);
+    setClientState("Choose the installed device's serial port…");
+    const port = await navigator.serial.requestPort();
+    link = new ProvisionLink(port);
+    await link.open();
+    const detected = await detectClient(link);
+    clientLink = link; clientRole = detected.role; clientInfo = detected.info;
+    renderClientInfo(clientInfo, clientRole);
+    setClientState(`Connected: ${clientInfo.name || clientRole}`, "ok");
+    appendClientLog("● ", `Connected to ${clientInfo.name || "device"} (${clientRole}, UMC ${clientInfo.umc || "unknown"})`);
+    setClientControls(true, false);
+    document.getElementById("clientCommand").focus();
+  } catch (error) {
+    await link?.close();
+    setClientState(error?.message || String(error), "bad");
+    appendClientLog("! ", error?.message || String(error));
+    setClientControls(false, false);
+  }
+}
+
+async function disconnectClient(message = "Disconnected") {
+  const link = clientLink;
+  clientLink = null; clientRole = null; clientInfo = null;
+  await link?.close();
+  document.getElementById("clientDetails").hidden = true;
+  setClientState(message);
+  appendClientLog("● ", message);
+  setClientControls(false, false);
+}
+
+async function refreshClient() {
+  if (!clientLink || clientBusy) return;
+  try {
+    setClientControls(true, true);
+    setClientState("Refreshing device…");
+    clientInfo = JSON.parse(await clientLink.request(clientRole, "info", 4000));
+    renderClientInfo(clientInfo, clientRole);
+    setClientState(`Connected: ${clientInfo.name || clientRole}`, "ok");
+    appendClientLog("● ", "Device information refreshed");
+  } catch (error) {
+    appendClientLog("! ", error?.message || String(error));
+    await disconnectClient("Connection lost");
+  } finally {
+    if (clientLink) setClientControls(true, false);
+  }
+}
+
+async function runClientCommand(value) {
+  if (!clientLink || clientBusy) return;
+  const command = oneLine(value, "Command", clientRole === "client" ? 165 : 140);
+  if (!command) return;
+  if (isDangerousCommand(command) && !window.confirm(`Run this potentially disruptive command?\n\n${redactCommand(command)}`)) return;
+  clientHistory.push(command); clientHistoryIndex = clientHistory.length;
+  document.getElementById("clientCommand").value = "";
+  appendClientLog("> ", redactCommand(command));
+  try {
+    setClientControls(true, true);
+    setClientState(`Running: ${redactCommand(command)}`);
+    const replies = await clientLink.runCommands(clientRole, command);
+    for (const reply of replies) appendClientLog("  ", reply || "(no output)");
+    setClientState(`Connected: ${clientInfo?.name || clientRole}`, "ok");
+    if (/^(?:reboot|poweroff|start\s+ota|update\s+install|ota\s+(?:rollback|install))(?:\s|$)/i.test(command)) {
+      await disconnectClient("Device is restarting");
+    }
+  } catch (error) {
+    appendClientLog("! ", error?.message || String(error));
+    setClientState(error?.message || String(error), "bad");
+  } finally {
+    if (clientLink) {
+      setClientControls(true, false);
+      document.getElementById("clientCommand").focus();
+    }
+  }
+}
+
 function refreshRoleFields() {
   const client = selectedRole() === "client";
   document.getElementById("cfgRepeaterLimit").hidden = client;
   document.getElementById("cfgClientLimit").hidden = !client;
 }
 
-function preview() {
-  const commands = buildProvisionCommands(configFromForm(), selectedRole());
+function preview(role = selectedRole()) {
+  const commands = buildProvisionCommands(configFromForm(), role);
   const plan = document.getElementById("setupPlan");
   plan.textContent = commands.map(redactCommand).join("\n"); plan.hidden = false;
   setStatus(`${commands.length} setting command${commands.length === 1 ? "" : "s"} prepared.`, "ok");
@@ -376,15 +532,22 @@ function preview() {
 async function applySetup() {
   const button = document.getElementById("applySetup");
   let link;
+  let keepOpen = false;
   try {
-    const role = selectedRole();
-    const commands = preview();
+    const role = clientLink ? clientRole : selectedRole();
+    const commands = preview(role);
     button.disabled = true;
-    setStatus("Choose the newly flashed device's serial port…");
-    const port = await navigator.serial.requestPort();
-    link = new ProvisionLink(port);
-    await link.open();
-    const info = await link.waitUntilReady(role, message => setStatus(message));
+    let info = clientInfo;
+    if (clientLink) {
+      link = clientLink; keepOpen = true; setClientControls(true, true);
+      setStatus(`Using connected ${info?.name || role}…`);
+    } else {
+      setStatus("Choose the newly flashed device's serial port…");
+      const port = await navigator.serial.requestPort();
+      link = new ProvisionLink(port);
+      await link.open();
+      info = await link.waitUntilReady(role, message => setStatus(message));
+    }
     for (let index = 0; index < commands.length; index++) {
       const command = commands[index];
       setStatus(`Applying ${index + 1}/${commands.length}: ${redactCommand(command)}`);
@@ -397,11 +560,16 @@ async function applySetup() {
     document.getElementById("cfgWifiPassword3").value = "";
     document.getElementById("cfgAdminPassword").value = "";
     document.getElementById("cfgExtra").value = "";
+    if (keepOpen) {
+      setClientControls(true, false);
+      await refreshClient();
+    }
   } catch (error) {
     setStatus(error?.message || String(error), "bad");
   } finally {
-    await link?.close();
-    button.disabled = false;
+    if (!keepOpen) await link?.close();
+    if (clientLink) setClientControls(true, false);
+    button.disabled = clientBusy || !("serial" in navigator);
   }
 }
 
@@ -416,6 +584,31 @@ function initialise() {
   TIMEZONES.forEach(item => timezone.add(new Option(item[0], item[1])));
   document.getElementById("previewSetup").addEventListener("click", () => { try { preview(); } catch (error) { setStatus(error.message, "bad"); } });
   document.getElementById("applySetup").addEventListener("click", applySetup);
+  document.getElementById("clientConnect").addEventListener("click", connectClient);
+  document.getElementById("clientDisconnect").addEventListener("click", () => disconnectClient());
+  document.getElementById("clientRefresh").addEventListener("click", refreshClient);
+  document.getElementById("clientRun").addEventListener("click", () => {
+    runClientCommand(formValue("clientCommand")).catch(error => appendClientLog("! ", error.message));
+  });
+  document.getElementById("clientQuickRun").addEventListener("click", () => {
+    const command = formValue("clientQuick");
+    if (command) runClientCommand(command).catch(error => appendClientLog("! ", error.message));
+  });
+  document.getElementById("clientCommand").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runClientCommand(event.currentTarget.value).catch(error => appendClientLog("! ", error.message));
+    } else if (event.key === "ArrowUp" && clientHistory.length) {
+      event.preventDefault(); clientHistoryIndex = Math.max(0, clientHistoryIndex - 1);
+      event.currentTarget.value = clientHistory[clientHistoryIndex];
+    } else if (event.key === "ArrowDown" && clientHistory.length) {
+      event.preventDefault(); clientHistoryIndex = Math.min(clientHistory.length, clientHistoryIndex + 1);
+      event.currentTarget.value = clientHistory[clientHistoryIndex] || "";
+    }
+  });
+  document.getElementById("clientClear").addEventListener("click", () => {
+    document.getElementById("clientLog").textContent = "Transcript cleared.\n";
+  });
   document.getElementById("clearSecrets").addEventListener("click", () => {
     for (const id of ["cfgWifiPassword", "cfgWifiPassword2", "cfgWifiPassword3", "cfgAdminPassword"]) document.getElementById(id).value = "";
     const extra = document.getElementById("cfgExtra");
@@ -423,6 +616,10 @@ function initialise() {
     setStatus("Passwords and advanced secret commands cleared from this page.", "ok");
   });
   document.addEventListener("change", event => { if (event.target?.name === "role") refreshRoleFields(); });
+  navigator.serial?.addEventListener("disconnect", event => {
+    if (clientLink?.port === event.target) disconnectClient("USB device disconnected");
+  });
+  setClientControls(false, false);
   refreshRoleFields();
 }
 

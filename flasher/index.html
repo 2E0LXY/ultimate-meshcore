@@ -26,6 +26,7 @@ input,select,textarea{width:100%;font:inherit;color:var(--ink);background:var(--
 input[type=checkbox]{width:auto;margin-right:7px}.check{font-weight:400}.help{display:block;color:var(--muted);font-size:13px;margin-top:4px}
 details{margin-top:12px}summary{cursor:pointer;font-weight:600}pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:240px;overflow:auto}
 .status{margin-top:10px;min-height:24px}.status.ok{color:var(--ok)}.status.bad{color:var(--bad)}
+.command-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}.terminal{min-height:220px;max-height:440px;background:#0b0f14;color:#d7e1ea;border-color:#303946;font:13px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.device-summary{margin:12px 0}.device-summary[hidden]{display:none}.client-actions{margin-top:12px}
 .warn{border:1px solid var(--warn);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:14px}
 .bad{color:var(--bad)}ol{padding-left:20px;margin:8px 0}li{margin:4px 0}code{background:var(--chip);padding:1px 5px;border-radius:5px;font-size:13px}
 a{color:var(--acc)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
@@ -120,6 +121,50 @@ a{color:var(--acc)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
       <li>Later updates can be done over WiFi from the device's <b>Firmware</b> page using the update <code>.bin</code>.</li>
     </ol>
     <div class="warn">Back up anything important first. Flashing the wrong board's firmware can stop a device booting until you re-flash the correct one.</div>
+  </div>
+
+  <div class="card" id="webClient">
+    <h2>5. USB Web Client <span class="pill">all firmware functions</span></h2>
+    <p class="sub">Connect to any installed Ultimate MeshCore device without installing an app. You can finish the setup above, inspect the device, use common actions, or run any firmware CLI command. Data stays between this browser and the USB device.</p>
+    <div class="row">
+      <button class="btn" id="clientConnect" type="button">Connect device</button>
+      <button class="btn sec" id="clientDisconnect" type="button" disabled>Disconnect</button>
+      <button class="btn sec" id="clientRefresh" type="button" disabled>Refresh device</button>
+      <span class="pill" id="clientState">Not connected</span>
+    </div>
+    <div class="meta device-summary" id="clientDetails" hidden></div>
+    <div class="client-actions grid">
+      <div>
+        <label for="clientQuick">Common function</label>
+        <select id="clientQuick" disabled>
+          <option value="">Choose a command…</option>
+          <option value="get setup">Setup status</option>
+          <option value="get umc.version">Firmware version</option>
+          <option value="get role">Firmware role</option>
+          <option value="get radio">Radio settings</option>
+          <option value="get tx">Transmit power</option>
+          <option value="get wifi.status">WiFi status</option>
+          <option value="get net.status">Network status</option>
+          <option value="region">Region tree</option>
+          <option value="neighbors">Neighbours</option>
+          <option value="routes">Routes</option>
+          <option value="stats">Live statistics</option>
+          <option value="clock">Clock</option>
+        </select>
+      </div>
+      <div style="align-self:end"><button class="btn sec" id="clientQuickRun" type="button" disabled>Run function</button></div>
+    </div>
+    <label for="clientCommand">Firmware command</label>
+    <div class="command-row">
+      <input id="clientCommand" maxlength="165" autocomplete="off" spellcheck="false" placeholder="For example: get radio" disabled>
+      <button class="btn" id="clientRun" type="button" disabled>Run</button>
+    </div>
+    <span class="help">Press Enter to run. Use ↑ and ↓ for command history. Password, PIN, private-key and secret command values are hidden in the transcript. Commands that erase, restart or update ask for confirmation.</span>
+    <pre id="clientLog" class="terminal" role="log" aria-live="polite">USB Web Client ready. Connect an installed device to begin.</pre>
+    <div class="row">
+      <button class="btn sec" id="clientClear" type="button">Clear transcript</button>
+      <a href="https://github.com/2E0LXY/ultimate-meshcore/blob/main/docs/umc/MANUAL.md#24-command-reference-az" id="commandReference" target="_blank" rel="noopener">Full command reference</a>
+    </div>
   </div>
 
   <p class="sub">Source: <a id="repoLink" href="#">GitHub repository</a> · Built automatically from the latest commit on <code>main</code>.</p>

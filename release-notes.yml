@@ -9,6 +9,30 @@ generated_from: "Adjacent git tag comparisons plus non-merge commit subjects."
 
 releases:
   - track: ultimate-meshcore
+    version: "0.1.10"
+    tag: "latest"
+    date: "2026-10-22"
+    previous_version: "0.1.9"
+    summary: "Adds a complete USB Web Client to the Web Flasher for setup and ongoing device control."
+    changes:
+      - type: added
+        area: web-client
+        text: "Added persistent USB connections to installed repeaters and clients with automatic bridge detection and device identity, board, role, version and setup-state details."
+      - type: added
+        area: web-client
+        text: "Added common device actions and unrestricted CLI access with complete multi-line replies, command history and a link to the full command reference."
+      - type: changed
+        area: provisioning
+        text: "First-boot setup can reuse an open Web Client connection instead of asking for the serial port again."
+      - type: security
+        area: web-client
+        text: "Redacts password, PIN, private-key and secret command values, keeps transcripts local, and confirms disruptive commands before sending them."
+      - type: changed
+        area: release
+        text: "Updated firmware, Web Flasher, desktop, manual, and project version declarations to 0.1.10."
+    breaking_changes: []
+
+  - track: ultimate-meshcore
     version: "0.1.9"
     tag: "latest"
     date: "2026-10-22"

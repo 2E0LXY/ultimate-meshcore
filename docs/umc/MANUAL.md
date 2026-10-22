@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.9** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.10** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -91,6 +91,17 @@ It builds on upstream MeshCore 1.17.1 and the MeshCore-EastMesh fork, and brings
 7. If you prepared settings, press **Apply setup over USB** and select the same port. The flasher waits for the firmware, applies each setting through its USB bridge, and shows the result. Credentials stay in browser memory only; they are not embedded in a download, placed in a URL or uploaded, and the password boxes are cleared on success.
 
 This post-install USB step is deliberate: it gives each device its settings after the published build is installed, without modifying the firmware image or exposing secrets in a custom binary. It works with both repeater and Ultimate MeshCore Client builds.
+
+### USB Web Client
+
+The flasher page remains useful after installation. In **USB Web Client**:
+
+1. Press **Connect device** and choose the serial port. The page automatically tries both the repeater text bridge and the Ultimate MeshCore Client framed bridge, then shows the node name, board, role, UMC version and setup state.
+2. Use **Apply setup over USB** above while connected to finish or change first-boot settings without choosing the port again.
+3. Pick a common function such as radio, WiFi, network, regions, neighbours, routes or statistics, or type any command from the command reference and press **Enter**.
+4. Use **↑** and **↓** to revisit command history. Password, PIN, private-key and secret values in commands are redacted from the transcript. Restart, erase, update and other disruptive commands require confirmation.
+
+The Web Client keeps the port open until **Disconnect** is pressed or the cable is unplugged. It does not upload the transcript or device data.
 
 The flasher always offers the **latest build** of the `main` branch.
 
