@@ -7,7 +7,7 @@ By **Daren Loxley 2E0LXY**
 
 [**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest firmware**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) · [**📱 Android app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) · [**🖥 Windows / Linux app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest)
 
-> **Status: 0.1.8 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
+> **Status: 0.1.9 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
 
 ![Repeater dashboard](docs/images/repeater-dashboard.png)
 
@@ -43,15 +43,16 @@ By **Daren Loxley 2E0LXY**
 
 ## Quick start
 
-1. Open the [web flasher](https://2e0lxy.github.io/ultimate-meshcore/) in Chrome or Edge. Choose your board and **Repeater** or **Ultimate MeshCore Client**, then press **Install**. Choose **No** at “Erase device?” to keep an existing node's identity.
-2. Join the open `UMC-Setup-XXXX` WiFi hotspot. The setup wizard opens by itself.
-3. Reconnect to your home WiFi and open `http://umc-<name>.local/`, or the IP address shown on the display.
+1. Open the [web flasher](https://2e0lxy.github.io/ultimate-meshcore/) in Chrome or Edge. Choose your board and **Repeater** or **Ultimate MeshCore Client**.
+2. Optionally enter WiFi, radio-area, region, identity and security settings on the flasher page, then press **Install**. Choose **No** at “Erase device?” to keep an existing node's identity.
+3. When installation finishes, press **Apply setup over USB** and select the same serial port. The settings go directly from the browser to the restarted device and passwords are cleared from the page afterwards.
+4. If you skipped USB setup, join `UMC-Setup-XXXX` and use the device's setup wizard. Then open `http://umc-<name>.local/`, or the IP address shown on the display.
 
 ---
 
 ## Installation and updates
 
-- **USB web flasher** (Chrome/Edge). It always installs the newest build. It can **update** (keeping identity and settings) or do a **fresh install**.
+- **USB web flasher** (Chrome/Edge). It always installs the newest build. It can **update** (keeping identity and settings) or do a **fresh install**, then securely provision WiFi, the complete MeshCore radio-preset list, UK region scopes, name, passwords, location, timezone, PIN, hostname, TX and airtime limits over the same USB cable.
 - **Update through the browser**: your browser fetches the latest build for this exact board and firmware type and sends it to the device. The device itself needs no internet access.
 - **Internet updates on the device**: checks and installs over verified HTTPS, with optional daily automatic checks or installs. The Heltec V3 client restarts into a short **update mode** with Bluetooth off, then returns to normal by itself.
 - **Upload a firmware file** in the browser. Images are validated: merged or wrong-chip images are rejected, and a wrong board or firmware type gets a warning.

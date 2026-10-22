@@ -62,7 +62,8 @@ def main(artifacts, site):
     commit = os.environ.get("GITHUB_SHA") or git("rev-parse", "HEAD")
     repo = os.environ.get("GITHUB_SERVER_URL", "https://github.com") + "/" + os.environ.get("GITHUB_REPOSITORY", "")
     os.makedirs(site, exist_ok=True)
-    shutil.copy(os.path.join(ROOT, "flasher", "index.html"), os.path.join(site, "index.html"))
+    for name in ("index.html", "provision.mjs"):
+        shutil.copy(os.path.join(ROOT, "flasher", name), os.path.join(site, name))
 
     builds = []
     for env in sorted(os.listdir(artifacts)):

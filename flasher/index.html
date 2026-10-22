@@ -21,6 +21,11 @@ label{display:block;font-weight:600;margin:10px 0 6px}
 .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.pill{background:var(--chip);color:var(--muted);border-radius:99px;padding:3px 10px;font-size:13px}
 esp-web-install-button button,.btn{font:inherit;background:var(--acc);color:var(--acc-ink);border:0;border-radius:10px;padding:11px 20px;cursor:pointer;font-weight:600}
 .btn.sec{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:400}
+.btn:disabled{opacity:.55;cursor:not-allowed}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px 14px}
+input,select,textarea{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+input[type=checkbox]{width:auto;margin-right:7px}.check{font-weight:400}.help{display:block;color:var(--muted);font-size:13px;margin-top:4px}
+details{margin-top:12px}summary{cursor:pointer;font-weight:600}pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:240px;overflow:auto}
+.status{margin-top:10px;min-height:24px}.status.ok{color:var(--ok)}.status.bad{color:var(--bad)}
 .warn{border:1px solid var(--warn);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:14px}
 .bad{color:var(--bad)}ol{padding-left:20px;margin:8px 0}li{margin:4px 0}code{background:var(--chip);padding:1px 5px;border-radius:5px;font-size:13px}
 a{color:var(--acc)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
@@ -44,7 +49,47 @@ a{color:var(--acc)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   </div>
 
   <div class="card">
-    <h2>2. Connect and install</h2>
+    <h2>2. Prepare first-boot settings <span class="pill">optional</span></h2>
+    <p class="sub">Fill in only what you want to change. After the firmware install finishes and the device restarts, use <b>Apply setup over USB</b> below. Settings travel directly from this browser to the device and are not uploaded anywhere.</p>
+    <div class="grid">
+      <div><label for="cfgSsid">WiFi network</label><input id="cfgSsid" maxlength="32" autocomplete="off" placeholder="SSID"></div>
+      <div><label for="cfgWifiPassword">WiFi password</label><input id="cfgWifiPassword" type="password" maxlength="63" autocomplete="new-password" placeholder="Leave blank for open WiFi"></div>
+      <div><label for="cfgRadio">Radio area / frequency preset</label><select id="cfgRadio"><option value="">Keep firmware default</option></select></div>
+      <div><label for="cfgRegion">Mesh region preset</label><select id="cfgRegion"><option value="">None / configure later</option><option value="yorkshire">Yorkshire</option><option value="northwest">Northwest England</option><option value="uk">United Kingdom</option></select></div>
+      <div><label for="cfgName">Node name</label><input id="cfgName" maxlength="31" placeholder="e.g. Home Repeater"></div>
+      <div><label for="cfgAdminPassword">Admin password</label><input id="cfgAdminPassword" type="password" maxlength="32" autocomplete="new-password" placeholder="8–32 characters"></div>
+    </div>
+    <details>
+      <summary>More settings</summary>
+      <div class="grid">
+        <div><label for="cfgSsid2">Backup WiFi network</label><input id="cfgSsid2" maxlength="32" autocomplete="off" placeholder="Optional SSID 2"></div>
+        <div><label for="cfgWifiPassword2">Backup WiFi password</label><input id="cfgWifiPassword2" type="password" maxlength="63" autocomplete="new-password"></div>
+        <div><label for="cfgSsid3">Second backup WiFi network</label><input id="cfgSsid3" maxlength="32" autocomplete="off" placeholder="Optional SSID 3"></div>
+        <div><label for="cfgWifiPassword3">Second backup WiFi password</label><input id="cfgWifiPassword3" type="password" maxlength="63" autocomplete="new-password"></div>
+        <div><label for="cfgTimezone">Timezone</label><select id="cfgTimezone"><option value="">Keep default</option></select></div>
+        <div><label for="cfgHostname">Network hostname</label><input id="cfgHostname" maxlength="32" placeholder="umc-home-repeater"></div>
+        <div><label for="cfgLatitude">Latitude</label><input id="cfgLatitude" type="number" min="-90" max="90" step="0.000001" placeholder="53.800000"></div>
+        <div><label for="cfgLongitude">Longitude</label><input id="cfgLongitude" type="number" min="-180" max="180" step="0.000001" placeholder="-1.550000"></div>
+        <div><label for="cfgPin">Device PIN</label><input id="cfgPin" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" placeholder="8 digits"><span class="help">Used for the setup/rescue access point and Bluetooth pairing.</span></div>
+        <div><label for="cfgTx">TX power</label><input id="cfgTx" type="number" min="-9" max="22" step="1" placeholder="Keep default"></div>
+        <div id="cfgRepeaterLimit"><label for="cfgDuty">Repeater duty-cycle limit (%)</label><input id="cfgDuty" type="number" min="1" max="100" step="1" placeholder="Keep default"></div>
+        <div id="cfgClientLimit" hidden><label for="cfgAirtime">Client airtime factor</label><input id="cfgAirtime" type="number" min="0" max="9" step="0.1" placeholder="Keep default"></div>
+      </div>
+      <label for="cfgExtra">Extra CLI settings</label><textarea id="cfgExtra" rows="4" placeholder="One safe command per line, for example:&#10;set ble on&#10;set web on"></textarea>
+      <span class="help">Advanced: commands run exactly as entered. Destructive/reboot/update commands are blocked here.</span>
+    </details>
+    <label class="check"><input id="cfgFinish" type="checkbox" checked>Mark first-time setup complete after applying settings</label>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="applySetup" type="button">Apply setup over USB</button>
+      <button class="btn sec" id="previewSetup" type="button">Preview commands</button>
+      <button class="btn sec" id="clearSecrets" type="button">Clear passwords</button>
+    </div>
+    <div id="setupStatus" class="status" role="status" aria-live="polite"></div>
+    <pre id="setupPlan" hidden></pre>
+  </div>
+
+  <div class="card">
+    <h2>3. Connect and install</h2>
     <ol>
       <li>Plug the device into this computer with a <b>data</b> USB cable.</li>
       <li>Press <b>Install</b> and pick the device's serial port (CP210x / USB JTAG / USB Serial).</li>
@@ -67,9 +112,10 @@ a{color:var(--acc)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   </div>
 
   <div class="card">
-    <h2>3. After installing</h2>
+    <h2>4. After installing</h2>
     <ol>
-      <li>A new or erased device starts an open WiFi hotspot called <code>UMC-Setup-XXXX</code>. Join it and the setup page opens (or browse to <code>http://192.168.4.1</code>).</li>
+      <li>Close the installer dialog, wait for the device to restart, then press <b>Apply setup over USB</b> above and select the same serial port.</li>
+      <li>If you did not apply settings over USB, a new or erased device starts <code>UMC-Setup-XXXX</code>. Join it and the setup page opens (or browse to <code>http://192.168.4.1</code>); use the PIN shown on the display or serial output if a password is requested.</li>
       <li>Updated devices keep their settings: open <code>http://umc-&lt;name&gt;.local/</code> or the IP shown on the display.</li>
       <li>Later updates can be done over WiFi from the device's <b>Firmware</b> page using the update <code>.bin</code>.</li>
     </ol>
@@ -109,5 +155,6 @@ fetch("builds.json", {cache: "no-store"}).then(r => r.json()).then(site => {
   render();
 }).catch(err => { $("#boards").innerHTML = `<span class="bad">Couldn't load the build list: ${esc(err.message)}</span>`; });
 </script>
+<script type="module" src="provision.mjs"></script>
 </body>
 </html>

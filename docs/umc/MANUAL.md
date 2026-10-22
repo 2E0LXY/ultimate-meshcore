@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.8** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.9** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -82,11 +82,15 @@ It builds on upstream MeshCore 1.17.1 and the MeshCore-EastMesh fork, and brings
 
 1. Open **https://2e0lxy.github.io/ultimate-meshcore/** in Chrome or Edge on a computer.
 2. Choose your **board** and **firmware type**.
-3. Plug the device in and press **Install**, then pick its serial port.
-4. When asked **“Erase device?”**:
+3. Optional: fill in **Prepare first-boot settings**. It supports WiFi and backup WiFi, every bundled MeshCore frequency preset, region scopes, node name, passwords, location, timezone, PIN, hostname, TX power and the role's airtime limit. Advanced users can preview and add other safe CLI settings.
+4. Plug the device in and press **Install**, then pick its serial port.
+5. When asked **“Erase device?”**:
    - **No** — update an existing MeshCore / EastMesh / UMC device and **keep** its identity, name, radio settings and everything else.
    - **Yes** — fresh install. All data is erased and a new identity is created.
-5. Wait for “Installation complete”. The device restarts.
+6. Wait for “Installation complete” and close the installer. The device restarts.
+7. If you prepared settings, press **Apply setup over USB** and select the same port. The flasher waits for the firmware, applies each setting through its USB bridge, and shows the result. Credentials stay in browser memory only; they are not embedded in a download, placed in a URL or uploaded, and the password boxes are cleared on success.
+
+This post-install USB step is deliberate: it gives each device its settings after the published build is installed, without modifying the firmware image or exposing secrets in a custom binary. It works with both repeater and Ultimate MeshCore Client builds.
 
 The flasher always offers the **latest build** of the `main` branch.
 

@@ -4,6 +4,11 @@ Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.9
+
+- ✅ Web Flasher first-boot provisioning over USB: WiFi, complete radio-area preset list, region scopes, identity, passwords, location, timezone, PIN, hostname, TX and airtime limits, plus safe advanced CLI settings
+- ✅ Credentials remain in browser memory, use the firmware's existing repeater/client USB bridges, and are cleared from the form after a successful setup
+
 ## Done in 0.1.8
 
 - ✅ Republished all supported firmware targets, the USB Web Flasher, and the desktop packages with synchronized 0.1.8 version metadata

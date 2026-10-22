@@ -9,6 +9,27 @@ generated_from: "Adjacent git tag comparisons plus non-merge commit subjects."
 
 releases:
   - track: ultimate-meshcore
+    version: "0.1.9"
+    tag: "latest"
+    date: "2026-10-22"
+    previous_version: "0.1.8"
+    summary: "Adds secure first-boot WiFi, radio-area and device provisioning to the USB Web Flasher."
+    changes:
+      - type: added
+        area: flasher
+        text: "Added optional WiFi, backup WiFi, complete radio-preset, region, identity, security, location, timezone and radio-limit setup to the Web Flasher."
+      - type: added
+        area: usb
+        text: "Added repeater text-bridge and client framed-bridge provisioning, including the client device/app handshake and chunked replies."
+      - type: security
+        area: credentials
+        text: "Kept credentials in page memory, redacted them from previews and progress, blocked destructive advanced commands, and cleared password fields and advanced commands after success."
+      - type: changed
+        area: release
+        text: "Updated firmware, Web Flasher, desktop, manual, and project version declarations to 0.1.9."
+    breaking_changes: []
+
+  - track: ultimate-meshcore
     version: "0.1.8"
     tag: "latest"
     date: "2026-10-22"
