@@ -1,5 +1,6 @@
 schema_version: 1
 tracks:
+  - ultimate-meshcore
   - companion-wifi
   - repeater-bridge-espnow
   - observer-eastmesh
@@ -7,6 +8,21 @@ tracks:
 generated_from: "Adjacent git tag comparisons plus non-merge commit subjects."
 
 releases:
+  - track: ultimate-meshcore
+    version: "0.1.8"
+    tag: "latest"
+    date: "2026-10-22"
+    previous_version: "0.1.7"
+    summary: "Republishes the complete Ultimate MeshCore firmware, Web Flasher, and desktop package set with synchronized 0.1.8 version metadata."
+    changes:
+      - type: changed
+        area: release
+        text: "Updated firmware, Web Flasher, desktop, manual, and project version declarations to 0.1.8."
+      - type: changed
+        area: flasher
+        text: "Republished every supported USB Web Flasher target from the current main branch."
+    breaking_changes: []
+
   - track: companion-wifi
     version: "1.14.1"
     tag: "companion-wifi-v1.14.1"
