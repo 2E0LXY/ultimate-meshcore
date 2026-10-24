@@ -11,33 +11,33 @@ repeater ──wss──► Caddy (443, TLS) ──► Mosquitto (127.0.0.1:9101
 Nodes connect to `wss://net.2e0lxy.uk/mqtt` with their own username and password. The firmware's
 custom-broker mode already speaks this (`mqtt.custom.transport wss`).
 
-## Topics (`umcnet/v1/<area>/...`)
+## Topics
+
+The standard MeshCore MQTT layout, which the firmware's uplink already publishes, so analysers
+and maps can read this broker as well:
 
 | Topic | Who writes | Who reads | Meaning |
 |---|---|---|---|
-| `bus/rx` | bridging repeaters | everyone | a packet heard on RF |
-| `node/<name>/status` | the node (retained) | everyone | state, version, uptime |
-| `node/<name>/cmd` | admin | that node | a command for the node |
-| `node/<name>/resp` | the node | admin | its reply |
-| `client/<name>/tx` | that client | repeaters | a packet the client wants sent over RF |
+| `meshcore/<area>/<device id>/raw` | that repeater | repeaters, clients | a packet it heard: `{"origin":..,"origin_id":..,"timestamp":..,"type":"RAW","data":"<hex>"}` |
+| `meshcore/<area>/<device id>/packets` | that repeater | clients | the same packet, decoded |
+| `meshcore/<area>/<device id>/status` | that repeater (retained, with a last-will) | everyone | online or offline, version, radio |
 
-`<area>` is a coverage area (`uk` to start), so separate regions can share one broker.
+`<area>` is the code set with `set mqtt.iata` (for example `LBA`), `<device id>` the repeater's
+64-digit public key in capitals. Create a repeater's account with
+`umcnet-user add <name> repeater --device <id>` and it can write only under its own id.
 
-## Payload (`bus/rx`, `client/<name>/tx`)
+## How the bridge works
 
-```json
-{"v":1,"o":"v4-repeater","s":1234,"t":1760000000,"r":-98,"n":7.5,"p":"<hex of the MeshCore packet>","m":"rf"}
-```
-
-`o` origin node, `s` its sequence number, `t` time, `r`/`n` RSSI and SNR where it was heard, `p` the
-packet, `m` `rf` (heard on air) or `net` (came from the network). A repeater re-sends only `m:"rf"`
-packets from other origins, and drops any packet it has already seen (MeshCore's own duplicate
-table), so nothing loops.
+On a repeater, `set mqtt.custom.bridge on` makes the MQTT uplink also subscribe to
+`meshcore/<area>/+/raw`. Each packet another repeater published is passed to the mesh as if it had
+arrived by radio, after the bridge delay. The mesh drops what it has already seen, so nothing
+loops, and forwards the rest by its normal rules (hop limit, regions, duty cycle). At most
+`mqtt.custom.rate` packets a minute are passed on (default 20). Our own packets are skipped.
 
 ## Roles
 
-`admin` everything · `repeater` publishes `bus/rx`, reads `bus/rx` and `client/+/tx`, takes
-commands on its own `cmd` topic · `client` reads `bus/rx`, publishes its own `tx` · `viewer` reads.
+`admin` everything · `repeater` writes only under its own device id, reads everyone's raw packets
+and status · `client` and `viewer` read only.
 
 ## Install
 
