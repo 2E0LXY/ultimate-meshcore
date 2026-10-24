@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.10** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.11** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -82,22 +82,24 @@ It builds on upstream MeshCore 1.17.1 and the MeshCore-EastMesh fork, and brings
 
 1. Open **https://2e0lxy.github.io/ultimate-meshcore/** in Chrome or Edge on a computer.
 2. Choose your **board** and **firmware type**.
-3. Optional: fill in **Prepare first-boot settings**. It supports WiFi and backup WiFi, every bundled MeshCore frequency preset, region scopes, node name, passwords, location, timezone, PIN, hostname, TX power and the role's airtime limit. Advanced users can preview and add other safe CLI settings.
-4. Plug the device in and press **Install**, then pick its serial port.
+3. Plug the device in, press **Install**, select the USB serial port and flash the fixed firmware image.
+4. Keep the device connected while the installer writes and verifies the image.
 5. When asked **“Erase device?”**:
    - **No** — update an existing MeshCore / EastMesh / UMC device and **keep** its identity, name, radio settings and everything else.
    - **Yes** — fresh install. All data is erased and a new identity is created.
 6. Wait for “Installation complete” and close the installer. The device restarts.
-7. If you prepared settings, press **Apply setup over USB** and select the same port. The flasher waits for the firmware, applies each setting through its USB bridge, and shows the result. Credentials stay in browser memory only; they are not embedded in a download, placed in a URL or uploaded, and the password boxes are cleared on success.
+7. Optional: use **Configure the installed device over USB** after the device restarts. It supports WiFi and backup WiFi, every bundled MeshCore frequency preset, multiple regions from the weekly GB community catalogue, a home region, node name, passwords, location, timezone, PIN, hostname, TX power, MQTT analyzer setup and the role's airtime limit. Select the same port and press **Apply setup to installed device**. Credentials stay in browser memory only; they are not embedded in the fixed firmware image, placed in a URL or uploaded, and password boxes are cleared on success.
 
 This post-install USB step is deliberate: it gives each device its settings after the published build is installed, without modifying the firmware image or exposing secrets in a custom binary. It works with both repeater and Ultimate MeshCore Client builds.
+
+Repeater builds include the packet/status MQTT publisher used by services such as Let's Mesh, MeshMapper, waev and EastMesh. They authenticate with the repeater's MeshCore identity and publish directly over WiFi, covering the normal `meshcoretomqtt` forwarding use case without a permanently attached Raspberry Pi. The external `meshcoretomqtt` project remains useful for stock firmware, USB debug forwarding and its separately secured remote-serial feature; UMC does not enable remote command execution from public brokers.
 
 ### USB Web Client
 
 The flasher page remains useful after installation. In **USB Web Client**:
 
 1. Press **Connect device** and choose the serial port. The page automatically tries both the repeater text bridge and the Ultimate MeshCore Client framed bridge, then shows the node name, board, role, UMC version and setup state.
-2. Use **Apply setup over USB** above while connected to finish or change first-boot settings without choosing the port again.
+2. Use **Apply setup to installed device** above while connected to finish or change first-boot settings without choosing the port again.
 3. Pick a common function such as radio, WiFi, network, regions, neighbours, routes or statistics, or type any command from the command reference and press **Enter**.
 4. Use **↑** and **↓** to revisit command history. Password, PIN, private-key and secret values in commands are redacted from the transcript. Restart, erase, update and other disruptive commands require confirmation.
 
@@ -285,17 +287,18 @@ Regions limit how far **flood** traffic spreads, so local chatter stays local.
 
 - Each repeater keeps a **region tree**. `*` is everything without a region.
 - **F / Flooding on** means the repeater repeats floods for that region.
-- Region names are **case-sensitive**. Every repeater in the same area must use exactly the same name: `yorkshire` and `Yorkshire` are different regions.
+- Public region identifiers are exact, **case-sensitive**, 1–29 bytes long, and use only lowercase `a-z`, digits and `-`. Up to 32 regions can be stored.
 - Changes work immediately but are **lost on reboot** until you press **Save regions** (`region save`).
+- Keep wildcard `*` flood-enabled for unscoped messages and older clients unless your community has explicitly agreed otherwise.
 
 On the **Regions** page:
 
 - The tree lists every region. Each row has a **Flooding** switch, **Set home** and **Remove**. Remove deletes sub-regions first and asks before doing so.
-- **UK presets** add names used on the public map: `yorkshire`, `northwest`, or `uk` containing both.
+- **LocalMesh presets** implement the documented Great Britain hierarchy (`gb` with a selected `gb-*` child) and the separate island-of-Ireland hierarchy (`ioi` with `bhd`, `snn`, `dub`, `noc`, or an optional code). Do not mix these conventions on an Ireland repeater.
 - **Add region** creates a region under a parent.
-- **Define in one line** uses `region def`, e.g. `uk yorkshire leeds|yorkshire wakefield`.
+- **Define in one line** uses `region def`, e.g. `gb gb-yor|gb gb-nwk`.
 
-Commands: `region`, `region put <name> [parent]`, `region remove <name>`, `region allowf <name>`, `region denyf <name>`, `region home <name>`, `region default <name>`, `region def <tokens>`, `region preset yorkshire|northwest|uk`, `region save`.
+Commands: `region`, `region put <name> [parent]`, `region remove <name>`, `region allowf <name>`, `region denyf <name>`, `region home <name>`, `region default <name>`, `region def <tokens>`, `region preset <code>`, `region save`. See the [LocalMesh regional configuration guide](https://localmesh.co.uk/meshcore-region-configuration/) for the shared codes.
 
 ---
 
@@ -423,7 +426,7 @@ A bridge links two LoRa areas through another medium. The Heltec V3 build includ
 | `advert.interval` | 60 | Zero-hop advert every hour |
 | `dutycycle` | 10 | UK/EU 869.4–869.65 MHz legal limit |
 
-It then adds the regions `yorkshire` and `eng-yh`, sets `yorkshire` as the default and saves. Check with your local mesh group before applying these elsewhere: other regions use different values.
+It then creates `gb` → `gb-yor`, enables flooding for both, sets `gb-yor` as home and default, and saves. Check with your local mesh group before applying these elsewhere: other regions use different values.
 
 ### Routes & trace
 
@@ -672,7 +675,7 @@ Every link sees the same contacts, channels and messages. The browser keeps its 
 - **Routes & trace** lists every contact with the route direct messages take, naming each repeater (ids are the first bytes of their keys). **Set route** fixes a route, e.g. `a1,b2,c3`; **Discover** asks the mesh for the best one; **Reset** floods the next message so a new route is learnt; **Trace** shows the signal each hop heard.
 - **Trace any path** at the top traces a hop list you type, out and back (`a1,b2,a1`).
 - **Map** shows everyone who shares a location on OpenStreetMap (blue = this radio, orange = repeaters, green = room servers, purple = people). The map is drawn by your browser, so it needs internet access; without it you get a list with map links. The Map page is on repeaters too, using the nodes they have heard.
-- **Region** sets up regional scopes: **Set up Yorkshire** adds `#Yorkshire` and scopes it to `yorkshire`, and lists the room servers the radio knows.
+- **Region** selects an exact Great Britain or island-of-Ireland scope and lists the room servers the radio knows.
 
 ### 21.6 Channels
 
@@ -685,14 +688,15 @@ Every link sees the same contacts, channels and messages. The browser keeps its 
 
 **Export all…** copies the channel list, including the secrets, so keep it private. **Import list…** adds channels from an export, skipping duplicates.
 
-### 21.6a Region scope (Yorkshire and other regional meshes)
+### 21.6a Region scope (Great Britain and island of Ireland)
 
-Regional meshes ask clients to **scope** their flood traffic so it doesn't cross the whole country. Set **Region scope for sends** (Messaging settings, or `set scope yorkshire`) to your region name and flood messages, channel posts and adverts carry that scope; repeaters that know the region pass them on and others can drop them.
+Regional meshes ask clients to **scope** flood traffic so it does not cross the whole country. Set **Region scope for sends** (Messaging settings, or `set scope gb-yor`) and flood messages, channel posts and adverts carry that exact scope; repeaters configured for it pass them on and others drop them.
 
-- Names are **case-sensitive** and must match what the repeaters use (`yorkshire`, `northwest`, …).
+- Great Britain uses `gb` and the documented `gb-*` examples. The island of Ireland uses the separate `ioi`, `bhd`, `snn`, `dub` and `noc` community codes; do not substitute `gb-nir` or mix the trees.
+- Names must match exactly and use 1–29 lowercase letters, digits or hyphens.
 - Blank (`set scope`) sends unscoped, reaching the whole mesh.
-- The [MeshCore Yorkshire guide](https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/) recommends adding the `yorkshire` scope to the `#Yorkshire` channel. On the client's **Region** page, **Set up Yorkshire** does exactly that: it adds `#Yorkshire` (capital Y, as the guide writes it) and scopes that channel to `yorkshire`.
-- Each channel can have its own scope (**Channels → Region scope…**), like **Set Region Scope** in the MeshCore apps. Channels without one use the device scope.
+- The client Region page offers every code documented by [LocalMesh](https://localmesh.co.uk/meshcore-region-configuration/). The repeater preset creates the required broad parent plus the selected local child, allows flooding for both, and sets home.
+- Each channel can have its own validated scope (**Channels → Region scope…**). Channels without one use the device scope.
 - Hashtag channel keys come from the name exactly as typed, so `#Yorkshire` and `#yorkshire` are different channels. Use the spelling your group uses.
 
 ### 21.7 Client settings
@@ -897,7 +901,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `region home [name]` | Home region |
 | `region list allowed\|denied` | List regions (USB) |
 | `region load` | Interactive bulk load (USB) |
-| `region preset yorkshire\|northwest\|uk` | Add UK region presets |
+| `region preset <code>` | Add a LocalMesh GB or Ireland parent/local preset and set home |
 | `region put <name> [parent]` | Create a region |
 | `region remove <name>` | Remove a region (no sub-regions) |
 | `region save` | Save region changes |

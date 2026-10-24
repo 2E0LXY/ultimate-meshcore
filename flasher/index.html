@@ -15,6 +15,9 @@ h1{font-size:26px;margin:0 0 4px}h2{font-size:17px;margin:0 0 10px}.sub{color:va
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
 label{display:block;font-weight:600;margin:10px 0 6px}
 .opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.region-picker{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg)}
+.region-option{display:block;font-weight:400;margin:0;padding:5px 7px;border-radius:6px}.region-option:hover{background:var(--chip)}
+.region-option small{color:var(--muted)}
 .opt{border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;background:var(--bg)}
 .opt input{margin-right:6px}.opt.on{border-color:var(--acc);outline:1px solid var(--acc)}
 .opt small{display:block;color:var(--muted);font-weight:400}
@@ -49,14 +52,15 @@ a{color:var(--acc)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     <div class="meta" id="meta"></div>
   </div>
 
-  <div class="card">
-    <h2>2. Prepare first-boot settings <span class="pill">optional</span></h2>
-    <p class="sub">Fill in only what you want to change. After the firmware install finishes and the device restarts, use <b>Apply setup over USB</b> below. Settings travel directly from this browser to the device and are not uploaded anywhere.</p>
+  <div class="card" id="setupCard">
+    <h2>3. Configure the installed device over USB <span class="pill">optional</span></h2>
+    <p class="sub">Install the firmware first. The installer writes a fixed firmware image; it cannot insert your passwords or local settings. After the device restarts, this step sends your choices directly to its MeshCore CLI. Nothing is uploaded.</p>
     <div class="grid">
       <div><label for="cfgSsid">WiFi network</label><input id="cfgSsid" maxlength="32" autocomplete="off" placeholder="SSID"></div>
       <div><label for="cfgWifiPassword">WiFi password</label><input id="cfgWifiPassword" type="password" maxlength="63" autocomplete="new-password" placeholder="Leave blank for open WiFi"></div>
       <div><label for="cfgRadio">Radio area / frequency preset</label><select id="cfgRadio"><option value="">Keep firmware default</option></select></div>
-      <div><label for="cfgRegion">Mesh region preset</label><select id="cfgRegion"><option value="">None / configure later</option><option value="yorkshire">Yorkshire</option><option value="northwest">Northwest England</option><option value="uk">United Kingdom</option></select></div>
+      <div style="grid-column:1/-1"><label for="cfgRegionSearch">Mesh regions (select one or more)</label><input id="cfgRegionSearch" type="search" placeholder="Search the current GB catalogue or Ireland presets"><div id="cfgRegions" class="region-picker"><span class="sub">Loading region catalogue…</span></div><span class="help" id="regionSource">The GB community catalogue is refreshed from GitHub weekly. GB and Island of Ireland hierarchies cannot be mixed.</span></div>
+      <div><label for="cfgRegionHome">Home region</label><select id="cfgRegionHome" disabled><option value="">Select regions above</option></select></div>
       <div><label for="cfgName">Node name</label><input id="cfgName" maxlength="31" placeholder="e.g. Home Repeater"></div>
       <div><label for="cfgAdminPassword">Admin password</label><input id="cfgAdminPassword" type="password" maxlength="32" autocomplete="new-password" placeholder="8–32 characters"></div>
     </div>
@@ -75,13 +79,15 @@ a{color:var(--acc)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
         <div><label for="cfgTx">TX power</label><input id="cfgTx" type="number" min="-9" max="22" step="1" placeholder="Keep default"></div>
         <div id="cfgRepeaterLimit"><label for="cfgDuty">Repeater duty-cycle limit (%)</label><input id="cfgDuty" type="number" min="1" max="100" step="1" placeholder="Keep default"></div>
         <div id="cfgClientLimit" hidden><label for="cfgAirtime">Client airtime factor</label><input id="cfgAirtime" type="number" min="0" max="9" step="0.1" placeholder="Keep default"></div>
+        <div id="cfgMqttBrokerField"><label for="cfgMqttBroker">MQTT / packet analyzer</label><select id="cfgMqttBroker"><option value="">Configure later</option><option value="letsmesh-eu">Let's Mesh EU</option><option value="letsmesh-us">Let's Mesh US</option><option value="meshmapper">MeshMapper</option><option value="waev">waev</option><option value="eastmesh-au">EastMesh AU</option></select></div>
+        <div id="cfgMqttIataField"><label for="cfgMqttIata">MQTT location (IATA)</label><input id="cfgMqttIata" maxlength="3" placeholder="e.g. LBA"><span class="help">Three letters used in analyzer MQTT topics. Repeater builds publish directly, so a separate Raspberry Pi bridge is not required.</span></div>
       </div>
       <label for="cfgExtra">Extra CLI settings</label><textarea id="cfgExtra" rows="4" placeholder="One safe command per line, for example:&#10;set ble on&#10;set web on"></textarea>
       <span class="help">Advanced: commands run exactly as entered. Destructive/reboot/update commands are blocked here.</span>
     </details>
     <label class="check"><input id="cfgFinish" type="checkbox" checked>Mark first-time setup complete after applying settings</label>
     <div class="row" style="margin-top:12px">
-      <button class="btn" id="applySetup" type="button">Apply setup over USB</button>
+      <button class="btn" id="applySetup" type="button">Apply setup to installed device</button>
       <button class="btn sec" id="previewSetup" type="button">Preview commands</button>
       <button class="btn sec" id="clearSecrets" type="button">Clear passwords</button>
     </div>
@@ -89,8 +95,8 @@ a{color:var(--acc)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     <pre id="setupPlan" hidden></pre>
   </div>
 
-  <div class="card">
-    <h2>3. Connect and install</h2>
+  <div class="card" id="installCard">
+    <h2>2. Connect and install firmware</h2>
     <ol>
       <li>Plug the device into this computer with a <b>data</b> USB cable.</li>
       <li>Press <b>Install</b> and pick the device's serial port (CP210x / USB JTAG / USB Serial).</li>
@@ -113,9 +119,9 @@ a{color:var(--acc)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   </div>
 
   <div class="card">
-    <h2>4. After installing</h2>
+    <h2>4. After configuration</h2>
     <ol>
-      <li>Close the installer dialog, wait for the device to restart, then press <b>Apply setup over USB</b> above and select the same serial port.</li>
+      <li>Close the installer dialog, wait for the device to restart, then use section 3 to apply any selected setup and choose the same serial port.</li>
       <li>If you did not apply settings over USB, a new or erased device starts <code>UMC-Setup-XXXX</code>. Join it and the setup page opens (or browse to <code>http://192.168.4.1</code>); use the PIN shown on the display or serial output if a password is requested.</li>
       <li>Updated devices keep their settings: open <code>http://umc-&lt;name&gt;.local/</code> or the IP shown on the display.</li>
       <li>Later updates can be done over WiFi from the device's <b>Firmware</b> page using the update <code>.bin</code>.</li>

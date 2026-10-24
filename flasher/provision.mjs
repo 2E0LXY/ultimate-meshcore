@@ -34,6 +34,28 @@ export const RADIO_PRESETS = [
   ["Vietnam (Deprecated)", 920.25, 250, 11, 5, -1],
 ];
 
+export const REGION_PRESETS = [
+  "gb", "gb-eng", "gb-sco", "gb-wls", "gb-nwk", "gb-yor", "gb-mid", "gb-sth", "gb-swt", "gb-est", "gb-nth",
+  "ioi", "bhd", "snn", "dub", "noc", "sco", "ioi-admin",
+];
+
+const IRELAND_REGIONS = {
+  code: "ioi", name: "Island of Ireland", regions: [
+    {code: "bhd", name: "Ulster", regions: []},
+    {code: "snn", name: "Munster", regions: []},
+    {code: "dub", name: "Leinster", regions: []},
+    {code: "noc", name: "Connacht", regions: []},
+    {code: "sco", name: "Optional Scotland link", regions: []},
+    {code: "ioi-admin", name: "Admin / wardrive", regions: []},
+  ],
+};
+
+export function validateRegionCode(value) {
+  const code = oneLine(value, "Region code", 29);
+  if (!/^[a-z0-9-]{1,29}$/.test(code)) throw new Error(`Invalid MeshCore region code: ${code || "(empty)"}`);
+  return code;
+}
+
 export const TIMEZONES = [
   ["Europe/London", "GMT0BST,M3.5.0/1,M10.5.0"],
   ["Europe/Dublin", "IST-1GMT0,M10.5.0,M3.5.0/1"],
@@ -130,8 +152,37 @@ export function buildProvisionCommands(config, role = "repeater") {
     if (duty !== "") commands.push(`set dutycycle ${duty}`);
   }
 
-  const region = oneLine(c.region, "Region preset", 20);
-  if (region) commands.push(`region preset ${region}`, "region save");
+  if (Array.isArray(c.regions) && c.regions.length) {
+    if (c.regions.length > 32) throw new Error("MeshCore supports at most 32 configured regions");
+    const seen = new Set();
+    for (const item of c.regions) {
+      const code = validateRegionCode(item?.code);
+      const parent = item?.parent ? validateRegionCode(item.parent) : "";
+      if (seen.has(code)) continue;
+      if (parent && !seen.has(parent)) throw new Error(`Region parent ${parent} must be configured before ${code}`);
+      commands.push(`region put ${code}${parent ? ` ${parent}` : ""}`, `region allowf ${code}`);
+      seen.add(code);
+    }
+    const home = validateRegionCode(c.regionHome || c.regions[c.regions.length - 1]?.code);
+    if (!seen.has(home)) throw new Error("Home region must be one of the configured regions");
+    commands.push(`region home ${home}`, "region save");
+  } else {
+    const region = oneLine(c.region, "Region preset", 20);
+    if (region) {
+      if (!REGION_PRESETS.includes(region)) throw new Error("Choose a valid LocalMesh region preset");
+      commands.push(`region preset ${region}`, "region save");
+    }
+  }
+
+  const mqttBroker = oneLine(c.mqttBroker, "MQTT broker", 20);
+  const mqttIata = oneLine(c.mqttIata, "MQTT IATA", 3).toUpperCase();
+  if (mqttIata && !/^[A-Z]{3}$/.test(mqttIata)) throw new Error("MQTT location must be a three-letter IATA code");
+  if (mqttBroker && !["letsmesh-eu", "letsmesh-us", "meshmapper", "waev", "eastmesh-au"].includes(mqttBroker)) {
+    throw new Error("Choose a valid MQTT broker");
+  }
+  if (mqttBroker && !mqttIata) throw new Error("Enter a three-letter MQTT location before enabling an analyzer");
+  if (mqttIata) commands.push(`set mqtt.iata ${mqttIata}`);
+  if (mqttBroker) commands.push(`set mqtt.${mqttBroker} on`, "set mqtt.packets on", "set mqtt.status on");
 
   wifiCommands(commands, 1, c.ssid, c.wifiPassword);
   wifiCommands(commands, 2, c.ssid2, c.wifiPassword2);
@@ -353,16 +404,32 @@ class ProvisionLink {
 
 function formValue(id) { return document.getElementById(id)?.value ?? ""; }
 function selectedRole() { return document.querySelector('input[name="role"]:checked')?.value || "repeater"; }
+let regionEntries = [];
+const selectedRegionCodes = new Set();
+
+function selectedRegionConfig() {
+  const needed = new Set();
+  const byCode = new Map(regionEntries.map(item => [item.code, item]));
+  const addWithParents = code => {
+    const item = byCode.get(code);
+    if (!item || needed.has(code)) return;
+    if (item.parent) addWithParents(item.parent);
+    needed.add(code);
+  };
+  selectedRegionCodes.forEach(addWithParents);
+  return regionEntries.filter(item => needed.has(item.code)).map(item => ({code: item.code, parent: item.parent || ""}));
+}
+
 function configFromForm() {
   return {
     ssid: formValue("cfgSsid"), wifiPassword: formValue("cfgWifiPassword"),
     ssid2: formValue("cfgSsid2"), wifiPassword2: formValue("cfgWifiPassword2"),
     ssid3: formValue("cfgSsid3"), wifiPassword3: formValue("cfgWifiPassword3"),
-    radio: formValue("cfgRadio"), region: formValue("cfgRegion"), name: formValue("cfgName"),
+    radio: formValue("cfgRadio"), regions: selectedRegionConfig(), regionHome: formValue("cfgRegionHome"), name: formValue("cfgName"),
     adminPassword: formValue("cfgAdminPassword"), timezone: formValue("cfgTimezone"),
     hostname: formValue("cfgHostname"), latitude: formValue("cfgLatitude"), longitude: formValue("cfgLongitude"),
     pin: formValue("cfgPin"), tx: formValue("cfgTx"), duty: formValue("cfgDuty"),
-    airtime: formValue("cfgAirtime"), extra: formValue("cfgExtra"),
+    airtime: formValue("cfgAirtime"), mqttBroker: formValue("cfgMqttBroker"), mqttIata: formValue("cfgMqttIata"), extra: formValue("cfgExtra"),
     finish: document.getElementById("cfgFinish")?.checked,
   };
 }
@@ -519,6 +586,62 @@ function refreshRoleFields() {
   const client = selectedRole() === "client";
   document.getElementById("cfgRepeaterLimit").hidden = client;
   document.getElementById("cfgClientLimit").hidden = !client;
+  document.getElementById("cfgMqttBrokerField").hidden = client;
+  document.getElementById("cfgMqttIataField").hidden = client;
+}
+
+function flattenRegions(root, family, parent = "", depth = 0, output = []) {
+  const code = validateRegionCode(root.code);
+  output.push({code, name: String(root.name || code), parent, depth, family});
+  for (const child of Array.isArray(root.regions) ? root.regions : []) flattenRegions(child, family, code, depth + 1, output);
+  return output;
+}
+
+function renderRegionPicker(filter = "") {
+  const picker = document.getElementById("cfgRegions");
+  const term = filter.trim().toLowerCase();
+  picker.replaceChildren();
+  for (const item of regionEntries) {
+    if (term && !`${item.code} ${item.name}`.toLowerCase().includes(term)) continue;
+    const label = document.createElement("label"); label.className = "region-option"; label.style.paddingLeft = `${7 + item.depth * 18}px`;
+    const input = document.createElement("input"); input.type = "checkbox"; input.value = item.code; input.checked = selectedRegionCodes.has(item.code);
+    const text = document.createTextNode(`${item.name} `); const code = document.createElement("small"); code.textContent = item.code;
+    label.append(input, text, code); picker.appendChild(label);
+  }
+}
+
+function refreshRegionHome() {
+  const selected = regionEntries.filter(item => selectedRegionCodes.has(item.code));
+  const families = new Set(selected.map(item => item.family));
+  if (families.size > 1) {
+    setStatus("GB and Island of Ireland region hierarchies cannot be mixed.", "bad");
+    return;
+  }
+  const home = document.getElementById("cfgRegionHome"); const previous = home.value;
+  home.replaceChildren(new Option(selected.length ? "Choose home region" : "Select regions above", ""));
+  for (const item of selected) {
+    home.add(new Option(`${item.name} — ${item.code}`, item.code));
+  }
+  home.disabled = !selected.length;
+  home.value = selected.some(item => item.code === previous) ? previous : (selected.at(-1)?.code || "");
+}
+
+async function loadRegionCatalogue() {
+  let gb;
+  try {
+    const response = await fetch("https://raw.githubusercontent.com/marcelverdult/meshcore-regions/main/regions/gb.json", {cache: "no-store"});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    gb = await response.json();
+    document.getElementById("regionSource").textContent = "Live GB community catalogue loaded from GitHub; the bundled fallback is refreshed weekly. GB and Island of Ireland hierarchies cannot be mixed.";
+  } catch (_) {
+    const response = await fetch("regions-gb.json");
+    if (!response.ok) throw new Error("Could not load the region catalogue");
+    gb = await response.json();
+    document.getElementById("regionSource").textContent = "Using the bundled weekly GB catalogue snapshot. GB and Island of Ireland hierarchies cannot be mixed.";
+  }
+  regionEntries = [...flattenRegions(gb, "gb"), ...flattenRegions(IRELAND_REGIONS, "ioi")];
+  if (regionEntries.length > 64) throw new Error("Region catalogue is unexpectedly large");
+  renderRegionPicker();
 }
 
 function preview(role = selectedRole()) {
@@ -573,7 +696,10 @@ async function applySetup() {
   }
 }
 
-function initialise() {
+async function initialise() {
+  // The fixed firmware image must be installed before browser-only settings can
+  // be sent over the device's freshly installed USB CLI.
+  document.getElementById("setupCard").before(document.getElementById("installCard"));
   if (!("serial" in navigator)) {
     document.getElementById("applySetup").disabled = true;
     setStatus("USB setup needs Web Serial in Chrome or Edge. Flashing is still available.");
@@ -582,6 +708,24 @@ function initialise() {
   RADIO_PRESETS.forEach((preset, index) => radio.add(new Option(`${preset[0]} — ${preset[1]} MHz · ${preset[2]} kHz · SF${preset[3]}`, String(index))));
   const timezone = document.getElementById("cfgTimezone");
   TIMEZONES.forEach(item => timezone.add(new Option(item[0], item[1])));
+  try { await loadRegionCatalogue(); } catch (error) {
+    document.getElementById("cfgRegions").textContent = error.message;
+    setStatus(error.message, "bad");
+  }
+  document.getElementById("cfgRegionSearch").addEventListener("input", event => renderRegionPicker(event.currentTarget.value));
+  document.getElementById("cfgRegions").addEventListener("change", event => {
+    const input = event.target.closest('input[type="checkbox"]');
+    if (!input) return;
+    const item = regionEntries.find(value => value.code === input.value);
+    const otherFamily = [...selectedRegionCodes].some(code => regionEntries.find(value => value.code === code)?.family !== item.family);
+    if (input.checked && otherFamily) {
+      input.checked = false;
+      setStatus("GB and Island of Ireland region hierarchies cannot be mixed.", "bad");
+      return;
+    }
+    if (input.checked) selectedRegionCodes.add(input.value); else selectedRegionCodes.delete(input.value);
+    refreshRegionHome();
+  });
   document.getElementById("previewSetup").addEventListener("click", () => { try { preview(); } catch (error) { setStatus(error.message, "bad"); } });
   document.getElementById("applySetup").addEventListener("click", applySetup);
   document.getElementById("clientConnect").addEventListener("click", connectClient);

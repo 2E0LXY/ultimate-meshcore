@@ -605,7 +605,8 @@ bool UmcService::channelScope(const char* channel_name, char* scope, size_t scop
 bool UmcService::setChannelScope(const char* channel_name, const char* scope) {
   if (channel_name == nullptr || channel_name[0] == 0) return false;
   if (strchr(channel_name, '=') || strchr(channel_name, ';')) return false;
-  if (scope && (strchr(scope, '=') || strchr(scope, ';'))) return false;
+  const bool clearing = scope == nullptr || scope[0] == 0 || strcmp(scope, "-") == 0;
+  if (!clearing && !isValidRegionName(scope)) return false;
 
   // rebuild the table without this channel, then add it back with the new scope
   char rebuilt[sizeof(_prefs.ch_scopes)];
@@ -627,7 +628,6 @@ bool UmcService::setChannelScope(const char* channel_name, const char* scope) {
     }
     p = end ? end + 1 : p + len;
   }
-  const bool clearing = scope == nullptr || scope[0] == 0 || strcmp(scope, "-") == 0;
   if (!clearing) {
     const size_t add = want + 1 + strlen(scope);
     if (pos + add + 2 > sizeof(rebuilt)) return false;
@@ -893,7 +893,7 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
   // ---- per-type flood hop caps (Low-Power firmware compatible names) ----
   // ---- touch client options ----
   // Six canned replies, sent from the message composer: "get quick", "set quick3 On my way"
-  // per-channel region scope: "get chscope", "set chscope #northeast eng-ne", "set chscope #x -"
+  // per-channel region scope: "get chscope", "set chscope #local gb-yor", "set chscope #x -"
   if (strcmp(command, "get chscope") == 0) {
     snprintf(reply, reply_size, "> %s", _prefs.ch_scopes[0] ? _prefs.ch_scopes : "(none - every channel uses the default)");
     return true;
@@ -1166,22 +1166,45 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
     return true;
   }
 
-  // ---- region presets (lowercase names match the public map / community catalogue) ----
+  // ---- LocalMesh region presets (parent-first, exact lowercase identifiers) ----
   if (startsWith(command, "region preset")) {
     const char* v = command + 13;
     while (*v == ' ') v++;
     // Each preset: parent-first list, "name:parent" ("" parent = wildcard root).
-    struct Preset { const char* id; const char* const* steps; };
-    static const char* const yorkshire[] = {"yorkshire:", nullptr};
-    static const char* const northwest[] = {"northwest:", nullptr};
-    static const char* const uk[] = {"uk:", "yorkshire:uk", "northwest:uk", nullptr};
-    static const Preset presets[] = {{"yorkshire", yorkshire}, {"northwest", northwest}, {"uk", uk}};
+    struct Preset { const char* id; const char* const* steps; const char* home; };
+    static const char* const gb[] = {"gb:", nullptr};
+    static const char* const gb_eng[] = {"gb:", "gb-eng:gb", nullptr};
+    static const char* const gb_sco[] = {"gb:", "gb-sco:gb", nullptr};
+    static const char* const gb_wls[] = {"gb:", "gb-wls:gb", nullptr};
+    static const char* const gb_nwk[] = {"gb:", "gb-nwk:gb", nullptr};
+    static const char* const gb_yor[] = {"gb:", "gb-yor:gb", nullptr};
+    static const char* const gb_mid[] = {"gb:", "gb-mid:gb", nullptr};
+    static const char* const gb_sth[] = {"gb:", "gb-sth:gb", nullptr};
+    static const char* const gb_swt[] = {"gb:", "gb-swt:gb", nullptr};
+    static const char* const gb_est[] = {"gb:", "gb-est:gb", nullptr};
+    static const char* const gb_nth[] = {"gb:", "gb-nth:gb", nullptr};
+    static const char* const ioi[] = {"ioi:", nullptr};
+    static const char* const bhd[] = {"ioi:", "bhd:ioi", nullptr};
+    static const char* const snn[] = {"ioi:", "snn:ioi", nullptr};
+    static const char* const dub[] = {"ioi:", "dub:ioi", nullptr};
+    static const char* const noc[] = {"ioi:", "noc:ioi", nullptr};
+    static const char* const sco[] = {"ioi:", "sco:ioi", nullptr};
+    static const char* const ioi_admin[] = {"ioi:", "ioi-admin:ioi", nullptr};
+    static const Preset presets[] = {
+        {"gb", gb, "gb"}, {"gb-eng", gb_eng, "gb-eng"}, {"gb-sco", gb_sco, "gb-sco"},
+        {"gb-wls", gb_wls, "gb-wls"}, {"gb-nwk", gb_nwk, "gb-nwk"}, {"gb-yor", gb_yor, "gb-yor"},
+        {"gb-mid", gb_mid, "gb-mid"}, {"gb-sth", gb_sth, "gb-sth"}, {"gb-swt", gb_swt, "gb-swt"},
+        {"gb-est", gb_est, "gb-est"}, {"gb-nth", gb_nth, "gb-nth"}, {"ioi", ioi, "ioi"},
+        {"bhd", bhd, "bhd"}, {"snn", snn, "snn"}, {"dub", dub, "dub"}, {"noc", noc, "noc"},
+        {"sco", sco, "sco"}, {"ioi-admin", ioi_admin, "ioi-admin"},
+        // Compatibility aliases create the current LocalMesh identifiers, never the old names.
+        {"uk", gb, "gb"}, {"northwest", gb_nwk, "gb-nwk"}, {"yorkshire", gb_yor, "gb-yor"}};
     const Preset* chosen = nullptr;
     for (const auto& p : presets) {
       if (strcmp(v, p.id) == 0) chosen = &p;
     }
     if (chosen == nullptr || _host == nullptr) {
-      snprintf(reply, reply_size, "Err - presets: yorkshire | northwest | uk (then 'region save')");
+      snprintf(reply, reply_size, "Err - use a gb-* or Ireland code; see the Regions page");
       return true;
     }
     char cmd[64], r[160];
@@ -1198,12 +1221,28 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
       snprintf(cmd, sizeof(cmd), parent[0] ? "region put %s %s" : "region put %s", name, parent);
       r[0] = 0;
       _host->umcCommand(cmd, r, sizeof(r));
+      if (strncmp(r, "Err", 3) == 0) {
+        snprintf(reply, reply_size, "Err - %s: %s", cmd, r);
+        return true;
+      }
       snprintf(cmd, sizeof(cmd), "region allowf %s", name);
       r[0] = 0;
       _host->umcCommand(cmd, r, sizeof(r));
+      if (strncmp(r, "Err", 3) == 0) {
+        snprintf(reply, reply_size, "Err - %s: %s", cmd, r);
+        return true;
+      }
       added++;
     }
-    snprintf(reply, reply_size, "OK - added %d region(s), flood allowed; run 'region save' to keep", added);
+    snprintf(cmd, sizeof(cmd), "region home %s", chosen->home);
+    r[0] = 0;
+    _host->umcCommand(cmd, r, sizeof(r));
+    if (strncmp(r, "Err", 3) == 0) {
+      snprintf(reply, reply_size, "Err - %s: %s", cmd, r);
+      return true;
+    }
+    snprintf(reply, reply_size, "OK - added %d region(s), flood allowed, home %s; run 'region save' to keep",
+             added, chosen->home);
     return true;
   }
 

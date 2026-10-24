@@ -20,6 +20,59 @@
 
 namespace {
 constexpr const char* kNs = "umc";
+
+const char* canonicalRegion(const char* name) {
+  if (strcmp(name, "uk") == 0) return "gb";
+  if (strcmp(name, "yorkshire") == 0) return "gb-yor";
+  if (strcmp(name, "northwest") == 0) return "gb-nwk";
+  if (strcmp(name, "eng-ne") == 0) return "gb-nth";
+  if (strcmp(name, "eng-yh") == 0) return "gb-yor";
+  return name;
+}
+
+bool normaliseRegionChoices(UmcPrefs& p) {
+  char clean[UMC_MAX_REGIONS][30] = {};
+  int count = 0;
+  for (int i = 0; i < UMC_MAX_REGIONS && count < UMC_MAX_REGIONS; i++) {
+    if (p.regions[i][0] == 0) continue;
+    const char* name = canonicalRegion(p.regions[i]);
+    bool duplicate = false;
+    for (int j = 0; j < count; j++) duplicate |= strcmp(clean[j], name) == 0;
+    if (!duplicate) strncpy(clean[count++], name, sizeof(clean[0]) - 1);
+  }
+  bool changed = memcmp(p.regions, clean, sizeof(clean)) != 0;
+  memcpy(p.regions, clean, sizeof(clean));
+
+  char scopes[sizeof(p.ch_scopes)] = {};
+  size_t pos = 0;
+  const char* entry = p.ch_scopes;
+  while (*entry) {
+    const char* end = strchr(entry, ';');
+    if (end == nullptr) end = entry + strlen(entry);
+    const char* eq = (const char*)memchr(entry, '=', end - entry);
+    if (eq != nullptr) {
+      char name[30] = {};
+      size_t n = end - eq - 1;
+      if (n < sizeof(name)) memcpy(name, eq + 1, n);
+      const char* canonical = canonicalRegion(name);
+      const size_t channel_len = eq - entry;
+      const size_t needed = channel_len + 1 + strlen(canonical) + (pos ? 1 : 0);
+      if (pos + needed >= sizeof(scopes)) break;
+      if (pos) scopes[pos++] = ';';
+      memcpy(scopes + pos, entry, channel_len);
+      pos += channel_len;
+      scopes[pos++] = '=';
+      strcpy(scopes + pos, canonical);
+      pos += strlen(canonical);
+    }
+    entry = *end ? end + 1 : end;
+  }
+  if (p.ch_scopes[0]) {
+    changed |= strcmp(p.ch_scopes, scopes) != 0;
+    memcpy(p.ch_scopes, scopes, sizeof(scopes));
+  }
+  return changed;
+}
 }
 
 void UmcPrefsStore::setDefaults(UmcPrefs& p) {
@@ -55,8 +108,11 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.beep_on_msg = true;
   p.flash_on_msg = false;
   p.ack_display = 2;
-  // The UK communities publish these; anything else is added by the operator.
-  static const char* const kRegions[] = {"yorkshire", "eng-ne", "northwest", "uk"};
+  // Public choices from the LocalMesh GB and island-of-Ireland conventions. This is only
+  // the client's scope picker: selecting one scope never configures or mixes repeater trees.
+  static const char* const kRegions[] = {
+      "gb", "gb-eng", "gb-sco", "gb-wls", "gb-nwk", "gb-yor", "gb-mid", "gb-sth",
+      "gb-swt", "gb-est", "gb-nth", "ioi", "bhd", "snn", "dub", "noc", "sco", "ioi-admin"};
   for (size_t i = 0; i < sizeof(kRegions) / sizeof(kRegions[0]) && i < UMC_MAX_REGIONS; i++) {
     strncpy(p.regions[i], kRegions[i], sizeof(p.regions[i]) - 1);
   }
@@ -113,10 +169,13 @@ void UmcPrefsStore::load(UmcPrefs& p) {
     if (nvs.isKey("chscope")) nvs.getString("chscope", p.ch_scopes, sizeof(p.ch_scopes));
     nvs.end();
   }
+  const bool regions_changed = normaliseRegionChoices(p);
   if (!isValidPin(p.pin)) {
     uint32_t r = esp_random() % 100000000UL;
     snprintf(p.pin, sizeof(p.pin), "%08lu", static_cast<unsigned long>(r));
     save(p);
+  } else if (regions_changed) {
+    save(p);  // persist one-time migration from UMC's former informal UK names
   }
 #endif
 }

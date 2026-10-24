@@ -132,7 +132,7 @@ const MQTTUplink::BrokerSpec MQTTUplink::kBrokerSpecs[kBrokerCount] = {
     {"meshmapper", "meshmapper", "mqtt.meshmapper.net", "wss://mqtt.meshmapper.net:443/mqtt", kMeshmapperBit, false, 0},
     // waev enforces a shorter max token lifetime than the curated default; match its documented config.
     {"waev", "waev", "mqtt.waev.app", "wss://mqtt.waev.app:443/mqtt", kWaevBit, false, 3600},
-    // Retired: LetsMesh is no longer maintained. Kept selectable for legacy nodes; new nodes should use meshmapper.
+    // LetsMesh Packet Analyzer endpoints (EU and US), using MeshCore identity JWT authentication.
     {"letsmesh-eu", "letsmesh-eu", "mqtt-eu-v1.letsmesh.net", "wss://mqtt-eu-v1.letsmesh.net:443/mqtt",
      kLetsmeshEuBit, false, 0},
     {"letsmesh-us", "letsmesh-us", "mqtt-us-v1.letsmesh.net", "wss://mqtt-us-v1.letsmesh.net:443/mqtt",

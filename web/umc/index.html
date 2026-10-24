@@ -93,6 +93,7 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;
 // ================================================================ API
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const validRegion = s => /^[a-z0-9-]{1,29}$/.test(String(s || ""));
 let TOKEN = sessionStorage.getItem("umc_token") || "";
 let cliQueue = Promise.resolve();
 let INFO = null;
@@ -224,7 +225,7 @@ const SECTIONS = [
     {title: "Sending", fields: [
       F("multi.acks", "Extra ACK transmissions", {type: "select", options: [["0", "Off"], ["1", "On"]], help: "Sends delivery confirmations twice: more reliable on busy meshes."}),
       F("path.hash.mode", "Path hash size", {type: "select", options: [["0", "1 byte (default)"], ["1", "2 bytes"], ["2", "3 bytes"]], help: "Larger hashes tell repeaters apart on big meshes. Everyone on the path must run firmware that supports it."}),
-      F("scope", "Region scope for sends", {help: "Region name (case-sensitive) added to flood sends so they stay in your area - e.g. yorkshire. Blank = whole mesh. Your repeaters must know the region.", placeholder: "yorkshire"}),
+      F("scope", "Region scope for sends", {help: "Exact region identifier added to flood sends, e.g. gb-yor. Use 1-29 lowercase letters, digits or hyphens. Blank = whole mesh. Your repeaters must know the region.", placeholder: "gb-yor"}),
       F("advert.loc", "Location in adverts", {type: "select", options: [["none", "Don't share"], ["share", "Share (rounded coordinates below)"]]}),
       F("repeat", "Client repeat", Object.assign({help: "Lets this client relay packets for others. Only allowed on 433.000, 869.495 and 918.000 MHz."}, onoff)),
     ]},
@@ -303,7 +304,7 @@ const SECTIONS = [
     ]},
     {title: "Brokers", sub: "At most two brokers can be enabled at once.", fields: [
       F("mqtt.meshmapper", "MeshMapper (global)", onoff), F("mqtt.waev", "waev", onoff), F("mqtt.eastmesh-au", "EastMesh AU", onoff),
-      F("mqtt.letsmesh-eu", "LetsMesh EU (retired)", onoff), F("mqtt.letsmesh-us", "LetsMesh US (retired)", onoff),
+      F("mqtt.letsmesh-eu", "LetsMesh EU", onoff), F("mqtt.letsmesh-us", "LetsMesh US", onoff),
     ]},
     {title: "Custom broker", fields: [
       F("mqtt.custom", "Enabled", onoff), F("mqtt.custom.host", "Host"), F("mqtt.custom.port", "Port", {type: "number", min: 1, max: 65535}),
@@ -523,7 +524,7 @@ async function runAction(act, reload) {
     // From the MeshCore Yorkshire guide: https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/
     const cmds = ["set flood.max 20", "set flood.max.advert 0", "set flood.max.unscoped 32", "set path.hash.mode 2",
       "set loop.detect minimal", "set flood.advert.interval 0", "set advert.interval 60", "set dutycycle 10"];
-    const regions = ["region put yorkshire", "region put eng-yh", "region default yorkshire", "region save"];
+    const regions = ["region put gb", "region put gb-yor gb", "region allowf gb", "region allowf gb-yor", "region home gb-yor", "region default gb-yor", "region save"];
     const withRegions = confirm(`Apply the Yorkshire mesh recommendations?\n\n${cmds.join("\n")}\n\nOK also adds the regions:\n${regions.join("\n")}\n\nCancel to stop, or Cancel then use the Regions page for regions only.`);
     if (!withRegions) return;
     const all = cmds.concat(regions);
@@ -734,13 +735,17 @@ async function renderRegions(view) {
     <table><thead><tr><th>Region</th><th>Flooding</th><th></th></tr></thead><tbody id="rBody"></tbody></table>
     <p class="msg" id="rDirty"></p>
     <div class="row"><button class="btn" id="rRef">Refresh</button><button class="btn pri" id="rSave">Save regions</button></div></div>
-    <div class="card"><h2>UK presets</h2><p class="sub">Names are case-sensitive and must match other repeaters exactly. These use the lowercase names seen on the public map.</p>
-      <div class="row"><button class="btn" data-preset="yorkshire">Add yorkshire</button><button class="btn" data-preset="northwest">Add northwest</button><button class="btn" data-preset="uk">uk → yorkshire + northwest</button></div></div>
+    <div class="card"><h2>LocalMesh presets</h2><p class="sub">Choose one convention. Great Britain uses a <code>gb</code> parent; the island of Ireland uses the separate <code>ioi</code> hierarchy and must not be mixed with <code>gb-*</code>. The preset adds the parent and selected region, allows both, and sets home. Press <b>Save regions</b> afterwards.</p>
+      <div class="row"><select id="rPreset" style="max-width:360px">
+        <option value="">Choose a region…</option>
+        <optgroup label="Great Britain"><option value="gb">Great Britain — gb</option><option value="gb-eng">England — gb-eng</option><option value="gb-sco">Scotland — gb-sco</option><option value="gb-wls">Wales — gb-wls</option><option value="gb-nwk">North West — gb-nwk</option><option value="gb-yor">Yorkshire — gb-yor</option><option value="gb-mid">Midlands — gb-mid</option><option value="gb-sth">South East — gb-sth</option><option value="gb-swt">South West — gb-swt</option><option value="gb-est">East of England — gb-est</option><option value="gb-nth">North East — gb-nth</option></optgroup>
+        <optgroup label="Island of Ireland"><option value="ioi">Island of Ireland — ioi</option><option value="bhd">Ulster — bhd</option><option value="snn">Munster — snn</option><option value="dub">Leinster — dub</option><option value="noc">Connacht — noc</option><option value="sco">Optional Scotland link — sco</option><option value="ioi-admin">Optional admin / wardrive — ioi-admin</option></optgroup>
+      </select><button class="btn" id="rPresetApply">Apply preset</button></div></div>
     <div class="card"><h2>Edit</h2>
-      <div class="field"><label>Add region</label><div class="ctl"><input id="rName" type="text" placeholder="#Leeds" style="max-width:180px"> under <input id="rParent" type="text" placeholder="parent (blank = *)" style="max-width:180px"></div><div class="act"><button class="btn sm" id="rPut">Add</button></div></div>
+      <div class="field"><label>Add region</label><div class="ctl"><input id="rName" type="text" maxlength="29" pattern="[a-z0-9-]+" placeholder="gb-local" style="max-width:180px"> under <input id="rParent" type="text" maxlength="29" pattern="[a-z0-9-]+" placeholder="parent (blank = *)" style="max-width:180px"></div><div class="act"><button class="btn sm" id="rPut">Add</button></div><div class="help">1-29 lowercase letters, digits or hyphens. Public names match exactly.</div></div>
       <div class="field"><label>Region</label><div class="ctl"><input id="rSel" type="text" placeholder="name or *" style="max-width:180px">
         <button class="btn sm" data-r="allowf">Allow flood</button><button class="btn sm" data-r="denyf">Deny flood</button><button class="btn sm" data-r="home">Set home</button><button class="btn sm" data-r="default">Set default scope</button><button class="btn sm danger" data-r="remove">Remove</button></div><div></div></div>
-      <div class="field"><label>Define in one line</label><div class="ctl"><input id="rDef" type="text" placeholder="#UK #Yorkshire #Leeds|#Yorkshire #Wakefield"></div><div class="act"><button class="btn sm" id="rDefBtn">Apply</button></div><div class="help">Uses <code>region def</code>: each name becomes a child of the previous; <code>name|jump</code> moves back up.</div></div>
+      <div class="field"><label>Define in one line</label><div class="ctl"><input id="rDef" type="text" placeholder="gb gb-yor|gb gb-nwk"></div><div class="act"><button class="btn sm" id="rDefBtn">Apply</button></div><div class="help">Uses <code>region def</code>: each name becomes a child of the previous; <code>name|jump</code> moves back up.</div></div>
     </div>`;
   let tree = [];  // [{name, depth, home, flood}]
   const setDirty = on => { const d = $("#rDirty"); d.textContent = on ? "Unsaved changes — press Save regions to keep them after a reboot." : ""; d.className = "msg" + (on ? " bad" : ""); };
@@ -781,10 +786,18 @@ async function renderRegions(view) {
       if (b.dataset.home != null) { r = await one(`region home ${tree[+b.dataset.home].name}`); setDirty(true); }
       if (b.id === "rRef") return load();
       if (b.id === "rSave") { r = await one("region save"); if (!isErr(r)) setDirty(false); }
-      if (b.id === "rPut") r = await one(`region put ${$("#rName").value.trim()} ${$("#rParent").value.trim()}`.trim());
+      if (b.id === "rPut") {
+        const name = $("#rName").value.trim(), parent = $("#rParent").value.trim();
+        if (!validRegion(name) || (parent && !validRegion(parent))) return toast("Use 1-29 lowercase letters, digits or hyphens", "bad");
+        r = await one(`region put ${name} ${parent}`.trim());
+      }
       if (b.id === "rDefBtn") r = await one(`region def ${$("#rDef").value.trim()}`);
       if (b.dataset.r) r = await one(`region ${b.dataset.r} ${$("#rSel").value.trim()}`);
-      if (b.dataset.preset) r = await one(`region preset ${b.dataset.preset}`);
+      if (b.id === "rPresetApply") {
+        const preset = $("#rPreset").value;
+        if (!preset) return toast("Choose a region first", "bad");
+        r = await one(`region preset ${preset}`);
+      }
       if (r != null) { toast(r, isErr(r) ? "bad" : "ok"); if (b.id !== "rSave" && !isErr(r)) setDirty(true); await load(); }
     } catch (err) { toast(err.message, "bad"); }
   });
@@ -1856,16 +1869,23 @@ async function renderMap(view) {
 
 // ---------------------------------------------------------------- Region page (client)
 const REGION_PRESETS = [
-  // name, region scope, channel for that region (as its community writes it), where it comes from
-  {label: "Yorkshire", scope: "yorkshire", channel: "#Yorkshire", note: "From the MeshCore Yorkshire guide: add the #Yorkshire channel and give it the yorkshire region scope."},
-  {label: "North West", scope: "northwest", channel: "", note: "Region scope only. Add the local channel on the Channels page if your group uses one."},
+  {label: "Great Britain", scope: "gb", group: "Great Britain"}, {label: "England", scope: "gb-eng", group: "Great Britain"},
+  {label: "Scotland", scope: "gb-sco", group: "Great Britain"}, {label: "Wales", scope: "gb-wls", group: "Great Britain"},
+  {label: "North West", scope: "gb-nwk", group: "Great Britain"}, {label: "Yorkshire", scope: "gb-yor", group: "Great Britain"},
+  {label: "Midlands", scope: "gb-mid", group: "Great Britain"}, {label: "South East", scope: "gb-sth", group: "Great Britain"},
+  {label: "South West", scope: "gb-swt", group: "Great Britain"}, {label: "East of England", scope: "gb-est", group: "Great Britain"},
+  {label: "North East", scope: "gb-nth", group: "Great Britain"},
+  {label: "Island of Ireland", scope: "ioi", group: "Island of Ireland"}, {label: "Ulster", scope: "bhd", group: "Island of Ireland"},
+  {label: "Munster", scope: "snn", group: "Island of Ireland"}, {label: "Leinster", scope: "dub", group: "Island of Ireland"},
+  {label: "Connacht", scope: "noc", group: "Island of Ireland"}, {label: "Scotland link (optional)", scope: "sco", group: "Island of Ireland"},
+  {label: "Admin / wardrive (optional)", scope: "ioi-admin", group: "Island of Ireland"},
 ];
 async function renderClientRegion(view) {
   view.innerHTML = `<div class="card"><h2>Region</h2><p class="sub">Regional meshes ask clients to scope their messages so they stay in the area. Repeaters that know the region pass them on; others can drop them.</p>
       <div class="grid" id="rgNow"></div></div>
-    <div class="card"><h2>Set up for your region</h2><div id="rgPresets"></div></div>
-    <div class="card"><h2>Region scope for everything this radio sends</h2><p class="sub">Used when a channel has no scope of its own (and for adverts and direct messages that flood). Names are case-sensitive.</p>
-      <div class="row"><input type="text" id="rgScope" placeholder="yorkshire" style="max-width:220px"><button class="btn pri" id="rgSave">Save</button><button class="btn" id="rgClear">None</button></div></div>
+    <div class="card"><h2>Set up for your region</h2><p class="sub">Great Britain and island-of-Ireland codes are separate conventions. Select only the convention used by your local repeaters.</p><div id="rgPresets"></div></div>
+    <div class="card"><h2>Region scope for everything this radio sends</h2><p class="sub">Used when a channel has no scope of its own (and for adverts and direct messages that flood). Use the exact 1-29 character lowercase identifier.</p>
+      <div class="row"><input type="text" id="rgScope" maxlength="29" pattern="[a-z0-9-]+" placeholder="gb-yor" style="max-width:220px"><button class="btn pri" id="rgSave">Save</button><button class="btn" id="rgClear">None</button></div></div>
     <div class="card"><h2>Room servers</h2><p class="sub">Room servers are contacts: they appear on the Contacts page when their advert is heard (or in the waiting list if manual add is on). Open one and use <b>Log in…</b>, then its posts arrive in Messages.</p>
       <div id="rgRooms"></div></div>`;
   MC.start();
@@ -1876,8 +1896,7 @@ async function renderClientRegion(view) {
       ...MC.channels.map(c => [c.name, MC.channelScope(c.idx) || "(device scope)"])]
       .map(([k, v]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join("");
     $("#rgPresets").innerHTML = REGION_PRESETS.map((p, i) => {
-      const has = p.channel && MC.channels.some(c => c.name === p.channel);
-      return `<div class="field"><label>${esc(p.label)}</label><div class="ctl"><span class="val">${esc(p.note)}${p.channel ? ` Channel ${esc(p.channel)}: ${has ? "added" : "not added yet"}.` : ""}</span></div>
+      return `<div class="field"><label>${esc(p.label)}</label><div class="ctl"><span class="val"><code>${esc(p.scope)}</code> · ${esc(p.group)}</span></div>
         <div class="act"><button class="btn pri" data-preset="${i}">Set up ${esc(p.label)}</button></div></div>`;
     }).join("");
     const rooms = [...MC.contacts.values()].filter(c => c.type === 3);
@@ -1889,18 +1908,11 @@ async function renderClientRegion(view) {
     if (room) { e.preventDefault(); sessionStorage.setItem("umc_focus_contact", room.dataset.room); return go("contacts"); }
     const b = e.target.closest("button"); if (!b) return;
     try {
-      if (b.id === "rgSave") { const r = await one(`set scope ${$("#rgScope").value.trim()}`); toast(r, isErr(r) ? "bad" : "ok"); }
+      if (b.id === "rgSave") { const scope = $("#rgScope").value.trim(); if (!validRegion(scope)) return toast("Use 1-29 lowercase letters, digits or hyphens", "bad"); const r = await one(`set scope ${scope}`); toast(r, isErr(r) ? "bad" : "ok"); }
       else if (b.id === "rgClear") { const r = await one("set scope"); toast(r, isErr(r) ? "bad" : "ok"); }
       else if (b.dataset.preset) {
         const p = REGION_PRESETS[+b.dataset.preset];
-        if (p.channel && !MC.channels.some(c => c.name === p.channel)) {
-          let idx = -1; for (let i = 0; i < 40; i++) if (!MC.channels.some(c => c.idx === i)) { idx = i; break; }
-          if (idx < 0) return toast("All channel slots are in use", "bad");
-          await MC.request(u8(32, idx, fixed(p.channel, 32), hashtagKey(p.channel)), [CODE.OK]);
-          await MC.listChannels();
-        }
-        if (p.channel) MC.setChannelScope(p.channel, p.scope);
-        else { const r = await one(`set scope ${p.scope}`); if (isErr(r)) throw new Error(r); }
+        const r = await one(`set scope ${p.scope}`); if (isErr(r)) throw new Error(r);
         toast(`${p.label} set up`, "ok");
       }
       await draw();
@@ -1939,8 +1951,9 @@ async function renderChannels(view) {
       if (b.dataset.chat) { MC.activeConv = "ch:" + b.dataset.chat; go("chat"); }
       else if (b.dataset.scope) {
         const ch = MC.channels.find(c => c.idx === +b.dataset.scope);
-        const v = prompt(`Region scope for ${ch.name} (e.g. yorkshire). Names are case-sensitive. Blank = none.`, MC.channelScope(ch.idx));
+        const v = prompt(`Region scope for ${ch.name} (e.g. gb-yor). Use 1-29 lowercase letters, digits or hyphens. Blank = none.`, MC.channelScope(ch.idx));
         if (v === null) return;
+        if (v.trim() && !validRegion(v.trim())) return toast("Use 1-29 lowercase letters, digits or hyphens", "bad");
         MC.setChannelScope(ch.name, v.trim());
         toast(v.trim() ? `${ch.name} messages are scoped to ${v.trim()}` : `${ch.name} is no longer scoped`, "ok");
         draw();

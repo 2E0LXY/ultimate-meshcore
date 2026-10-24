@@ -616,8 +616,8 @@ void MyMesh::sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pk
     return;
   }
   // An app that asked for a scope gets it. Otherwise the channel's own scope, if it has
-  // one, and the default for everything else - #northeast belongs in eng-ne, not in
-  // whatever the node happens to default to.
+  // one, and the default for everything else - a local channel can use gb-nth while
+  // the node itself defaults to another exact scope.
   TransportKey scope;
   memcpy(&scope.key, _prefs.default_scope_key, sizeof(scope.key));
   if (!send_scope.isNull()) {
@@ -1156,6 +1156,24 @@ void MyMesh::begin(bool has_display) {
 
   // load persisted prefs
   _store->loadPrefs(_prefs);
+  // Migrate UMC's former informal UK scopes to the LocalMesh identifiers. Only exact
+  // legacy defaults are changed; community-defined names are left untouched.
+  const char* migrated_scope = nullptr;
+  if (strcmp(_prefs.default_scope_name, "uk") == 0) migrated_scope = "gb";
+  else if (strcmp(_prefs.default_scope_name, "yorkshire") == 0) migrated_scope = "gb-yor";
+  else if (strcmp(_prefs.default_scope_name, "northwest") == 0) migrated_scope = "gb-nwk";
+  else if (strcmp(_prefs.default_scope_name, "eng-ne") == 0) migrated_scope = "gb-nth";
+  else if (strcmp(_prefs.default_scope_name, "eng-yh") == 0) migrated_scope = "gb-yor";
+  if (migrated_scope != nullptr) {
+    TransportKeyStore temp;
+    TransportKey key;
+    char hashed[40];
+    snprintf(hashed, sizeof(hashed), "#%s", migrated_scope);
+    temp.getAutoKeyFor(0, hashed, key);
+    StrHelper::strncpy(_prefs.default_scope_name, migrated_scope, sizeof(_prefs.default_scope_name));
+    memcpy(_prefs.default_scope_key, key.key, sizeof(_prefs.default_scope_key));
+    _store->savePrefs(_prefs);
+  }
   sensors.node_lat = _prefs.node_lat;
   sensors.node_lon = _prefs.node_lon;
 
@@ -3088,7 +3106,7 @@ bool MyMesh::umcCli(const char* command, char* reply, size_t n) {
       return true;
     }
   }
-  // Region scope for flood sends (Yorkshire guidance: scope channel traffic to your region)
+  // Region scope for flood sends. Public LocalMesh identifiers are exact lowercase names.
   if (strcmp(command, "get scope") == 0) {
     snprintf(reply, n, "> %s", _prefs.default_scope_name[0] ? _prefs.default_scope_name : "-");
     return true;
@@ -3103,7 +3121,10 @@ bool MyMesh::umcCli(const char* command, char* reply, size_t n) {
       snprintf(reply, n, "OK - no region scope (sends reach the whole mesh)");
       return true;
     }
-    if (strlen(v) >= sizeof(_prefs.default_scope_name)) { snprintf(reply, n, "Err - name too long"); return true; }
+    if (!UmcService::isValidRegionName(v)) {
+      snprintf(reply, n, "Err - use 1-29 lowercase letters, digits or hyphens");
+      return true;
+    }
     char hashed[40];
     snprintf(hashed, sizeof(hashed), "#%s", v);   // public region keys are SHA256 of "#name"
     TransportKeyStore temp;

@@ -147,6 +147,9 @@ bool RegionMap::save(FILESYSTEM* _fs, const char* path) {
 }
 
 RegionEntry* RegionMap::putRegion(const char* name, uint16_t parent_id, uint16_t id) {
+  // MeshCore region names are 1-29 bytes. Keep one byte for the terminator and
+  // reject a 30-byte value even though the backing buffer could hold it.
+  if (name == nullptr || name[0] == 0 || strlen(name) > 29) return NULL;
   const char* sp = name;  // check for illegal name chars
   while (*sp) {
     if (!is_name_char(*sp)) return NULL;   // error

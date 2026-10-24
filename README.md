@@ -7,7 +7,7 @@ By **Daren Loxley 2E0LXY**
 
 [**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest firmware**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) · [**📱 Android app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) · [**🖥 Windows / Linux app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest)
 
-> **Status: 0.1.10 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
+> **Status: 0.1.11 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
 
 ![Repeater dashboard](docs/images/repeater-dashboard.png)
 
@@ -45,7 +45,7 @@ By **Daren Loxley 2E0LXY**
 
 1. Open the [web flasher](https://2e0lxy.github.io/ultimate-meshcore/) in Chrome or Edge. Choose your board and **Repeater** or **Ultimate MeshCore Client**.
 2. Optionally enter WiFi, radio-area, region, identity and security settings on the flasher page, then press **Install**. Choose **No** at “Erase device?” to keep an existing node's identity.
-3. When installation finishes, press **Apply setup over USB** and select the same serial port. The settings go directly from the browser to the restarted device and passwords are cleared from the page afterwards.
+3. When installation finishes, use **Configure the installed device over USB** and select the same serial port. ESP Web Tools writes a fixed firmware image, so personal settings are deliberately sent afterwards through the restarted device's MeshCore USB CLI. Passwords are cleared from the page afterwards.
 4. If you skipped USB setup, join `UMC-Setup-XXXX` and use the device's setup wizard. Then open `http://umc-<name>.local/`, or the IP address shown on the display.
 
 ---
@@ -109,10 +109,11 @@ Shows uptime, battery, clock, packets, neighbours, queue, memory, WiFi, hotspot 
 - Public key, and private key export/import.
 - ACL permissions.
 
-### Regions and the Yorkshire recommended settings
+### Regions and LocalMesh presets
 - **Tree view** of regions. Each region has a **flooding switch**, **set home** and **remove** (sub-regions are removed first).
-- **UK presets** `yorkshire`, `northwest` and `uk`, plus add and one-line definitions, with a reminder about unsaved changes.
-- **Yorkshire mesh recommended settings** in one click: flood limits, advert intervals, duty cycle and regions from the [Yorkshire suggested repeater commands](https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/).
+- [**LocalMesh region conventions**](https://localmesh.co.uk/meshcore-region-configuration/) for Great Britain (`gb` plus `gb-*`) and the separate island-of-Ireland hierarchy (`ioi` plus province codes). Presets add broad and local entries, enable both, and set the local entry as home.
+- Strict public identifiers: 1–29 lowercase letters, digits or hyphens; up to 32 regions. Unscoped traffic remains enabled through `*` for compatibility.
+- **Yorkshire mesh recommended settings** in one click: flood limits, advert intervals and duty cycle from the [Yorkshire suggested repeater commands](https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/), with `gb` → `gb-yor` region configuration.
 
 ![Regions](docs/images/repeater-regions.png)
 
@@ -218,7 +219,7 @@ A companion radio with every app link and a complete messenger built into its we
 - **Channel types**: hashtag, private (random secret), shared secret, and Public.
 - Share, remove, and export/import channels.
 - **Region scope** for each channel, so sends reach only that region's repeaters.
-- **Region page** with one-tap **Yorkshire** (`#Yorkshire` channel, `yorkshire` scope) and **North West** presets, plus a default scope for all sends.
+- **Region page** with all documented Great Britain and island-of-Ireland scopes, plus a validated default scope for all sends. GB and Ireland conventions are clearly separated.
 
 ![Channels](docs/images/client-channels.png)
 
@@ -277,7 +278,7 @@ The messenger also works on a phone browser:
   - login, status, telemetry, trace and path discovery;
   - **set route**;
   - a **remote admin console**.
-- **Channels**, including region scope and one-tap Yorkshire setup.
+- **Channels**, including a validated per-channel region scope, plus LocalMesh GB and island-of-Ireland scope shortcuts.
 - A **map** of everyone who shares a location.
 - **Radio settings**: presets, frequency, power, name, location, confirmations and Bluetooth PIN.
 - **Device tab**: opens the full web interface of any UMC repeater or client on your network, including firmware updates.
@@ -322,7 +323,7 @@ net.ip, net.hostname, net.mdns, get net.status
 ap.mode, ap.password, ap.rescue, get ap.status, pin
 http, http.timeout, telnet, timezone, app.tcp, get app.status
 display.mode, display.ip, display.page, display.traffic, display.timeout
-region preset yorkshire|northwest|uk, get traffic, group.hops.max, advert.hops.max
+region preset <gb|gb-*|ioi|province>, get traffic, group.hops.max, advert.hops.max
 routes, route <node>, route find|pin|unpin|forget, trace <path>, trace route <node>, get trace
 update check, update install, get update.status, update.auto, update.interval, update.url, get build
 get ota.state, ota rollback

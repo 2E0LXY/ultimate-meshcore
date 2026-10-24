@@ -1,8 +1,15 @@
 # Ultimate MeshCore — Roadmap and gap analysis
 
-Last reviewed: 2026-09-14. Sources checked: upstream MeshCore `main` and `dev`, MeshCore-EastMesh, agessaman/MeshCore (observer-firmware, abstract-networking, map uploader, alerts, SNMP), OffbandMesh, meshcomod, MeshCore-Low-Power (docs), MeshCore-BitChat, jmead MQTT gateway, redengin (Rust), openHop modem/flasher, mesh-loader, meshcore_py, meshcore-open, ZephCore, pyMC_Repeater, CubeCellMeshCore, awesome-meshcore, LitBomb FAQ, meshcore.co.uk guide, meshcore-regions catalogue.
+Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, MeshCore-EastMesh, LocalMesh region configuration, agessaman/MeshCore (observer-firmware, abstract-networking, map uploader, alerts, SNMP), OffbandMesh, meshcomod, MeshCore-Low-Power (docs), MeshCore-BitChat, jmead MQTT gateway, redengin (Rust), openHop modem/flasher, mesh-loader, meshcore_py, meshcore-open, ZephCore, pyMC_Repeater, CubeCellMeshCore, awesome-meshcore, LitBomb FAQ, meshcore.co.uk guide, meshcore-regions catalogue.
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
+
+## Done in 0.1.11
+
+- ✅ LocalMesh region conventions implemented across repeater presets, Web Flasher, web/desktop client and T-Deck: exact `gb`/`gb-*` and separate `ioi` province hierarchies, strict identifiers, parent/local flooding, home selection, wildcard compatibility and 32 client scope choices
+- ✅ Fixed Australian state presets to create `au-xx` beneath `au`, and reject overlong region names instead of silently truncating them
+- ✅ Web Flasher multi-region picker backed by the live community GB catalogue, with a bundled snapshot refreshed automatically every week
+- ✅ Restored active Let's Mesh EU/US MQTT analyzer presets and added IATA/broker setup to post-install USB provisioning
 
 ## Done in 0.1.10
 

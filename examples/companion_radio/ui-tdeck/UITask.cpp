@@ -2018,7 +2018,7 @@ static const char* scopeAt(int i) {
 }
 
 // Adds a hashtag channel by name. The key is worked out from the name the same way the
-// phone apps do it, so everyone who types "#yorkshire" lands on the same channel. Returns
+// phone apps do it, so everyone who types the same hashtag lands on the same channel. Returns
 // false when it is already there or there is no room for it.
 static bool addHashChannel(const char* name) {
   char hashed[40];
@@ -2225,7 +2225,7 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
     case SP_REGION:
       if (row == scopeCount()) {
         snprintf(label, label_n, "Yorkshire starter");
-        snprintf(value, value_n, "%s", _setup_confirm == row ? "tap again" : "radio, scope, channels");
+        snprintf(value, value_n, "%s", _setup_confirm == row ? "tap again" : "radio, gb-yor, channels");
         break;
       }
       if (row == scopeCount() + 2) {
@@ -2235,7 +2235,7 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
       }
       if (row == scopeCount() + 1) {
         snprintf(label, label_n, "Repeater commands");
-        snprintf(value, value_n, "region put yorkshire ...");
+        snprintf(value, value_n, "region put gb-yor gb ...");
         break;
       }
       if (row < scopeCount()) {
@@ -2579,16 +2579,16 @@ void UITask::setupAction(int row) {
         _edit_len = 0;
         return;
       } else if (row == scopeCount() + 1) {
-        // What a Yorkshire repeater operator has to enter on the repeater itself.
+        // LocalMesh's broad + local hierarchy for a Yorkshire repeater. Keep wildcard
+        // enabled for unscoped/backward-compatible traffic.
         StrHelper::strncpy(_console_out,
-                           "On each repeater:\nregion put yorkshire\nregion default yorkshire\n"
-                           "region put eng-ne\nregion put northwest\nregion denyf *\nregion save",
+                           "On each repeater:\nregion put gb\nregion put gb-yor gb\n"
+                           "region allowf gb\nregion allowf gb-yor\nregion home gb-yor\nregion allowf *\nregion save",
                            sizeof(_console_out));
         setupOpen(SP_CONSOLE);
         return;
       } else if (row == scopeCount()) {
-        // The published MeshCore Yorkshire setup: the shared radio profile, the regional
-        // scope, and the three public channels.
+        // The shared radio profile, LocalMesh's exact Yorkshire scope, and three public channels.
         if (_setup_confirm != row) {           // it changes the radio, so ask first
           _setup_confirm = row;
           StrHelper::strncpy(_setup_status, "Tap again: this retunes the radio", sizeof(_setup_status));
@@ -2600,16 +2600,16 @@ void UITask::setupAction(int row) {
           StrHelper::strncpy(_setup_status, radio, sizeof(_setup_status));
           break;
         }
-        umcCli("set scope yorkshire");
+        umcCli("set scope gb-yor");
         int added = 0;
         for (const char* name : {"yorkshire", "northwest", "northeast"}) {
           if (addHashChannel(name)) added++;
         }
         // each channel sends in its own region, as the community guide sets them up
-        umcCli("set chscope #yorkshire yorkshire");
-        umcCli("set chscope #northwest northwest");
-        umcCli("set chscope #northeast eng-ne");
-        snprintf(_setup_status, sizeof(_setup_status), "UK narrow, scope yorkshire, %d channels", added);
+        umcCli("set chscope #yorkshire gb-yor");
+        umcCli("set chscope #northwest gb-nwk");
+        umcCli("set chscope #northeast gb-nth");
+        snprintf(_setup_status, sizeof(_setup_status), "UK narrow, scope gb-yor, %d channels", added);
       } else {
         setupOpen(SP_ROOT);
         return;
