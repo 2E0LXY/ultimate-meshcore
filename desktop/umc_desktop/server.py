@@ -15,6 +15,8 @@ from . import __version__
 from .backends import ProxyBackend, RepeaterSerialBackend, normalise_role
 from .companion import CompanionBackend
 from .flash import flash_app
+from .omit import web as omit_web
+from .omit.runtime import Runtime
 from .links import (BleFrameLink, SerialFrameLink, SerialTextLink, TcpFrameLink, list_serial_ports, open_serial,
                     scan_ble)
 
@@ -57,6 +59,7 @@ class State:
         self.busy = asyncio.Lock()
         self.note = ""
         self.recent_file = config_dir() / "recent.json"
+        self.omit = Runtime(config_dir())             # chat, bot and dashboard (the radio attaches below)
 
     # ------------------------------------------------------------ recent connections
     def recent(self):
@@ -75,6 +78,7 @@ class State:
 
     # ------------------------------------------------------------ connect
     async def disconnect(self):
+        self.omit.detach()
         if self.backend:
             try:
                 await self.backend.close()
@@ -121,6 +125,8 @@ class State:
         else:
             raise ValueError("unknown connection type")
         self.backend, self.target = backend, target
+        if isinstance(backend, CompanionBackend) and backend.role == "companion":
+            self.omit.attach(backend)                 # a client radio: the chat page can use it
         self.remember(target, self.label)
 
 
@@ -389,6 +395,7 @@ def make_app():
         asyncio.get_running_loop().call_later(0.3, lambda: os._exit(0))
         return js({"ok": True})
 
+    omit_web.setup(app, state)
     app.router.add_get("/", root)
     app.router.add_get("/index.html", root)
     app.router.add_get("/connect", connect_page)

@@ -594,6 +594,27 @@ The app opens in its own window. It uses Microsoft Edge, Google Chrome, Chromium
 
 Recent connections are listed at the top of the connection page. **Connections** (top right of the interface) disconnects and returns to that page. If the radio restarts, the app reconnects by itself.
 
+**Chat, bot and dashboard (client radios)**
+
+The **Chat** button (top right of the interface, or `http://127.0.0.1:47815/omit`) opens a page for the client radio you are connected to. Nothing here needs a terminal.
+
+| Part | What it does |
+|---|---|
+| **Feed** | One line per message: time, channel, `<name>` in a colour of its own, the text, and in grey how it arrived: `(2h +5.5dB via Hilltop>Ridge)`. Test calls are yellow, a message naming your node is highlighted, direct messages are lilac, old queued messages are dimmed. Click a name to start an `@[name]` mention. |
+| **Windows and nicks** | One window per channel and for direct messages, with unread counts, and who was heard in the last three hours with their hops. |
+| **Send box** | Pick the channel, type, press Enter (160 characters at most). **Quick lines** and **Reply to test** (fills in the station's name, hops, SNR and repeaters for you to check and send). |
+| **Operator / Bot mode** | Operator: you talk, the bot is silent. Bot: it answers test calls and may send beacons. **Pause answers** keeps Bot mode but stops replying. The blue frame means Bot mode. |
+| **The bot** | Answers a message that is exactly a test word (`test`, `ping`, `radio check`) on the channels you choose. It waits a few seconds, answers each station at most once every ten minutes and never more than six times an hour, never repeats a line to the same station until it has used them all, skips messages that were queued on the radio before the app started, and ignores names containing `bot`. The **Events** panel says why it stayed quiet. |
+| **Beacons** | Off by default (a beacon is a message to everyone). Every 30 minutes at most, in Bot mode; messages naming your node afterwards are counted as replies. |
+| **Dashboard** | Messages per hour, test calls, answers, stations heard most, how many hops away, which repeaters carry your traffic, beacon replies. |
+| **Repeaters** | Add a repeater the radio has heard, with its admin password, and the app logs in to it every 30 minutes (Operator mode too) and records battery, uptime, noise floor, the trace SNR there and back, and the best neighbour it hears. Readings are kept in the database. The password stays in the app's settings folder and is never sent to the page again. **Poll now** runs it at once. |
+| **Settings** | Every limit and every line of text (answers, mentions, beacons, quick lines) is edited in the form and applied when you save. |
+| **Storage** | Messages, packets, beacons and events are kept in `omit.sqlite` in the app's settings folder, so they survive restarts and can be queried. |
+
+**Automatic messages are labelled.** Replies and beacons end with `[auto]` and your callsign (set both in Settings), because other stations should know a machine answered. The chat page deliberately does not imitate a person (no slang or typos). Check that automatic transmission suits your licence and the network's rules before you switch Bot mode on.
+
+*The chat page, the bot, the dashboard and repeater polling are new. They are tested with a simulated radio and repeater (85 tests, and the page driven in a real browser), not yet with real traffic.*
+
 **What works where**
 - **Ultimate MeshCore Client and repeater firmware** answer the desktop app's bridge requests. You get every page the device's own web interface has, over any connection: settings, WiFi, routes, live traffic, console and backup.
 - **Other MeshCore companion radios** get messages, contacts, channels, routes and trace, the map, region scope, radio, messaging and identity settings, and the dashboard. Settings they don't have show *not supported*.
