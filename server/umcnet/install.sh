@@ -13,7 +13,7 @@ fi
 systemctl disable --now mosquitto >/dev/null 2>&1 || true
 
 id umcnet >/dev/null 2>&1 || useradd --system --home-dir /opt/umcnet --shell /usr/sbin/nologin umcnet
-install -d -o root -g umcnet -m 750 /opt/umcnet
+install -d -o umcnet -g umcnet -m 750 /opt/umcnet
 install -d -o umcnet -g umcnet -m 750 /var/lib/umcnet
 
 for f in mosquitto.conf umcnet-user; do curl -fsSL "$RAW/$f" -o "/opt/umcnet/$f"; done

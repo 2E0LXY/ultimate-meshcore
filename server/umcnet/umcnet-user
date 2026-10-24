@@ -96,7 +96,7 @@ def main(argv):
         return 2
     if argv[1] == "remove":
         users.pop(name, None)
-        subprocess.run(["mosquitto_passwd", "-D", PASSWD, name], check=False)
+        subprocess.run(["runuser", "-u", "umcnet", "--", "mosquitto_passwd", "-D", PASSWD, name], check=False)
     else:
         role = argv[3] if len(argv) > 3 else ""
         if role not in ROLES:
@@ -105,16 +105,16 @@ def main(argv):
         pw = secrets.token_urlsafe(15)
         if "--password" in argv:
             pw = argv[argv.index("--password") + 1]
-        flag = "-b" if os.path.exists(PASSWD) else "-c"
-        if flag == "-c":
+        if not os.path.exists(PASSWD):
             open(PASSWD, "a").close()
-            flag = "-b"
-        subprocess.run(["mosquitto_passwd", "-b", PASSWD, name, pw], check=True)
+            own(PASSWD)
+        # run as the broker's own user so the password file stays owned by it
+        subprocess.run(["runuser", "-u", "umcnet", "--", "mosquitto_passwd", "-b", PASSWD, name, pw], check=True)
         users[name] = role
         print(f"{name} ({role}) password: {pw}")
     save(users)
     write_acl(users)
-    own(PASSWD)
+    own(ACL)
     reload_broker()
     return 0
 
