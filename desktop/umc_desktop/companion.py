@@ -62,6 +62,7 @@ class CompanionBackend:
         self.worker = None
         self.supervisor = None
         self.status = "connecting"
+        self.listeners = []                 # called with every frame the radio sends (the chat bot reads them)
 
     # ------------------------------------------------------------ link plumbing
     def attach(self, link):
@@ -94,6 +95,11 @@ class CompanionBackend:
     def _on_frame(self, f):
         if not f:
             return
+        for fn in list(self.listeners):
+            try:
+                fn(f)
+            except Exception:
+                pass                            # a listener's trouble must never stop the radio link
         code = f[0]
         job = self.current
         if code == PUSH_MSG_WAITING:

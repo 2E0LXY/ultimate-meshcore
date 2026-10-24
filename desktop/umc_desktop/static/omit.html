@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UMC Chat</title>
+<style>
+:root { color-scheme: dark; --bg:#14161a; --panel:#1c1f26; --line:#2b3039; --text:#e6e8ec; --dim:#8b93a1;
+  --accent:#b79cf0; --bot:#5aa2ff; --yellow:#f0d264; --green:#6fd08c; --orange:#f0a25a; --lilac:#c9a8ff; }
+body.bot { --accent: var(--bot); }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, "Segoe UI", sans-serif; display: flex; flex-direction: column; }
+header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; background: var(--panel);
+  border-bottom: 3px solid var(--accent); }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+.pill { padding: 2px 10px; border-radius: 12px; background: #262a33; color: var(--dim); font-size: 12px; }
+.pill.ok { color: var(--green); } .pill.warn { color: var(--orange); }
+button, select, input, textarea { font: inherit; color: var(--text); background: #232831; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+button { cursor: pointer; } button:hover { border-color: var(--accent); } button.primary { background: var(--accent); color: #101216; border-color: var(--accent); }
+a.btn { text-decoration: none; color: var(--text); background: #232831; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+.sp { flex: 1; }
+nav { display: flex; gap: 4px; padding: 6px 12px 0; background: var(--panel); }
+nav button { border-radius: 6px 6px 0 0; border-bottom: none; }
+nav button.on { background: var(--bg); color: var(--accent); border-color: var(--accent); }
+main { flex: 1; min-height: 0; display: flex; }
+section { display: none; flex: 1; min-height: 0; } section.on { display: flex; }
+.cols { display: grid; grid-template-columns: 190px 1fr 270px; gap: 8px; padding: 8px; flex: 1; min-height: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-height: 0; overflow: auto; }
+.card h2 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 0 0 6px; }
+.stack { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.win { display: flex; justify-content: space-between; padding: 3px 6px; border-radius: 5px; cursor: pointer; }
+.win:hover, .win.on { background: #262b35; } .win.on { color: var(--accent); }
+.badge { background: var(--accent); color: #101216; border-radius: 9px; padding: 0 6px; font-size: 11px; }
+.nick { cursor: pointer; padding: 1px 4px; display: flex; justify-content: space-between; } .nick:hover { background: #262b35; }
+#feedwrap { display: flex; flex-direction: column; min-height: 0; }
+#feed { flex: 1; overflow: auto; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.line { padding: 1px 2px; white-space: pre-wrap; word-break: break-word; }
+.line .t, .line .c, .line .meta { color: var(--dim); } .line .who { cursor: pointer; font-weight: 600; }
+.line.trig .txt { color: var(--yellow); } .line.mention { background: #4a3f12; }
+.line.dm { background: #33284d; } .line.backlog { opacity: .5; } .line.own .who { color: #fff !important; }
+.line.beacon .txt, .line.beacon_reply { color: #cbb6ff; } .line.bot_reply .txt { color: #fff; }
+#compose { display: flex; gap: 6px; padding-top: 6px; } #compose input[type=text] { flex: 1; }
+.ev.ok { color: var(--green); } .ev.warn { color: var(--orange); } .ev { font-size: 12px; padding: 1px 0; }
+.big { padding: 12px; overflow: auto; flex: 1; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.stat b { display: block; font-size: 24px; color: var(--accent); }
+table { border-collapse: collapse; width: 100%; } td, th { padding: 3px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.bar { height: 10px; background: var(--accent); border-radius: 3px; min-width: 2px; }
+.form { display: grid; grid-template-columns: 220px 1fr; gap: 6px 12px; max-width: 880px; align-items: center; }
+.form h3 { grid-column: 1 / -1; margin: 14px 0 0; color: var(--accent); } .form small { color: var(--dim); grid-column: 2; }
+textarea { width: 100%; min-height: 110px; font-family: ui-monospace, Consolas, monospace; }
+#problems { color: var(--orange); }
+</style>
+</head>
+<body>
+<header>
+  <h1>UMC Chat</h1><span class="pill" id="node">not connected</span><span class="pill" id="modepill"></span>
+  <button id="modebtn" class="primary" title="Operator: you talk, the bot is silent. Bot: it answers test calls and can send beacons.">Switch to Bot mode</button>
+  <button id="pausebtn">Pause answers</button>
+  <span class="pill" id="counts"></span><span class="pill" id="nextb"></span>
+  <span class="sp"></span><a class="btn" href="/">Radio settings</a><a class="btn" href="/connect">Connections</a>
+</header>
+<nav><button data-tab="chat" class="on">Chat</button><button data-tab="dash">Dashboard</button><button data-tab="rep">Repeaters</button><button data-tab="set">Settings</button></nav>
+<main>
+<section id="chat" class="on"><div class="cols">
+  <div class="stack"><div class="card"><h2>Windows</h2><div id="wins"></div></div><div class="card" style="flex:1"><h2>Heard in the last 3 hours</h2><div id="nicks"></div></div></div>
+  <div class="card" id="feedwrap"><div id="feed"></div>
+    <div id="compose"><select id="target"></select><input type="text" id="text" maxlength="160" placeholder="Type a message, Enter to send" autocomplete="off">
+      <select id="quick"><option value="">Quick lines</option></select><button id="reply" title="Prepare an answer to the last test call">Reply to test</button><button class="primary" id="send">Send</button></div>
+    <div class="pill" id="count" style="align-self:flex-start;margin-top:4px">0 / 160</div></div>
+  <div class="stack"><div class="card"><h2>Status</h2><div id="status"></div><button id="beaconnow" style="margin-top:6px">Send a beacon now</button></div><div class="card" style="flex:1"><h2>Events</h2><div id="events"></div></div></div>
+</div></section>
+<section id="dash"><div class="big" id="dashbody">Loading…</div></section>
+<section id="rep"><div class="big" id="repbody">Loading…</div></section>
+<section id="set"><div class="big"><div class="form" id="form"></div><p><button class="primary" id="save">Save settings</button> <span id="problems"></span></p></div></section>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const H = {"Content-Type": "application/json", "X-UMC": "1"};
+const post = (url, body) => fetch(url, {method: "POST", headers: H, body: JSON.stringify(body || {})}).then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j; });
+const get = url => fetch(url, {cache: "no-store"}).then(r => r.json());
+let seq = 0, rows = [], channels = {}, win = "all", unread = {}, state = {}, tab = "chat", settings = null;
+
+const hue = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+const hhmm = ts => new Date(ts * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+const hopsWord = h => h === null || h === undefined ? "" : h === 0 ? "direct" : h + "h";
+function meta(r) {
+  const parts = [];
+  if (r.hops !== null && r.hops !== undefined) parts.push(hopsWord(r.hops));
+  if (r.snr !== null && r.snr !== undefined) parts.push((r.snr >= 0 ? "+" : "") + Number(r.snr).toFixed(1) + "dB");
+  const via = r.path ? "via " + r.path : "";
+  return parts.length || via ? "(" + parts.join(" ") + (via ? " " + via : "") + ")" : "";
+}
+function winKey(r) { return r.channel_idx === -1 ? "dm" : String(r.channel_idx); }
+function line(r) {
+  const mine = state.node && r.sender === state.node;
+  const mention = state.node && r.text && r.text.toLowerCase().includes("@[" + state.node.toLowerCase() + "]");
+  const d = el("div", "line " + (r.kind || "") + (r.is_trigger ? " trig" : "") + (mention ? " mention" : "") + (mine || r.kind === "tx" || r.kind === "bot_reply" || r.kind === "beacon" ? " own" : ""));
+  d.append(el("span", "t", hhmm(r.ts) + " "), el("span", "c", (r.channel_name || "") + " "));
+  const who = el("span", "who", "<" + r.sender + "> "); who.style.color = "hsl(" + hue(r.sender || "") + ",70%,70%)";
+  who.onclick = () => { $("text").value = "@[" + r.sender + "] " + $("text").value; $("text").focus(); };
+  d.append(who, el("span", "txt", r.text + " "), el("span", "meta", meta(r)));
+  return d;
+}
+function drawFeed(full) {
+  const f = $("feed"), stick = f.scrollTop + f.clientHeight >= f.scrollHeight - 30;
+  if (full) f.replaceChildren();
+  for (const r of full ? rows : rows.slice(-1)) if (win === "all" || winKey(r) === win) f.append(line(r));
+  if (stick) f.scrollTop = f.scrollHeight;
+}
+function drawWins() {
+  const w = $("wins"); w.replaceChildren();
+  const add = (key, name) => { const d = el("div", "win" + (win === key ? " on" : ""), name); if (unread[key]) d.append(el("span", "badge", unread[key]));
+    d.onclick = () => { win = key; unread[key] = 0; if (key !== "all" && key !== "dm") $("target").value = key; drawWins(); drawFeed(true); }; w.append(d); };
+  add("all", "All"); for (const [k, n] of Object.entries(channels)) add(k, n); add("dm", "Direct messages");
+}
+function drawTargets() {
+  const t = $("target"), old = t.value; t.replaceChildren();
+  for (const [k, n] of Object.entries(channels)) { const o = el("option", "", n); o.value = k; t.append(o); }
+  if (old) t.value = old;
+}
+async function pollFeed() {
+  if (tab !== "chat") return;
+  let j; try { j = await get("/omit/api/feed?since=" + seq); } catch { return; }
+  if (j.error) { $("node").textContent = j.error; $("node").className = "pill warn"; return; }
+  state = j.state; paint(); if (JSON.stringify(channels) !== JSON.stringify(state.channels)) { channels = state.channels; drawWins(); drawTargets(); }
+  if (j.rows.length) {
+    const first = seq === 0; seq = j.seq; rows.push(...j.rows); if (rows.length > 600) rows = rows.slice(-600);
+    if (first) drawFeed(true); else for (const r of j.rows) { const k = winKey(r); if (win === "all" || win === k) { const f = $("feed"), stick = f.scrollTop + f.clientHeight >= f.scrollHeight - 30; $("feed").append(line(r)); if (stick) f.scrollTop = f.scrollHeight; } else unread[k] = (unread[k] || 0) + 1; }
+    drawWins();
+  }
+  const n = $("nicks"); n.replaceChildren();
+  for (const x of j.nicks) { const d = el("div", "nick"); const a = el("span", "", x.nick); a.style.color = "hsl(" + hue(x.nick) + ",70%,70%)"; d.append(a, el("span", "meta", (x.hops === null || x.hops === undefined ? "" : hopsWord(x.hops) + " ") + x.n)); d.onclick = () => { $("text").value = "@[" + x.nick + "] " + $("text").value; $("text").focus(); }; n.append(d); }
+  const ev = $("events"); ev.replaceChildren(); for (const e of j.events.slice().reverse()) ev.append(el("div", "ev " + e.level, hhmm(e.ts) + " " + e.text));
+}
+function paint() {
+  document.body.classList.toggle("bot", state.mode === "bot");
+  $("node").textContent = state.node || "radio"; $("node").className = "pill ok";
+  $("modepill").textContent = state.mode === "bot" ? "BOT mode" : "OPERATOR mode"; $("modebtn").textContent = state.mode === "bot" ? "Switch to Operator mode" : "Switch to Bot mode";
+  $("pausebtn").textContent = state.paused ? "Resume answers" : "Pause answers";
+  const c = state.counters || {}; $("counts").textContent = "heard " + c.heard + " · tests " + c.tests + " · answers " + c.answers + " · beacons " + c.beacons + " (" + c.beacon_replies + " replied)";
+  $("nextb").textContent = state.beacon_enabled && state.mode === "bot" && state.next_beacon !== null ? "next beacon in " + Math.round(state.next_beacon / 60) + " min" : state.beacon_enabled ? "beacons: bot mode only" : "beacons off";
+  const s = $("status"); s.replaceChildren(); for (const [k, v] of [["Contacts", state.contacts], ["Up", Math.round(state.uptime / 60) + " min"], ["Answers on", (state.reply_channels || []).map(i => channels[i] || i).join(", ")]]) s.append(el("div", "", k + ": " + v));
+}
+$("modebtn").onclick = () => post("/omit/api/mode", {mode: state.mode === "bot" ? "operator" : "bot"}).then(pollFeed);
+$("pausebtn").onclick = () => post("/omit/api/mode", {paused: !state.paused}).then(pollFeed);
+$("beaconnow").onclick = () => post("/omit/api/beacon").then(pollFeed).catch(e => alert(e.message));
+async function doSend() {
+  const text = $("text").value.trim(); if (!text) return;
+  try { await post("/omit/api/send", {channel: Number($("target").value || 0), text}); $("text").value = ""; $("count").textContent = "0 / 160"; pollFeed(); } catch (e) { alert(e.message); }
+}
+$("send").onclick = doSend; $("text").onkeydown = e => { if (e.key === "Enter") doSend(); }; $("text").oninput = () => $("count").textContent = $("text").value.length + " / 160";
+$("reply").onclick = () => {
+  const t = rows.slice().reverse().find(r => r.is_trigger && r.sender !== state.node); if (!t) { alert("No test call to answer yet."); return; }
+  const h = t.hops === null || t.hops === undefined ? "a few hops" : t.hops === 0 ? "direct" : t.hops + " hop" + (t.hops === 1 ? "" : "s");
+  $("text").value = "@[" + t.sender + "] heard you " + h + (t.snr === null || t.snr === undefined ? "" : ", SNR " + Number(t.snr).toFixed(1) + " dB") + (t.path ? " via " + t.path : ""); $("text").focus(); $("count").textContent = $("text").value.length + " / 160";
+};
+$("quick").onchange = () => { if ($("quick").value) { $("text").value = $("quick").value; $("quick").value = ""; $("text").focus(); } };
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => { tab = b.dataset.tab; document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b)); document.querySelectorAll("section").forEach(s => s.classList.toggle("on", s.id === tab)); if (tab === "dash") loadDash(); if (tab === "rep") loadDash(); if (tab === "set") loadSettings(); });
+
+// ---- dashboard
+function table(head, rowsData) { const t = el("table"); const tr = el("tr"); head.forEach(h => tr.append(el("th", "", h))); t.append(tr); for (const r of rowsData) { const x = el("tr"); r.forEach(c => { const td = el("td"); if (c instanceof Node) td.append(c); else td.textContent = c; x.append(td); }); t.append(x); } return t; }
+function bar(n, max) { const b = el("div", "bar"); b.style.width = Math.max(2, 160 * n / Math.max(1, max)) + "px"; return b; }
+async function loadDash() {
+  const d = await get("/omit/api/dashboard").catch(() => null); const body = tab === "rep" ? $("repbody") : $("dashbody");
+  if (!d || d.error) { body.textContent = (d && d.error) || "Connect a companion radio first."; return; }
+  if (tab === "rep") { body.replaceChildren(); body.append(el("p", "", "Repeaters you poll show here with battery, noise floor, trace SNR and their best neighbour, logged to the database. Polling a repeater needs its admin password and is the next piece to be added."));
+    if (d.repeaters.length) body.append(table(["Repeater", "Last poll", "Battery", "Noise", "Trace SNR (there/back)", "Note"], d.repeaters.map(r => [r.name, new Date(r.ts * 1000).toLocaleString(), r.bat_mv ? (r.bat_mv / 1000).toFixed(2) + " V" : "-", r.noise_floor ?? "-", (r.trace_there ?? "-") + " / " + (r.trace_back ?? "-"), r.note || ""]))); return; }
+  body.replaceChildren(); const g = el("div", "grid"); for (const [k, v] of [["Messages", d.stats.messages], ["Test calls", d.stats.tests || 0], ["Answers", d.stats.answers || 0], ["Stations", d.stats.stations || 0], ["Beacons sent", d.beacons.sent], ["Beacons answered", d.beacons.answered]]) { const c = el("div", "card stat"); c.append(el("b", "", v), el("span", "", k)); g.append(c); } body.append(g);
+  const mx = Math.max(1, ...d.hourly.map(h => h.messages)); const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.setAttribute("viewBox", "0 0 480 90"); svg.style.width = "100%"; svg.style.maxWidth = "720px";
+  d.hourly.forEach((h, i) => { const w = 480 / d.hourly.length; const r = document.createElementNS(svg.namespaceURI, "rect"); const ht = 80 * h.messages / mx; r.setAttribute("x", i * w + 1); r.setAttribute("y", 85 - ht); r.setAttribute("width", Math.max(1, w - 2)); r.setAttribute("height", ht); r.setAttribute("fill", "#b79cf0"); const t = document.createElementNS(svg.namespaceURI, "title"); t.textContent = h.messages + " messages, " + h.tests + " tests"; r.append(t); svg.append(r); });
+  const c1 = el("div", "card"); c1.append(el("h2", "", "Messages per hour, last " + d.hours + " h"), svg); body.append(c1);
+  const two = el("div", "grid"); const mt = Math.max(1, ...d.top.map(x => x.n)), mh = Math.max(1, ...d.hops.map(x => x.n)), mr = Math.max(1, ...d.relays.map(x => x.n));
+  const mk = (title, tb) => { const c = el("div", "card"); c.append(el("h2", "", title), tb); two.append(c); };
+  mk("Stations heard most", table(["Station", "Messages", ""], d.top.map(x => [x.sender, x.n, bar(x.n, mt)])));
+  mk("How far away", table(["Hops", "Messages", ""], d.hops.map(x => [x.hops === 0 ? "direct" : x.hops, x.n, bar(x.n, mh)])));
+  mk("Repeaters carrying the traffic", table(["Repeater", "Messages", ""], d.relays.map(x => [x.repeater, x.n, bar(x.n, mr)])));
+  mk("Latest answers", table(["Text"], d.replies.map(x => [x.text]))); body.append(two);
+}
+// ---- settings
+const FIELDS = [
+  ["h", "Station"], ["node_name", "Node name (empty: from the radio)", "text"], ["callsign", "Callsign (added to every automatic message)", "text"], ["locations", "Places for {location}", "list"], ["start_mode", "Start in", "select:operator,bot"],
+  ["h", "Test-reply bot"], ["bot.enabled", "Bot enabled", "check"], ["bot.reply_channels", "Answer on channels (numbers)", "numlist"], ["bot.triggers", "Test words", "list"], ["bot.per_sender_minutes", "One answer per station per (minutes)", "num"], ["bot.max_per_hour", "Most answers per hour", "num"], ["bot.delay_s", "Wait before answering (seconds, low,high)", "numlist"], ["bot.ignore_senders_containing", "Never answer names containing", "list"], ["bot.answer_mentions", "Also answer people who name this node", "check"], ["bot.signature", "Tag added to automatic replies", "text"],
+  ["h", "Beacon (a message to everyone, bot mode only)"], ["beacon.enabled", "Send beacons", "check"], ["beacon.channel", "Channel number", "num"], ["beacon.interval_minutes", "Every (minutes, at least 5)", "num"], ["beacon.first_after_s", "First one after (seconds)", "num"], ["beacon.reply_window_minutes", "Count replies for (minutes)", "num"]];
+const TEXTS = [["replies", "Answers to a test call", "{name} {me} {location} {hops} {snr} {rssi} {path}"], ["mentions", "Answers to a mention", "same fields"], ["beacons", "Beacons", "{greeting} {me} {location}"], ["quick", "Quick lines in the send box", ""]];
+const dig = (o, p) => p.split(".").reduce((a, k) => a == null ? a : a[k], o);
+function put(o, p, v) { const ks = p.split("."); let a = o; while (ks.length > 1) { const k = ks.shift(); a = a[k] = a[k] || {}; } a[ks[0]] = v; }
+async function loadSettings() {
+  settings = await get("/omit/api/settings"); const f = $("form"); f.replaceChildren();
+  for (const [key, label, kind] of FIELDS) {
+    if (key === "h") { f.append(el("h3", "", label)); continue; }
+    f.append(el("label", "", label)); const v = dig(settings.config, key); let i;
+    if (kind === "check") { i = el("input"); i.type = "checkbox"; i.checked = !!v; } else if (kind.startsWith("select")) { i = el("select"); for (const o of kind.split(":")[1].split(",")) { const op = el("option", "", o); op.value = o; i.append(op); } i.value = v; } else { i = el("input"); i.type = kind === "num" ? "number" : "text"; i.value = Array.isArray(v) ? v.join(", ") : v; }
+    i.dataset.key = key; i.dataset.kind = kind; f.append(i);
+  }
+  const h = el("h3", "", "What it says (one line each)"); f.append(h);
+  for (const [k, label, hint] of TEXTS) { f.append(el("label", "", label)); const t = el("textarea"); t.dataset.text = k; t.value = settings.texts[k].join("\n"); f.append(t); if (hint) f.append(el("small", "", "Fields: " + hint)); }
+  const q = $("quick"); q.replaceChildren(el("option", "", "Quick lines")); q.firstChild.value = ""; for (const l of settings.texts.quick) { const o = el("option", "", l); o.value = l; q.append(o); }
+}
+$("save").onclick = async () => {
+  const config = {}, texts = {};
+  document.querySelectorAll("#form [data-key]").forEach(i => { const k = i.dataset.key, kind = i.dataset.kind; let v;
+    if (kind === "check") v = i.checked; else if (kind === "num") v = Number(i.value); else if (kind === "list") v = i.value.split(",").map(s => s.trim()).filter(Boolean); else if (kind === "numlist") v = i.value.split(",").map(s => Number(s.trim())).filter(n => !Number.isNaN(n)); else v = i.value; put(config, k, v); });
+  document.querySelectorAll("#form [data-text]").forEach(t => texts[t.dataset.text] = t.value.split("\n").map(s => s.trim()).filter(Boolean));
+  try { await post("/omit/api/settings", {config, texts}); $("problems").textContent = "Saved."; $("problems").style.color = "var(--green)"; seq = 0; rows = []; loadSettings(); } catch (e) { $("problems").textContent = e.message; $("problems").style.color = "var(--orange)"; }
+};
+loadSettings().catch(() => {}); pollFeed(); setInterval(pollFeed, 2000); setInterval(() => { if (tab === "dash") loadDash(); }, 30000);
+</script>
+</body>
+</html>

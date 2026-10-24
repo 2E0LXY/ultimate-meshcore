@@ -11,7 +11,13 @@
   btn.textContent = "Connections";
   btn.title = "Disconnect and choose another radio";
   const logout = document.getElementById("logoutBtn");
+  const chat = document.createElement("a");
+  chat.className = "btn sm";
+  chat.textContent = "Chat";
+  chat.title = "Messages, the test-reply bot and the dashboard";
+  chat.href = "/omit";
   top.insertBefore(pill, logout);
+  top.insertBefore(chat, logout);
   top.insertBefore(btn, logout);
   btn.onclick = async () => {
     if (!confirm("Disconnect from this radio?")) return;
