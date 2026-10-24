@@ -1,0 +1,20 @@
+[Unit]
+Description=UMC Net MQTT broker (separate from the other services on this server)
+After=network.target
+
+[Service]
+User=umcnet
+Group=umcnet
+ExecStart=/usr/sbin/mosquitto -c /opt/umcnet/mosquitto.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=3
+MemoryMax=96M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/umcnet
+
+[Install]
+WantedBy=multi-user.target

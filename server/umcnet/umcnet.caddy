@@ -1,0 +1,12 @@
+# UMC Net: MQTT over WebSockets, behind TLS. A separate site; the other sites are untouched.
+# Installed as /etc/caddy/conf.d/umcnet.caddy and pulled in with one `import` line.
+net.2e0lxy.uk {
+	encode off
+	@mqtt path /mqtt /mqtt/*
+	handle @mqtt {
+		reverse_proxy 127.0.0.1:9101
+	}
+	handle {
+		respond "UMC Net broker. Nothing to see here." 200
+	}
+}
