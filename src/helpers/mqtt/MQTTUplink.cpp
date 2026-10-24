@@ -1,4 +1,5 @@
 #include "MQTTUplink.h"
+#include "NetPacket.h"
 #include "MQTTCaCerts.h"
 
 #ifdef WITH_MQTT_UPLINK
@@ -1470,47 +1471,17 @@ bool MQTTUplink::setCustomTransport(const char* transport) {
   return saved;
 }
 
-static int hexNibble(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-  return -1;
-}
-
 // Runs on the network task: keep it short and touch nothing of the mesh. The topic is
 // meshcore/<iata>/<sender id>/raw and the payload is the observer JSON, whose "data" is the packet in hex.
 void MQTTUplink::onNetMessage(const char* topic, int topic_len, const char* data, int data_len, int offset,
                               int total) {
   if (!_prefs.custom_bridge || topic == nullptr || data == nullptr) return;
   if (offset != 0 || data_len != total) return;                       // a message split in pieces: skip it
-  if (topic_len < 5 || memcmp(topic + topic_len - 4, "/raw", 4) != 0) return;
-  // Our own packets come back on this subscription; the sender's id is in the topic.
-  const size_t id_len = strlen(_device_id);
-  if (id_len > 0) {
-    for (int i = 0; i + (int)id_len <= topic_len; i++) {
-      if (strncasecmp(topic + i, _device_id, id_len) == 0) return;
-    }
-  }
-  static const char kKey[] = "\"data\":\"";
-  const int klen = sizeof(kKey) - 1;
-  const char* p = nullptr;
-  for (int i = 0; i + klen < data_len; i++) {
-    if (memcmp(data + i, kKey, klen) == 0) {
-      p = data + i + klen;
-      break;
-    }
-  }
-  if (p == nullptr) return;
-  const char* end = data + data_len;
+  if (!umcnet::topicIsRaw(topic, topic_len)) return;
+  if (umcnet::topicHasId(topic, topic_len, _device_id)) return;       // our own packet coming back
   uint8_t tmp[255];
-  int n = 0;
-  while (p + 1 < end && n < (int)sizeof(tmp)) {
-    const int hi = hexNibble(p[0]), lo = hexNibble(p[1]);
-    if (hi < 0 || lo < 0) break;
-    tmp[n++] = (uint8_t)((hi << 4) | lo);
-    p += 2;
-  }
-  if (n < 2) return;
+  const int n = umcnet::packetFromRawJson(data, data_len, tmp, (int)sizeof(tmp));
+  if (n == 0) return;
   _net_heard++;
   const uint8_t next = (uint8_t)((_net_head + 1) % kNetInbox);
   if (next == _net_tail) {                                            // the loop is behind: drop, never block

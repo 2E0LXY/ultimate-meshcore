@@ -4,6 +4,10 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.12
+
+- ✅ UMC Net: a self-hosted MQTT broker (`server/umcnet`) and the repeater bridge. With `set mqtt.custom.bridge on` a repeater also listens for other repeaters' raw packets on the broker and passes them to the mesh (rate-limited, loop-safe), over the existing WSS connection. Off by default.
+
 ## Done in 0.1.11
 
 - ✅ LocalMesh region conventions implemented across repeater presets, Web Flasher, web/desktop client and T-Deck: exact `gb`/`gb-*` and separate `ioi` province hierarchies, strict identifiers, parent/local flooding, home selection, wildcard compatibility and 32 client scope choices
