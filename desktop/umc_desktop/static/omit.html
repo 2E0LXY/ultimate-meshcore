@@ -91,7 +91,7 @@ function meta(r) {
   const parts = [];
   if (r.hops !== null && r.hops !== undefined) parts.push(hopsWord(r.hops));
   if (r.snr !== null && r.snr !== undefined) parts.push((r.snr >= 0 ? "+" : "") + Number(r.snr).toFixed(1) + "dB");
-  const via = r.path ? "via " + r.path : "";
+  const via = typeof r.path === "string" && r.path ? "via " + r.path : "";
   return parts.length || via ? "(" + parts.join(" ") + (via ? " " + via : "") + ")" : "";
 }
 function winKey(r) { return r.channel_idx === -1 ? "dm" : String(r.channel_idx); }
@@ -163,7 +163,7 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => { tab = b
 
 // ---- dashboard
 function table(head, rowsData) { const t = el("table"); const tr = el("tr"); head.forEach(h => tr.append(el("th", "", h))); t.append(tr); for (const r of rowsData) { const x = el("tr"); r.forEach(c => { const td = el("td"); if (c instanceof Node) td.append(c); else td.textContent = c; x.append(td); }); t.append(x); } return t; }
-function bar(n, max) { const b = el("div", "bar"); b.style.width = Math.max(2, 160 * n / Math.max(1, max)) + "px"; return b; }
+function bar(n, max) { const b = el("div", "bar"); b.style.width = Math.max(2, 90 * n / Math.max(1, max)) + "px"; return b; }
 async function loadDash() {
   const d = await get("/omit/api/dashboard").catch(() => null); const body = tab === "rep" ? $("repbody") : $("dashbody");
   if (!d || d.error) { body.textContent = (d && d.error) || "Connect a companion radio first."; return; }

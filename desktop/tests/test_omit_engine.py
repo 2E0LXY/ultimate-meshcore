@@ -171,6 +171,23 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("Hilltop>1f", -97.0), (row["path"], row["rssi"]))
         self.assertEqual({"Hilltop": 1, "1f": 1}, {r["repeater"]: r["n"] for r in db.relay_counts(NOW)})
 
+    async def test_the_feed_carries_the_path_as_text_not_a_list(self):
+        eng, be, _ = make(known_prefixes={"38": "Hilltop"})
+        raw = bytes([(5 << 2) | 1, 2, 0x38, 0x1F]) + b"\x01payload"
+        be.listeners[0](F.build_log_rx(raw, snr=5.5, rssi=-97))
+        be.listeners[0](chan("Alice: hello", snr=5.5, hops=2))
+        self.assertEqual("Hilltop>1f", eng.feed()[-1]["path"])
+        await eng.send_channel(1, "hi")
+        self.assertEqual("", eng.feed()[-1]["path"])
+
+    async def test_preloaded_history_is_in_time_order(self):
+        eng, _, _ = make()
+        eng.preload([{"ts": 30, "text": "c", "kind": "rx", "sender": "x", "path": ""},
+                     {"ts": 10, "text": "a", "kind": "rx", "sender": "x", "path": "A>B"},
+                     {"ts": 20, "text": "b", "kind": "rx", "sender": "x", "path": ""}])
+        self.assertEqual(["a", "b", "c"], [r["text"] for r in eng.feed()])
+        self.assertEqual("A>B", eng.feed()[0]["path"])
+
     async def test_a_repeater_contact_names_its_hash(self):
         eng, be, db = make()
         be.listeners[0](F.build_contact("1f" + "00" * 31, "Ridge", ctype=2))

@@ -43,7 +43,7 @@ class Engine:
 
     def preload(self, rows):
         """Put the last rows from the database into the feed, so the page is not empty after a restart."""
-        for r in rows:
+        for r in sorted(rows, key=lambda x: x.get("ts") or 0):
             r = dict(r)
             r["path_names"] = [x for x in (r.get("path") or "").split(">") if x]
             self._push(r)
@@ -115,7 +115,7 @@ class Engine:
         backlog = now - f["timestamp"] > 120 if f["timestamp"] else False
         rec = {"ts": now, "sender_ts": f["timestamp"], "channel_idx": f["channel_idx"],
                "channel_name": self.channels.get(f["channel_idx"], f"slot {f['channel_idx']}"), "sender": sender,
-               "text": text, "hops": hops, "snr": f["snr"], "rssi": rssi, "path": path, "path_names": path,
+               "text": text, "hops": hops, "snr": f["snr"], "rssi": rssi, "path": ">".join(path), "path_names": path,
                "kind": "backlog" if backlog else "rx"}
         mine = sender == self.bot.node_name and sender != ""
         if mine:
@@ -140,7 +140,7 @@ class Engine:
         pk = next((k for k in self.contacts if k.startswith(f["prefix"])), None)
         sender = self.contacts[pk]["name"] if pk else f["prefix"]
         rec = {"ts": self.now(), "sender_ts": f["timestamp"], "channel_idx": -1, "channel_name": "DM", "sender": sender,
-               "text": f["text"], "hops": f["hops"], "snr": f["snr"], "kind": "dm", "path": []}
+               "text": f["text"], "hops": f["hops"], "snr": f["snr"], "kind": "dm", "path": ""}
         rec["id"] = self.db.add_message(rec)
         self._push(rec)
 
@@ -164,7 +164,7 @@ class Engine:
             return False
         row = {"ts": self.now(), "channel_idx": channel_idx, "channel_name": self.channels.get(channel_idx, ""),
                "sender": self.bot.node_name or "me", "text": text, "kind": kind, "reply_to": reply_to,
-               "beacon_id": beacon_id, "path": []}
+               "beacon_id": beacon_id, "path": ""}
         row["id"] = self.db.add_message(row)
         self._push(row)
         return True

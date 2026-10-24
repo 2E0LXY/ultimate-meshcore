@@ -4,6 +4,10 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Unreleased (branch `omit-engine`)
+
+- ✅ Desktop: a Chat page for client radios with an IRC-style feed, a test-reply bot (labelled `[auto]`), optional beacons and a 24-hour dashboard, all set in forms. Ideas from MeshOmit (opensourcera, MIT). Next: poll repeaters (battery, noise, trace SNR, neighbours) and keep a history; send direct messages from the page.
+
 ## Done in 0.1.11
 
 - ✅ LocalMesh region conventions implemented across repeater presets, Web Flasher, web/desktop client and T-Deck: exact `gb`/`gb-*` and separate `ioi` province hierarchies, strict identifiers, parent/local flooding, home selection, wildcard compatibility and 32 client scope choices
