@@ -37,6 +37,9 @@ jobs:
       - name: Install build tools
         working-directory: desktop
         run: pip install -r requirements.txt pyinstaller pillow
+      - name: Run the chat, bot and repeater-monitor tests
+        working-directory: desktop
+        run: python -m unittest discover -s tests -p "test_omit*.py"
       - name: Build the portable program
         working-directory: desktop
         run: python build.py
@@ -58,6 +61,7 @@ jobs:
           done
           echo
           curl -sf http://127.0.0.1:47900/connect | grep -q "Ultimate MeshCore Desktop"
+          curl -sf http://127.0.0.1:47900/omit | grep -q "UMC Chat"
           curl -sf http://127.0.0.1:47900/desk/ports
           curl -sf -X POST http://127.0.0.1:47900/desk/quit || true
       - name: Package (Windows)

@@ -607,12 +607,13 @@ The **Chat** button (top right of the interface, or `http://127.0.0.1:47815/omit
 | **The bot** | Answers a message that is exactly a test word (`test`, `ping`, `radio check`) on the channels you choose. It waits a few seconds, answers each station at most once every ten minutes and never more than six times an hour, never repeats a line to the same station until it has used them all, skips messages that were queued on the radio before the app started, and ignores names containing `bot`. The **Events** panel says why it stayed quiet. |
 | **Beacons** | Off by default (a beacon is a message to everyone). Every 30 minutes at most, in Bot mode; messages naming your node afterwards are counted as replies. |
 | **Dashboard** | Messages per hour, test calls, answers, stations heard most, how many hops away, which repeaters carry your traffic, beacon replies. |
+| **Repeaters** | Add a repeater the radio has heard, with its admin password, and the app logs in to it every 30 minutes (Operator mode too) and records battery, uptime, noise floor, the trace SNR there and back, and the best neighbour it hears. Readings are kept in the database. The password stays in the app's settings folder and is never sent to the page again. **Poll now** runs it at once. |
 | **Settings** | Every limit and every line of text (answers, mentions, beacons, quick lines) is edited in the form and applied when you save. |
 | **Storage** | Messages, packets, beacons and events are kept in `omit.sqlite` in the app's settings folder, so they survive restarts and can be queried. |
 
 **Automatic messages are labelled.** Replies and beacons end with `[auto]` and your callsign (set both in Settings), because other stations should know a machine answered. The chat page deliberately does not imitate a person (no slang or typos). Check that automatic transmission suits your licence and the network's rules before you switch Bot mode on.
 
-*The chat page, the bot and the dashboard are new and have been tested with a simulated radio, not yet with real traffic. Polling repeaters (battery, noise floor, trace SNR) is not in yet.*
+*The chat page, the bot, the dashboard and repeater polling are new. They are tested with a simulated radio and repeater (85 tests, and the page driven in a real browser), not yet with real traffic.*
 
 **What works where**
 - **Ultimate MeshCore Client and repeater firmware** answer the desktop app's bridge requests. You get every page the device's own web interface has, over any connection: settings, WiFi, routes, live traffic, console and backup.

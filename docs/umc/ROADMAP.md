@@ -6,7 +6,7 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ## Unreleased (branch `omit-engine`)
 
-- ✅ Desktop: a Chat page for client radios with an IRC-style feed, a test-reply bot (labelled `[auto]`), optional beacons and a 24-hour dashboard, all set in forms. Ideas from MeshOmit (opensourcera, MIT). Next: poll repeaters (battery, noise, trace SNR, neighbours) and keep a history; send direct messages from the page.
+- ✅ Desktop: a Chat page for client radios with an IRC-style feed, a test-reply bot (labelled `[auto]`), optional beacons and a 24-hour dashboard, all set in forms. Ideas from MeshOmit (opensourcera, MIT). It also polls repeaters (battery, uptime, noise floor, trace SNR there and back, best neighbour) and keeps a history. Next: send direct messages from the page; rooms need firmware support for setting channels, which the companion protocol does not offer yet.
 
 ## Done in 0.1.11
 

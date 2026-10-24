@@ -19,7 +19,7 @@ By **Daren Loxley 2E0LXY**.
   - **Search this network** finds them.
 - **Works with other MeshCore companion radios too**: messages, contacts, channels, map, radio, messaging and identity settings.
 - **Recent connections**, and automatic reconnect after a restart.
-- **Chat** (the *Chat* button, or `/omit`) for client radios: an IRC-style feed with hops, SNR and the repeaters each message came through; a **test-reply bot**, optional **beacons**, and a 24-hour **dashboard**. Everything is set in a form, nothing needs a terminal. See the manual, section 20.1.
+- **Chat** (the *Chat* button, or `/omit`) for client radios: an IRC-style feed with hops, SNR and the repeaters each message came through; a **test-reply bot**, optional **beacons**, a 24-hour **dashboard**, and **repeater monitoring** (battery, noise floor, trace SNR, neighbours). Everything is set in a form, nothing needs a terminal. See the manual, section 20.1.
 
 ![Messages over a WiFi app link](../docs/images/desktop-messages.png)
 

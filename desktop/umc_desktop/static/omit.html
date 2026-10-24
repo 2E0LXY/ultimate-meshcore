@@ -159,16 +159,14 @@ $("reply").onclick = () => {
   $("text").value = "@[" + t.sender + "] heard you " + h + (t.snr === null || t.snr === undefined ? "" : ", SNR " + Number(t.snr).toFixed(1) + " dB") + (t.path ? " via " + t.path : ""); $("text").focus(); $("count").textContent = $("text").value.length + " / 160";
 };
 $("quick").onchange = () => { if ($("quick").value) { $("text").value = $("quick").value; $("quick").value = ""; $("text").focus(); } };
-document.querySelectorAll("nav button").forEach(b => b.onclick = () => { tab = b.dataset.tab; document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b)); document.querySelectorAll("section").forEach(s => s.classList.toggle("on", s.id === tab)); if (tab === "dash") loadDash(); if (tab === "rep") loadDash(); if (tab === "set") loadSettings(); });
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => { tab = b.dataset.tab; document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b)); document.querySelectorAll("section").forEach(s => s.classList.toggle("on", s.id === tab)); if (tab === "dash") loadDash(); if (tab === "rep") loadReps(); if (tab === "set") loadSettings(); });
 
 // ---- dashboard
 function table(head, rowsData) { const t = el("table"); const tr = el("tr"); head.forEach(h => tr.append(el("th", "", h))); t.append(tr); for (const r of rowsData) { const x = el("tr"); r.forEach(c => { const td = el("td"); if (c instanceof Node) td.append(c); else td.textContent = c; x.append(td); }); t.append(x); } return t; }
 function bar(n, max) { const b = el("div", "bar"); b.style.width = Math.max(2, 90 * n / Math.max(1, max)) + "px"; return b; }
 async function loadDash() {
-  const d = await get("/omit/api/dashboard").catch(() => null); const body = tab === "rep" ? $("repbody") : $("dashbody");
+  const d = await get("/omit/api/dashboard").catch(() => null); const body = $("dashbody");
   if (!d || d.error) { body.textContent = (d && d.error) || "Connect a companion radio first."; return; }
-  if (tab === "rep") { body.replaceChildren(); body.append(el("p", "", "Repeaters you poll show here with battery, noise floor, trace SNR and their best neighbour, logged to the database. Polling a repeater needs its admin password and is the next piece to be added."));
-    if (d.repeaters.length) body.append(table(["Repeater", "Last poll", "Battery", "Noise", "Trace SNR (there/back)", "Note"], d.repeaters.map(r => [r.name, new Date(r.ts * 1000).toLocaleString(), r.bat_mv ? (r.bat_mv / 1000).toFixed(2) + " V" : "-", r.noise_floor ?? "-", (r.trace_there ?? "-") + " / " + (r.trace_back ?? "-"), r.note || ""]))); return; }
   body.replaceChildren(); const g = el("div", "grid"); for (const [k, v] of [["Messages", d.stats.messages], ["Test calls", d.stats.tests || 0], ["Answers", d.stats.answers || 0], ["Stations", d.stats.stations || 0], ["Beacons sent", d.beacons.sent], ["Beacons answered", d.beacons.answered]]) { const c = el("div", "card stat"); c.append(el("b", "", v), el("span", "", k)); g.append(c); } body.append(g);
   const mx = Math.max(1, ...d.hourly.map(h => h.messages)); const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.setAttribute("viewBox", "0 0 480 90"); svg.style.width = "100%"; svg.style.maxWidth = "720px";
   d.hourly.forEach((h, i) => { const w = 480 / d.hourly.length; const r = document.createElementNS(svg.namespaceURI, "rect"); const ht = 80 * h.messages / mx; r.setAttribute("x", i * w + 1); r.setAttribute("y", 85 - ht); r.setAttribute("width", Math.max(1, w - 2)); r.setAttribute("height", ht); r.setAttribute("fill", "#b79cf0"); const t = document.createElementNS(svg.namespaceURI, "title"); t.textContent = h.messages + " messages, " + h.tests + " tests"; r.append(t); svg.append(r); });
@@ -179,6 +177,32 @@ async function loadDash() {
   mk("How far away", table(["Hops", "Messages", ""], d.hops.map(x => [x.hops === 0 ? "direct" : x.hops, x.n, bar(x.n, mh)])));
   mk("Repeaters carrying the traffic", table(["Repeater", "Messages", ""], d.relays.map(x => [x.repeater, x.n, bar(x.n, mr)])));
   mk("Latest answers", table(["Text"], d.replies.map(x => [x.text]))); body.append(two);
+}
+// ---- repeaters
+const ago = ts => { const m = Math.round((Date.now() / 1000 - ts) / 60); return m < 1 ? "just now" : m < 90 ? m + " min ago" : Math.round(m / 60) + " h ago"; };
+async function saveRepeaters(list) { await post("/omit/api/settings", {config: {repeaters: list.map(r => ({name: r.name, pubkey: r.pubkey, password: r.password || ""}))}}); loadReps(); }
+async function loadReps() {
+  const body = $("repbody"), d = await get("/omit/api/repeaters").catch(() => null), st = await get("/omit/api/settings").catch(() => null);
+  if (!d || d.error || !st) { body.textContent = (d && d.error) || "Connect a companion radio first."; return; }
+  const configured = st.config.repeaters || [];
+  body.replaceChildren(el("p", "", "Repeaters you add here are logged in to every " + st.config.repeater_poll_minutes + " minutes, in Operator mode too: battery, noise floor, trace SNR there and back, and the best neighbour each one hears. The admin password stays inside this program and is never shown again. The radio must already know the repeater (it has heard its advert)."));
+  const poll = el("button", "primary", d.polling ? "Polling…" : "Poll now"); poll.onclick = async () => { poll.disabled = true; await post("/omit/api/repeaters/poll").catch(e => alert(e.message)); setTimeout(loadReps, 9000); };
+  body.append(poll);
+  const rows = d.table.map(r => {
+    const remove = el("button", "", "Remove"); remove.onclick = () => { if (confirm("Stop polling " + r.name + "?")) saveRepeaters(configured.filter(c => c.name !== r.name)); };
+    const note = el("span", "", r.note || ""); if (r.note) note.style.color = "var(--orange)";
+    return [r.name, r.ts ? ago(r.ts) : "-", r.bat_mv ? (r.bat_mv / 1000).toFixed(2) + " V (" + r.battery_pct + "%)" : "-", r.uptime_s ? Math.floor(r.uptime_s / 86400) + " d " + Math.floor(r.uptime_s % 86400 / 3600) + " h" : "-", r.noise_floor ?? "-",
+      r.trace_there !== null && r.trace_there !== undefined ? Number(r.trace_there).toFixed(1) + " / " + Number(r.trace_back).toFixed(1) + " dB" : "-", r.best ? r.best.name + " " + (r.best.snr >= 0 ? "+" : "") + r.best.snr.toFixed(1) + " dB" : "-", note, remove];
+  });
+  const t = table(["Repeater", "Last poll", "Battery", "Uptime", "Noise dBm", "Trace SNR there / back", "Best neighbour", "Note", ""], rows); t.style.marginTop = "10px"; body.append(t);
+  const add = el("div", "card"); add.style.marginTop = "12px"; add.append(el("h2", "", "Add a repeater"));
+  const sel = el("select"); sel.append(Object.assign(el("option", "", "Choose a repeater the radio has heard"), {value: ""}));
+  for (const k of d.known) if (!configured.some(c => c.pubkey === k.pubkey)) { const o = el("option", "", k.name + " (" + k.pubkey.slice(0, 8) + ")"); o.value = k.pubkey; o.dataset.name = k.name; sel.append(o); }
+  const nm = el("input"); nm.placeholder = "Name"; const pw = el("input"); pw.type = "password"; pw.placeholder = "Admin password"; pw.autocomplete = "new-password";
+  sel.onchange = () => { nm.value = sel.selectedOptions[0].dataset.name || ""; };
+  const go = el("button", "primary", "Add and poll"); go.onclick = async () => { if (!sel.value || !nm.value.trim() || !pw.value) { alert("Choose a repeater, give it a name and type its admin password."); return; }
+    try { await saveRepeaters([...configured, {name: nm.value.trim(), pubkey: sel.value, password: pw.value}]); await post("/omit/api/repeaters/poll"); setTimeout(loadReps, 9000); } catch (e) { alert(e.message); } };
+  const row = el("div"); row.style.cssText = "display:flex;gap:8px;flex-wrap:wrap"; row.append(sel, nm, pw, go); add.append(row); body.append(add);
 }
 // ---- settings
 const FIELDS = [

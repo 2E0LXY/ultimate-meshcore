@@ -47,11 +47,21 @@ class Runtime:
 
     # ---- settings
     def settings(self):
-        return {"config": self.cfg, "texts": self.texts, "defaults": {"config": C.DEFAULTS, "texts": T.DEFAULT_TEXTS}}
+        """What the page may see. Repeater admin passwords never leave this program: the page only learns
+        whether one is set."""
+        shown = json.loads(json.dumps(self.cfg))
+        shown["repeaters"] = [{"name": r.get("name", ""), "pubkey": r.get("pubkey", ""), "password_set": bool(r.get("password"))}
+                              for r in shown.get("repeaters", [])]
+        return {"config": shown, "texts": self.texts, "defaults": {"config": C.DEFAULTS, "texts": T.DEFAULT_TEXTS}}
 
     def save_settings(self, config=None, texts=None):
         """Check, write and apply new settings. Returns a list of problems; empty means saved."""
         new_cfg = C.merge(self.cfg, config or {})
+        if config and "repeaters" in config:                  # a blank password means "keep the one I have"
+            old = {r.get("pubkey", "").lower(): r.get("password", "") for r in self.cfg.get("repeaters", [])}
+            new_cfg["repeaters"] = [{"name": str(r.get("name", "")).strip(), "pubkey": str(r.get("pubkey", "")).strip().lower(),
+                                     "password": r.get("password") or old.get(str(r.get("pubkey", "")).strip().lower(), "")}
+                                    for r in config["repeaters"]]
         problems = C.check(new_cfg)
         new_texts = dict(self.texts)
         for k, v in (texts or {}).items():
@@ -66,6 +76,6 @@ class Runtime:
         self.cfg, self.texts = new_cfg, new_texts
         (self.dir / "config.json").write_text(json.dumps(self.cfg, indent=1), encoding="utf-8")
         (self.dir / "texts.json").write_text(json.dumps(self.texts, indent=1, ensure_ascii=False), encoding="utf-8")
-        if self.backend is not None:                       # apply at once: a new engine with the same radio
-            self.attach(self.backend)
+        if self.engine is not None:                        # applied at once, without losing what the radio told us
+            self.engine.reconfigure(self.cfg, self.texts)
         return []

@@ -9,6 +9,7 @@ import time
 
 from . import frames as F
 from .bot import Bot
+from .repeaters import Monitor
 
 
 class Engine:
@@ -25,7 +26,9 @@ class Engine:
         self.events = collections.deque(maxlen=100)
         self.started_at = now()
         self.tasks = []
+        self.waiters = []                                     # (match function, future): answers someone is waiting for
         self._seq = 0
+        self.monitor = Monitor(self)
         if self.bot.node_name == "" and getattr(backend, "me", None):
             self.bot.node_name = backend.me.get("name", "")
         backend.listeners.append(self.on_frame)
@@ -58,6 +61,9 @@ class Engine:
             f = F.parse(bytes(frame))
             if f is None:
                 return
+            for entry in list(self.waiters):
+                if not entry[1].done() and entry[0](f):
+                    entry[1].set_result(f)
             kind = f["kind"]
             if kind == "log_rx":
                 self._on_log_rx(f)
@@ -137,6 +143,8 @@ class Engine:
             self.tasks.append(asyncio.ensure_future(self._answer(rec, decision)))
 
     def _on_contact_msg(self, f):
+        if f["txt_type"] == F.TXT_CLI:
+            return                                              # a repeater answering a command: not a chat message
         pk = next((k for k in self.contacts if k.startswith(f["prefix"])), None)
         sender = self.contacts[pk]["name"] if pk else f["prefix"]
         rec = {"ts": self.now(), "sender_ts": f["timestamp"], "channel_idx": -1, "channel_name": "DM", "sender": sender,
@@ -201,6 +209,7 @@ class Engine:
         except Exception:
             self.event("warn", "contacts did not load yet")
         self.tasks.append(asyncio.ensure_future(self.beacon_loop()))
+        self.tasks.append(asyncio.ensure_future(self.monitor.loop()))
         self.event("ok", "chat bot started in " + self.bot.mode + " mode")
 
     def stop(self):
@@ -208,6 +217,18 @@ class Engine:
             t.cancel()
         if self.on_frame in self.backend.listeners:
             self.backend.listeners.remove(self.on_frame)
+
+    def reconfigure(self, cfg, texts=None):
+        """New settings, applied in place: the feed, counters, contacts and mode are kept."""
+        import copy
+        self.cfg = cfg
+        self.bot.cfg = cfg
+        if texts is not None:
+            self.bot.texts = copy.deepcopy(texts)
+        if cfg.get("node_name"):
+            self.bot.node_name = cfg["node_name"]
+        self.channels.update({int(k): v for k, v in cfg.get("channels", {}).items() if int(k) not in self.channels})
+        self.event("ok", "settings applied")
 
     def set_mode(self, mode):
         self.bot.set_mode(mode)

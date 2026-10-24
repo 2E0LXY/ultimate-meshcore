@@ -88,6 +88,18 @@ def setup(app, state):
                    "relays": db.relay_counts(now, hours), "beacons": db.beacon_summary(now, hours),
                    "repeaters": db.last_repeater_status(), "replies": db.recent_replies(10)})
 
+    async def api_repeaters(request):
+        await need_engine(request)
+        m = engine().monitor
+        return js({"table": m.table(), "known": m.known_repeaters(), "polling": m.running})
+
+    async def api_repeaters_poll(request):
+        await need_engine(request)
+        await body(request)
+        import asyncio
+        asyncio.ensure_future(engine().monitor.poll_all())
+        return js({"ok": True})
+
     async def api_settings_get(request):
         rt = getattr(state, "omit", None)
         return js(rt.settings())
@@ -104,5 +116,7 @@ def setup(app, state):
     app.router.add_post("/omit/api/send", api_send)
     app.router.add_post("/omit/api/beacon", api_beacon)
     app.router.add_get("/omit/api/dashboard", api_dashboard)
+    app.router.add_get("/omit/api/repeaters", api_repeaters)
+    app.router.add_post("/omit/api/repeaters/poll", api_repeaters_poll)
     app.router.add_get("/omit/api/settings", api_settings_get)
     app.router.add_post("/omit/api/settings", api_settings_post)
