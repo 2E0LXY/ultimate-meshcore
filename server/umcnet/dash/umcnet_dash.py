@@ -13,7 +13,7 @@ CFG = {
     "mqtt_host": os.environ.get("DASH_MQTT_HOST", "127.0.0.1"), "mqtt_port": int(os.environ.get("DASH_MQTT_PORT", "1884")),
     "mqtt_user": os.environ.get("DASH_MQTT_USER", "dash"), "mqtt_pass_file": os.environ.get("DASH_MQTT_PASS_FILE", "/opt/umcnet-dash/mqtt.pass"),
     "http_host": os.environ.get("DASH_HTTP_HOST", "127.0.0.1"), "http_port": int(os.environ.get("DASH_HTTP_PORT", "9102")),
-    "data": os.environ.get("DASH_DATA", "/var/lib/umcnet-dash"), "users": os.environ.get("DASH_USERS", "/opt/umcnet/users.json"),
+    "data": os.environ.get("DASH_DATA", "/var/lib/umcnet-dash"), "users": os.environ.get("DASH_USERS", "/var/lib/umcnet-dash/accounts.json"),
     "unit": os.environ.get("DASH_UNIT", "umcnet-mosquitto"), "host": os.environ.get("DASH_HOST", "net.2e0lxy.uk"),
     "services": os.environ.get("DASH_SERVICES", "umcnet-mosquitto,caddy,umcnet-dash").split(","),
     "static": os.environ.get("DASH_STATIC", os.path.join(os.path.dirname(os.path.abspath(__file__)), "dash.html")),

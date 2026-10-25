@@ -21,7 +21,7 @@ python3 -m py_compile /opt/umcnet-dash/umcnet_dash.py.new
 mv /opt/umcnet-dash/umcnet_dash.py.new /opt/umcnet-dash/umcnet_dash.py; mv /opt/umcnet-dash/dash.html.new /opt/umcnet-dash/dash.html
 mv /opt/umcnet-dash/umcnet-dash.service.new /etc/systemd/system/umcnet-dash.service
 chmod 644 /opt/umcnet-dash/umcnet_dash.py /opt/umcnet-dash/dash.html
-[ -f /opt/umcnet/users.json ] && chgrp umcnet-dash /opt/umcnet/users.json && chmod 640 /opt/umcnet/users.json || true
+/opt/umcnet/umcnet-user export          # the dashboard keeps its own copy of the account list (no passwords)
 
 # the broker account the dashboard listens with
 if [ ! -s /opt/umcnet-dash/mqtt.pass ]; then

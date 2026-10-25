@@ -44,9 +44,22 @@ def save(users):
     with open(tmp, "w") as f:
         json.dump(users, f, indent=1, sort_keys=True)
     os.chmod(tmp, 0o640)
-    try: shutil.chown(tmp, group="umcnet-dash")     # the dashboard reads the account list; nobody else needs to
-    except (LookupError, PermissionError): pass
     os.replace(tmp, USERS)
+    export(users)
+
+
+def export(users):
+    """The dashboard may not enter /opt/umcnet, so it gets its own copy of the account list: names, roles and
+    device ids only (passwords live in the broker's password file and are never copied)."""
+    d = "/var/lib/umcnet-dash"
+    if not os.path.isdir(d):
+        return
+    tmp = os.path.join(d, "accounts.json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(users, f, indent=1, sort_keys=True)
+    shutil.chown(tmp, "umcnet-dash", "umcnet-dash")
+    os.chmod(tmp, 0o640)
+    os.replace(tmp, os.path.join(d, "accounts.json"))
 
 
 def own(path):
@@ -100,10 +113,12 @@ def opt(argv, flag):
 
 
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("add", "remove", "list", "device"):
+    if len(argv) < 2 or argv[1] not in ("add", "remove", "list", "device", "export"):
         print(__doc__)
         return 2
     users = load()
+    if argv[1] == "export":
+        export(load()); print("account list copied for the dashboard"); return
     if argv[1] == "list":
         for n, i in sorted(users.items()):
             dev = i.get("device", "")
