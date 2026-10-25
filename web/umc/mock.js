@@ -31,13 +31,14 @@
     net: {sta: {connected: !setup, ssid: "HomeNet", ip: "192.168.1.77", gw: "192.168.1.1", rssi: -58, ch: 6, mac: "AA:BB:CC:DD:EE:FF"},
       ap: {active: setup, ssid: "UMC-Setup-D9C4", ip: "192.168.4.1", clients: 1, mode: "auto"}, hostname: state["net.hostname"], mdns: true, networks: 1, setup, time_sync: true, wifi: true},
     auth_required: !setup && !sessionStorage.getItem("umc_token")});
+  const T0 = Date.now(), el = () => (Date.now() - T0) / 1000;        // counters that move while the preview is open
   const cmd = c => {
     if (c === "ver") return "v1.17.1 (Build: 14-Aug-2026)";
     if (c === "board") return "Heltec V3";
     if (c === "clock") return new Date().toISOString().slice(11, 16) + " - " + new Date().toLocaleDateString("en-GB") + " UTC";
-    if (c === "stats-core") return JSON.stringify({battery_mv: 4052, uptime_secs: 93712, errors: 0, queue_len: 0});
-    if (c === "stats-radio") return JSON.stringify({noise_floor: -103, last_rssi: -97, last_snr: 6.25, tx_air_secs: 48, rx_air_secs: 311});
-    if (c === "stats-packets") return JSON.stringify({recv: 1204, sent: 377, flood_tx: 201, direct_tx: 176, flood_rx: 950, direct_rx: 254, recv_errors: 3});
+    if (c === "stats-core") return JSON.stringify({battery_mv: 3870, uptime_secs: 93712 + Math.floor(el()), errors: 0, queue_len: 1});
+    if (c === "stats-radio") return JSON.stringify({noise_floor: -103 + Math.round(2 * Math.sin(el() / 9)), last_rssi: -97, last_snr: 6.25, tx_air_secs: Math.floor(48 + el() * 0.06), rx_air_secs: Math.floor(311 + el() * 0.4)});
+    if (c === "stats-packets") return (() => { const rx = 1204 + Math.floor(el() * 0.35), tx = 377 + Math.floor(el() * 0.12); return JSON.stringify({recv: rx, sent: tx, flood_tx: Math.floor(tx * 0.53), direct_tx: Math.ceil(tx * 0.47), flood_rx: Math.floor(rx * 0.79), direct_rx: Math.ceil(rx * 0.21), recv_errors: 3}); })();
     if (c === "memory") return JSON.stringify({heap_free: 128400, heap_min: 98112, heap_max: 65524, psram_free: 0, psram_min: 0, psram_max: 0});
     if (c === "neighbors") return "A1B2C3D4:340:50\n9F00AB12:5400:-18";
     if (c === "region") return "* F\n gb F\n  gb-yor^ F\n  gb-nwk F";
@@ -139,7 +140,11 @@
     if (url.startsWith("/api/scan")) return [{ssid: "HomeNetwork 2.4G", rssi: -48, ch: 6, auth: "wpa2"}, {ssid: "BT-Hub", rssi: -71, ch: 11, auth: "wpa2"}, {ssid: "Guest", rssi: -80, ch: 1, auth: "open"}];
     if (url === "/api/traffic") return {rx_total: 1204, tx_total: 377, packets: [
       {age: 2, tx: false, type: "CHAN", flood: true, hops: 3, rssi: -97, snr: 6.25, len: 58}, {age: 3, tx: true, type: "CHAN", flood: true, hops: 0, rssi: 0, snr: 0, len: 59},
-      {age: 20, tx: false, type: "ADVERT", flood: true, hops: 1, rssi: -88, snr: 9.5, len: 140}, {age: 75, tx: false, type: "ACK", flood: false, hops: 2, rssi: -103, snr: -2.25, len: 12}]};
+      {age: 20, tx: false, type: "ADVERT", flood: true, hops: 1, rssi: -88, snr: 9.5, len: 140}, {age: 31, tx: false, type: "ADVERT", flood: true, hops: 0, rssi: -74, snr: 11, len: 140},
+      {age: 44, tx: false, type: "MSG", flood: false, hops: 2, rssi: -101, snr: 3.5, len: 64}, {age: 52, tx: true, type: "ACK", flood: false, hops: 0, rssi: 0, snr: 0, len: 12},
+      {age: 60, tx: false, type: "CHAN", flood: true, hops: 4, rssi: -108, snr: -1.5, len: 61}, {age: 75, tx: false, type: "ACK", flood: false, hops: 2, rssi: -103, snr: -2.25, len: 12},
+      {age: 90, tx: false, type: "PATH", flood: true, hops: 2, rssi: -95, snr: 5.25, len: 48}, {age: 110, tx: false, type: "ADVERT", flood: true, hops: 2, rssi: -99, snr: 4.5, len: 140},
+      {age: 140, tx: false, type: "CHAN", flood: true, hops: 1, rssi: -90, snr: 8.0, len: 55}, {age: 170, tx: true, type: "ADVERT", flood: true, hops: 0, rssi: 0, snr: 0, len: 140}]};
     if (url === "/api/routes") return {routes: [
       {key: "271e2ee5a1b2", name: "Leeds Hill", type: "repeater", hops: 0, hash: 1, path: "", pin: "", snr: 12.5, ago: 95, adverts: 4},
       {key: "da8f72dfcc34", name: "Wakefield Roof", type: "repeater", hops: 1, hash: 1, path: "27", pin: "", snr: 11.8, ago: 320, adverts: 2},

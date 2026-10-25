@@ -62,6 +62,62 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;
 .progress{height:8px;background:var(--line);border-radius:8px;overflow:hidden}.progress i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
 #menuBtn{display:none}
 @media (max-width:820px){#app{display:block}nav{position:fixed;left:0;top:0;z-index:30;transform:translateX(-100%);transition:.2s;box-shadow:0 0 30px #0005}nav.open{transform:none}#menuBtn{display:inline-block}main{padding:14px 16px 60px}.field{grid-template-columns:1fr}.field .act{justify-self:start}}
+/* ---- Dashboard: dials, charts, connections and data flow ---- */
+.dash2{--g:#2fe27a;--g2:#8dffb0;--cd:#0d1b17;--ln:#1b3a30;--tx:#e9f7ef;--mu:#7fa392;--am:#f2c14e;--bl:#4aa8ff;--pu:#a58bff;--rd:#ff5d6c;color:var(--tx);border-radius:16px;padding:16px;
+  background:radial-gradient(1100px 480px at 15% -8%,#10301f 0,transparent 62%),radial-gradient(900px 420px at 100% 0,#0b2a2a 0,transparent 60%),#07100d}
+.dash2 a{color:var(--g)}
+.dash2 .hd{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px}
+.dash2 .hd h1{margin:0;font-size:26px;letter-spacing:.2px}.dash2 .hd h1 span{color:var(--g)}
+.dash2 .hd p{margin:2px 0 0;color:var(--mu);font-size:13px}
+.dash2 .hd .sp{flex:1}
+.dash2 .pl{display:inline-flex;gap:6px;align-items:center;padding:4px 11px;border-radius:99px;background:#0d2219;border:1px solid var(--ln);color:var(--mu);font-size:12px}
+.dash2 .pl.ok{color:var(--g)}.dash2 .pl.warn{color:var(--am)}.dash2 .pl.bad{color:var(--rd)}
+.dash2 .dot{width:8px;height:8px;border-radius:50%;background:var(--mu);display:inline-block;box-shadow:0 0 8px currentColor}
+.dash2 .dot.ok{background:var(--g);color:var(--g)}.dash2 .dot.warn{background:var(--am);color:var(--am)}.dash2 .dot.bad{background:var(--rd);color:var(--rd)}
+.dash2 .rng button,.dash2 .tool{background:#0d2219;color:var(--mu);border:1px solid var(--ln);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px}
+.dash2 .rng button.on{color:#06140c;background:var(--g);border-color:var(--g)}
+.dash2 .tool:hover,.dash2 .rng button:hover{border-color:var(--g);color:var(--tx)}
+.dash2 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(172px,1fr));gap:10px;margin-bottom:12px}
+.dash2 .k,.dash2 .pn{background:linear-gradient(180deg,#0e1f19,#0b1814);border:1px solid var(--ln);border-radius:14px;padding:14px;box-shadow:0 0 0 1px #08140f inset,0 8px 24px #0006}
+.dash2 .k{display:flex;gap:10px;align-items:center;position:relative;padding:12px}.dash2 .k>div:nth-child(2){min-width:0;flex:1}
+.dash2 .k .ic{flex:none;width:40px;height:40px;border-radius:11px;background:#0f3a28;color:var(--g);display:grid;place-items:center;font-size:21px;box-shadow:0 0 16px #22d36a40;border:1px solid #1f6a45}
+.dash2 .k small{color:var(--mu);font-size:11.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dash2 .k b{font-size:24px;line-height:1.15;display:block}
+.dash2 .tr{font-size:12px;color:var(--mu)}.dash2 .tr.up{color:var(--g)}.dash2 .tr.down{color:var(--am)}.dash2 .tr.bad{color:var(--rd)}
+.dash2 .k svg.sp{position:absolute;right:10px;bottom:8px;width:56px;height:22px;opacity:.85}
+.dash2 .panels{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
+.dash2 .s12{grid-column:span 12}.dash2 .s8{grid-column:span 8}.dash2 .s7{grid-column:span 7}.dash2 .s6{grid-column:span 6}.dash2 .s5{grid-column:span 5}.dash2 .s4{grid-column:span 4}
+@media(max-width:1000px){.dash2 .s8,.dash2 .s7,.dash2 .s6,.dash2 .s5,.dash2 .s4{grid-column:span 12}}
+.dash2 .pn h3{margin:0 0 8px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}.dash2 .pn h3 em{font-style:normal;color:var(--mu);font-weight:400;font-size:12px;margin-left:auto}
+.dash2 .chart{position:relative}.dash2 .chart svg{width:100%;height:auto;display:block}
+.dash2 .gl{stroke:#17342a;stroke-width:1}.dash2 .ax{fill:#6f9483;font-size:10px}
+.dash2 .ln{filter:drop-shadow(0 0 4px currentColor)}
+.dash2 .empty{padding:36px 10px;text-align:center;color:var(--mu);font-size:13px}
+.dash2 .tip{position:absolute;pointer-events:none;background:#06130d;border:1px solid var(--g);border-radius:8px;padding:6px 9px;font-size:12px;white-space:nowrap;z-index:5;display:none}
+.dash2 .lgd{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mu);margin-top:4px}.dash2 .lgd i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.dash2 .dials{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px}
+.dash2 .gauge{text-align:center}.dash2 .gauge svg{width:100%;max-width:170px}
+.dash2 .gt{fill:none;stroke:#143027;stroke-width:9;stroke-linecap:round}.dash2 .gv{fill:none;stroke-width:9;stroke-linecap:round}
+.dash2 .gn{fill:var(--tx);font-size:19px;font-weight:700}.dash2 .gs{fill:var(--mu);font-size:7.5px}
+.dash2 .gl2{color:var(--mu);font-size:12px;margin-top:-6px}
+.dash2 .dn{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.dash2 .dn svg{width:150px;flex:none}
+.dash2 .dn ul{list-style:none;margin:0;padding:0;font-size:12.5px;flex:1;min-width:140px}.dash2 .dn li{display:flex;gap:7px;align-items:center;padding:2px 0}.dash2 .dn li b{margin-left:auto;font-weight:600}.dash2 .dn li s{text-decoration:none;color:var(--mu)}
+.dash2 .dn .ct{fill:var(--tx);font-size:18px;font-weight:700}.dash2 .dn .cs{fill:var(--mu);font-size:7px}
+.dash2 table{width:100%;border-collapse:collapse;font-size:13px}.dash2 th{color:var(--mu);font-weight:500;text-align:left;font-size:12px;padding:4px 6px}.dash2 td{padding:6px;border-top:1px solid #12291f}
+.dash2 .bar{height:7px;border-radius:4px;background:#12291f;min-width:70px}.dash2 .bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#1fb85c,var(--g2))}
+.dash2 .tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;background:#10301f;color:var(--g)}.dash2 .tag.tx{background:#33280f;color:var(--am)}
+.dash2 .conn{display:flex;flex-direction:column;gap:2px}.dash2 .conn div{display:flex;gap:10px;align-items:center;padding:7px 4px;border-top:1px solid #12291f}.dash2 .conn div:first-child{border-top:0}
+.dash2 .conn b{font-weight:600}.dash2 .conn span{color:var(--mu);font-size:12px;margin-left:auto;text-align:right}
+.dash2 .flow svg{width:100%;height:auto}
+.dash2 .fn rect{fill:#0c2018;stroke:#1f6a45;stroke-width:1.2}.dash2 .fn.off rect{stroke:#2a3a34;fill:#0a1511}.dash2 .fn text{fill:var(--tx);font-size:12px;font-weight:600}.dash2 .fn .sb{fill:var(--mu);font-size:10px;font-weight:400}
+.dash2 .fn.hub rect{stroke:var(--g);stroke-width:2;filter:drop-shadow(0 0 10px #2fe27a66)}
+.dash2 .fe{fill:none;stroke:#1d3d31;stroke-width:2.2}.dash2 .fe.on{stroke:var(--g);stroke-dasharray:7 9;animation:dfl var(--d,1.6s) linear infinite;filter:drop-shadow(0 0 3px #2fe27a88)}
+.dash2 .fe.tx.on{stroke:var(--am);filter:drop-shadow(0 0 3px #f2c14e88)}.dash2 .fe.net.on{stroke:var(--bl);filter:drop-shadow(0 0 3px #4aa8ff88)}
+.dash2 .fl{fill:var(--mu);font-size:10px}
+@keyframes dfl{to{stroke-dashoffset:-32}}
+.dash2 .digi{white-space:nowrap;font-family:ui-monospace,Consolas,monospace;font-size:30px;letter-spacing:2px;color:var(--g2);text-shadow:0 0 14px #2fe27a88}
+.dash2 .qa{display:flex;gap:8px;flex-wrap:wrap}
+.dash2 .warnb{background:#33280f;border:1px solid var(--am);color:var(--am);border-radius:10px;padding:8px 12px;margin-bottom:12px}
+.dash2 .fe.on{marker-end:url(#dar-g)}.dash2 .fe.tx.on{marker-end:url(#dar-a)}.dash2 .fe.net.on{marker-end:url(#dar-b)}
 </style>
 </head>
 <body>
@@ -546,47 +602,222 @@ const parseJson = r => { try { return JSON.parse(val(r)); } catch { return null;
 const fmtUp = s => { s = +s || 0; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + "d " : "") + h + "h " + m + "m"; };
 
 let dashTimer = null;
+// ===== Dashboard: KPI cards, dials, history charts, connections and live data flow =====
+// History is kept in this browser (one sample a minute for 24 h, per device) because the device itself
+// keeps counters, not a time series. Keep this page open and the charts fill in.
+const D = {cols: ["t", "rx", "tx", "frx", "ftx", "err", "noise", "rssi", "snr", "batt", "heap", "txair", "rxair"], rows: [], saved: 0, sampler: null, uid: 0, range: 3600, routes: null, routesAt: 0};
+D.key = () => "umc_hist1:" + (INFO ? INFO.name : "");
+D.load = () => { try { const a = JSON.parse(localStorage.getItem(D.key()) || "[]"), cut = Date.now() / 1000 - 86400; D.rows = a.filter(r => Array.isArray(r) && r[0] >= cut); } catch { D.rows = []; } };
+D.save = () => { try { localStorage.setItem(D.key(), JSON.stringify(D.rows)); D.saved = Date.now(); } catch {} };
+D.add = row => {
+  const p = D.rows[D.rows.length - 1]; if (p && row[0] - p[0] < 45) return;
+  D.rows.push(row); const cut = row[0] - 86400; while (D.rows.length && D.rows[0][0] < cut) D.rows.shift();
+  if (Date.now() - D.saved > 300000) D.save();
+};
+D.fetch = async () => {
+  const r = await api.cli(["stats-core", "stats-radio", "stats-packets", "memory"]);
+  const core = parseJson(r[0]) || {}, radio = parseJson(r[1]) || {}, pk = parseJson(r[2]) || {}, mem = parseJson(r[3]) || {};
+  D.add([Math.floor(Date.now() / 1000), pk.recv ?? null, pk.sent ?? null, pk.flood_rx ?? null, pk.flood_tx ?? null, pk.recv_errors ?? null, radio.noise_floor ?? null,
+    radio.last_rssi ?? null, radio.last_snr ?? null, core.battery_mv ?? null, mem.heap_free ?? null, radio.tx_air_secs ?? null, radio.rx_air_secs ?? null]);
+  return {core, radio, pk, mem};
+};
+D.start = () => { if (D.sampler) return; D.load(); window.addEventListener("pagehide", D.save); D.sampler = setInterval(() => D.fetch().catch(() => {}), 60000); D.fetch().catch(() => {}); };
+
+// ---- numbers from the history
+D.ci = k => D.cols.indexOf(k);
+D.sum = (r, keys) => keys.reduce((s, k) => s == null || r[D.ci(k)] == null ? null : s + r[D.ci(k)], 0);
+// mode "rate": counter increase per minute; "pct": counter (seconds) increase as a share of elapsed time; "avg": the value itself
+D.series = (keys, win, bucket, mode) => {
+  const now = Date.now() / 1000, from = now - win, bins = new Map(), rows = D.rows.filter(r => r[0] >= from - 1800);
+  const put = (t, v) => { if (t < from || v == null || !isFinite(v)) return; const b = Math.floor(t / bucket) * bucket, a = bins.get(b) || [0, 0]; a[0] += v; a[1]++; bins.set(b, a); };
+  if (mode === "avg") rows.forEach(r => put(r[0], D.sum(r, keys)));
+  else for (let i = 1; i < rows.length; i++) {
+    const p = rows[i - 1], c = rows[i], dt = c[0] - p[0], a = D.sum(p, keys), b = D.sum(c, keys);
+    if (dt <= 0 || dt > 900 || a == null || b == null || b < a) continue;       // a gap or a restart: skip it
+    put(c[0], mode === "rate" ? (b - a) / dt * 60 : Math.min(100, (b - a) / dt * 100));
+  }
+  return [...bins].sort((x, y) => x[0] - y[0]).map(([t, a]) => [Math.min(now, t + bucket / 2), a[0] / a[1]]);
+};
+D.total = (keys, from, to) => {            // how much a counter rose between two times; null when the history does not cover it
+  const rows = D.rows.filter(r => r[0] >= from - 120 && r[0] <= to); let s = 0, n = 0;
+  for (let i = 1; i < rows.length; i++) { const dt = rows[i][0] - rows[i - 1][0], a = D.sum(rows[i - 1], keys), b = D.sum(rows[i], keys); if (dt > 0 && dt <= 900 && a != null && b != null && b >= a) { s += b - a; n++; } }
+  return n >= 3 ? s : null;
+};
+D.trend = keys => {
+  const now = Date.now() / 1000, cur = D.total(keys, now - 3600, now), prev = D.total(keys, now - 7200, now - 3600);
+  return {cur, prev, pct: cur != null && prev ? (cur - prev) / prev * 100 : null};
+};
+D.win = () => ({3600: [3600, 60], 21600: [21600, 300], 86400: [86400, 900]}[D.range]);
+
+// ---- drawing
+D.fmt = v => v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, "");
+D.hm = t => new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+D.nice = v => { const p = 10 ** Math.floor(Math.log10(Math.max(v, 1e-9))); return ([1, 2, 5, 10].find(k => k * p >= v) || 10) * p; };
+D.empty = t => `<div class="empty">${esc(t)}</div>`;
+D.area = (series, o = {}) => {
+  const W = o.w || 640, H = o.h || 230, L = 38, R = 12, T = 12, B = 26, id = "dg" + (++D.uid), pts = series.flatMap(s => s.data);
+  if (pts.length < 2) return D.empty("Collecting data. The chart fills in as this page stays open (one point a minute).");
+  const x0 = Math.min(...pts.map(p => p[0])), x1 = Math.max(...pts.map(p => p[0])), ym = D.nice(Math.max(...pts.map(p => p[1]), o.min || 1) * 1.05);
+  const X = t => L + (t - x0) / ((x1 - x0) || 1) * (W - L - R), Y = v => T + (1 - v / ym) * (H - T - B), f = o.fmt || D.fmt;
+  let g = ""; for (let i = 0; i <= 4; i++) { const v = ym * i / 4, y = Y(v); g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" class="gl"/><text x="${L - 6}" y="${y + 3}" class="ax" text-anchor="end">${f(v)}</text>`; }
+  for (let i = 0; i <= 4; i++) { const t = x0 + (x1 - x0) * i / 4; g += `<text x="${X(t)}" y="${H - 7}" class="ax" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${D.hm(t)}</text>`; }
+  const defs = series.map((s, i) => `<linearGradient id="${id}${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".42"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient>`).join("");
+  const body = series.map((s, i) => { if (!s.data.length) return ""; const d = s.data.map((p, j) => (j ? "L" : "M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1)).join(" "), last = s.data[s.data.length - 1];
+    return `<path d="${d} L${X(last[0]).toFixed(1)} ${Y(0)} L${X(s.data[0][0]).toFixed(1)} ${Y(0)}Z" fill="url(#${id}${i})"/><path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" class="ln" style="color:${s.color}"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="3.6" fill="${s.color}"/>`; }).join("");
+  const meta = esc(JSON.stringify({x0, x1, L, R, W, f: o.unit || "", s: series.map(s => ({n: s.name, c: s.color, d: s.data}))}));
+  return `<div class="chart" data-m="${meta}"><svg viewBox="0 0 ${W} ${H}"><defs>${defs}</defs>${g}${body}</svg><div class="tip"></div></div>
+    <div class="lgd">${series.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>`;
+};
+D.bars = (rx, tx, o = {}) => {
+  const W = 640, H = o.h || 230, L = 38, R = 12, T = 12, B = 26, map = new Map();
+  rx.forEach(([t, v]) => map.set(Math.round(t), [v, 0])); tx.forEach(([t, v]) => { const a = map.get(Math.round(t)) || [0, 0]; a[1] = v; map.set(Math.round(t), a); });
+  const rows = [...map].sort((a, b) => a[0] - b[0]); if (rows.length < 2) return D.empty("Collecting data.");
+  const ym = D.nice(Math.max(...rows.map(r => r[1][0] + r[1][1]), 1) * 1.1), bw = Math.max(2, (W - L - R) / rows.length - 2), Y = v => T + (1 - v / ym) * (H - T - B);
+  let g = ""; for (let i = 0; i <= 4; i++) { const v = ym * i / 4; g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" class="gl"/><text x="${L - 6}" y="${Y(v) + 3}" class="ax" text-anchor="end">${D.fmt(v)}%</text>`; }
+  const id = "db" + (++D.uid); const bars = rows.map(([t, [a, b]], i) => { const x = L + i * ((W - L - R) / rows.length) + 1; return `<rect x="${x.toFixed(1)}" y="${Y(a + b).toFixed(1)}" width="${bw.toFixed(1)}" height="${(Y(0) - Y(a + b)).toFixed(1)}" rx="2" fill="url(#${id}a)"/><rect x="${x.toFixed(1)}" y="${Y(b).toFixed(1)}" width="${bw.toFixed(1)}" height="${(Y(0) - Y(b)).toFixed(1)}" rx="2" fill="url(#${id}b)"/>`; }).join("");
+  const xs = [0, 1, 2, 3, 4].map(i => { const r = rows[Math.min(rows.length - 1, Math.round((rows.length - 1) * i / 4))]; return `<text x="${L + (W - L - R) * i / 4}" y="${H - 7}" class="ax" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${D.hm(r[0])}</text>`; }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}"><defs><linearGradient id="${id}a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8dffb0"/><stop offset="1" stop-color="#1fb85c"/></linearGradient><linearGradient id="${id}b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2c14e"/><stop offset="1" stop-color="#b8861c"/></linearGradient></defs>${g}${bars}${xs}</svg>
+    <div class="lgd"><span><i style="background:#2fe27a"></i>Receiving</span><span><i style="background:#f2c14e"></i>Transmitting</span></div>`;
+};
+D.spark = (vals, color = "#2fe27a") => {
+  if (vals.length < 2) return ""; const mx = Math.max(...vals, 1e-9), mn = Math.min(...vals, 0), W = 70, H = 28;
+  const d = vals.map((v, i) => (i ? "L" : "M") + (i / (vals.length - 1) * W).toFixed(1) + " " + (H - 3 - (v - mn) / ((mx - mn) || 1) * (H - 6)).toFixed(1)).join(" ");
+  return `<svg class="sp" viewBox="0 0 ${W} ${H}"><path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" style="filter:drop-shadow(0 0 3px ${color})"/></svg>`;
+};
+D.gauge = (v, min, max, label, text, sub, color) => {
+  const pct = v == null || !isFinite(v) ? 0 : Math.max(0, Math.min(1, (v - min) / (max - min))), r = 42, cx = 55, cy = 55, a0 = 135, sw = 270;
+  const pt = a => [cx + r * Math.cos(a * Math.PI / 180), cy + r * Math.sin(a * Math.PI / 180)];
+  const arc = (a, b) => { const [x1, y1] = pt(a), [x2, y2] = pt(b); return `M${x1.toFixed(2)} ${y1.toFixed(2)} A${r} ${r} 0 ${b - a > 180 ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`; };
+  return `<div class="gauge"><svg viewBox="0 0 110 100"><path d="${arc(a0, a0 + sw)}" class="gt"/>${pct > 0.004 ? `<path d="${arc(a0, a0 + sw * Math.min(pct, 0.9999))}" class="gv" stroke="${color}" filter="url(#dglow)"/>` : ""}
+    <text x="55" y="55" class="gn" text-anchor="middle">${esc(text)}</text><text x="55" y="67" class="gs" text-anchor="middle">${esc(sub)}</text></svg><div class="gl2">${esc(label)}</div></div>`;
+};
+D.level = (v, good, warn, higherIsBetter = true) => v == null ? "#7fa392" : (higherIsBetter ? (v >= good ? "#2fe27a" : v >= warn ? "#f2c14e" : "#ff5d6c") : (v <= good ? "#2fe27a" : v <= warn ? "#f2c14e" : "#ff5d6c"));
+D.donut = (parts, centre, sub) => {
+  const tot = parts.reduce((s, p) => s + p.value, 0); if (!tot) return D.empty("Nothing yet.");
+  const r = 42, C = 2 * Math.PI * r; let off = 0;
+  const segs = parts.filter(p => p.value > 0).map(p => { const len = p.value / tot * C, s = `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${p.color}" stroke-width="13" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 60 60)"/>`; off += len; return s; }).join("");
+  return `<div class="dn"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="${r}" fill="none" stroke="#12291f" stroke-width="13"/>${segs}<text x="60" y="62" class="ct" text-anchor="middle">${esc(centre)}</text><text x="60" y="74" class="cs" text-anchor="middle">${esc(sub)}</text></svg>
+    <ul>${parts.map(p => `<li><i style="background:${p.color};width:9px;height:9px;border-radius:50%;display:inline-block"></i>${esc(p.label)}<b>${p.value}</b><s>${(p.value / tot * 100).toFixed(0)}%</s></li>`).join("")}</ul></div>`;
+};
+D.flowEdge = (x1, y1, x2, y2, cls, rate, on, bend = 0) => {
+  const dur = Math.max(.5, Math.min(3, 2.6 - Math.log10(1 + (rate || 0)) * 1.1)).toFixed(2), mx = (x1 + x2) / 2;
+  return `<path class="fe ${cls} ${on ? "on" : ""}" style="--d:${dur}s" d="M${x1} ${y1} C${mx} ${y1 + bend} ${mx} ${y2 + bend} ${x2} ${y2}"/>`;
+};
+D.flow = (f) => {
+  const W = 720, H = 70 + f.nodes.length * 62, cy = H / 2, hub = [360, cy];
+  const right = f.nodes.map((n, i) => ({...n, x: 600, y: 45 + i * ((H - 90) / Math.max(1, f.nodes.length - 1 || 1)) + (f.nodes.length === 1 ? (H - 90) / 2 : 0)}));
+  let e = D.flowEdge(170, cy - 22, 270, cy - 22, "rx", f.rx, f.rx > 0, -6) + D.flowEdge(270, cy + 22, 170, cy + 22, "tx", f.tx, f.tx > 0, 6);
+  right.forEach(n => { e += D.flowEdge(450, cy, 520, n.y, "net", n.rate || 1, n.ok, 0); });
+  const box = (x, y, w, h, title, sub, cls = "") => `<g class="fn ${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12"/><text x="${x + w / 2}" y="${y + h / 2 - 2}" text-anchor="middle">${esc(title)}</text><text x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle" class="sb">${esc(sub)}</text></g>`;
+  const mk = (id, c) => `<marker id="dar-${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`;
+  return `<div class="flow"><svg viewBox="0 0 ${W} ${H}"><defs>${mk("g", "#2fe27a")}${mk("a", "#f2c14e")}${mk("b", "#4aa8ff")}</defs>${e}
+    ${box(30, cy - 36, 140, 72, "LoRa radio", f.freq, f.rx > 0 || f.tx > 0 ? "" : "")}${box(270, cy - 44, 180, 88, f.name, f.role, "hub")}
+    <text x="220" y="${cy - 30}" class="fl" text-anchor="middle">in ${D.fmt(f.rx)}/min</text><text x="220" y="${cy + 40}" class="fl" text-anchor="middle">out ${D.fmt(f.tx)}/min</text>
+    ${right.map(n => box(520, n.y - 24, 180, 48, n.title, n.sub, n.ok ? "" : "off")).join("")}</svg></div>`;
+};
+
+// ---- connection facts
+D.parseMqtt = t => { const m = {}; String(t || "").replace(/^>\s*/, "").split(/\s+/).forEach(w => { const i = w.indexOf(":"); if (i > 0) m[w.slice(0, i)] = w.slice(i + 1); }); return m; };
+
 async function renderDash(view) {
-  view.innerHTML = `<div class="card"><h2 id="dName">…</h2><p class="sub" id="dSub"></p><div class="grid" id="dStats"></div></div>
-    ${has("wifi") ? `<div class="card"><h2>Network</h2><div class="grid" id="dNet"></div></div>` : ""}
-    <div class="card"><h2>Radio</h2><div class="grid" id="dRadio"></div></div>
-    <div class="card"><h2>Quick actions</h2><div class="row">
-      ${roleOk(CL) ? `<button class="btn pri" data-go="chat">Open messages</button><button class="btn" data-q="advert.flood">Flood advert</button><button class="btn" data-q="advert">Zero-hop advert</button>`
-        : `<button class="btn" data-q="advert">Flood advert</button><button class="btn" data-q="advert.zerohop">Zero-hop advert</button>`}
-      <button class="btn" data-q="clocksync">Set clock from this browser</button><button class="btn" data-q="refresh">Refresh</button></div></div>`;
-  const stat = (v, l) => `<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`;
+  const main = document.querySelector("main"); main.style.maxWidth = "none"; view.className = "dash2";
+  view.innerHTML = `<svg width="0" height="0" style="position:absolute"><defs><filter id="dglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>
+    <div class="hd"><div><h1><span id="dName">…</span> Dashboard</h1><p id="dSub"></p></div><div class="sp"></div>
+      <div class="rng" id="dRng"><button data-r="3600" class="on">1 h</button> <button data-r="21600">6 h</button> <button data-r="86400">24 h</button></div>
+      <span class="pl" id="dLive"><i class="dot"></i> loading</span><button class="tool" data-q="refresh">Refresh</button></div>
+    <div id="dBody"></div>`;
+  D.start();
+  let snap = null, uptimeAt = 0, uptimeBase = null;
+  const KP = (ic, label, value, tr, spark = "", id = "") => `<div class="k"><div class="ic">${ic}</div><div><small>${esc(label)}</small><b ${id ? `id="${id}"` : ""}>${value}</b><span class="tr ${tr.cls || ""}">${tr.text || ""}</span></div>${spark}</div>`;
+  const trendOf = (t, unit = "vs previous hour") => t.cur == null ? {text: "collecting history…"} : t.pct == null ? {text: "this hour: " + Math.round(t.cur)} : {cls: t.pct >= 0 ? "up" : "down", text: (t.pct >= 0 ? "▲ " : "▼ ") + Math.abs(t.pct).toFixed(0) + "% " + unit};
+  const draw = () => {
+    if (!snap) return;
+    const {core, radio, pk, mem, net, links, cc, neigh, tf, conn, bridge, freq} = snap, [win, bucket] = D.win(), role = INFO.role;
+    const rxS = D.series(["rx"], win, bucket, "rate"), txS = D.series(["tx"], win, bucket, "rate");
+    const air = D.series(["txair", "rxair"], 3600, 60, "pct"), airH = D.total(["txair", "rxair"], Date.now() / 1000 - 3600, Date.now() / 1000);
+    const txH = D.total(["txair"], Date.now() / 1000 - 3600, Date.now() / 1000), rxH = D.total(["rxair"], Date.now() / 1000 - 3600, Date.now() / 1000);
+    const tRx = D.trend(["rx"]), tTx = D.trend(["tx"]);
+    const rxNow = rxS.length ? rxS[rxS.length - 1][1] : 0, txNow = txS.length ? txS[txS.length - 1][1] : 0;
+    const bat = core.battery_mv ? core.battery_mv / 1000 : null, batPct = bat ? Math.max(0, Math.min(100, Math.round((bat - 3.2) / 1.0 * 100))) : null;
+    const airPct = airH != null ? airH / 3600 * 100 : null;
+    uptimeBase = core.uptime_secs ?? null; uptimeAt = Date.now();
+    const kpis = [
+      KP("⇩", "Received this hour", tRx.cur == null ? esc(String(pk.recv ?? "—")) : Math.round(tRx.cur), tRx.cur == null ? {text: "since boot: " + (pk.recv ?? "—")} : trendOf(tRx), D.spark(rxS.slice(-30).map(p => p[1]))),
+      KP("⇧", "Sent this hour", tTx.cur == null ? esc(String(pk.sent ?? "—")) : Math.round(tTx.cur), tTx.cur == null ? {text: "since boot: " + (pk.sent ?? "—")} : trendOf(tTx), D.spark(txS.slice(-30).map(p => p[1]), "#f2c14e")),
+      KP("◔", "Airtime this hour", airPct == null ? "—" : D.fmt(airPct) + "%", airPct == null ? {text: "collecting history…"} : {text: `receiving ${D.fmt(rxH / 36)}% · sending ${D.fmt(txH / 36)}%`}),
+      roleOk(RS) ? KP("⌖", "Neighbours", neigh ? neigh.length : "—", {text: neigh && neigh.length ? "best SNR " + Math.max(...neigh.map(n => n.snr)).toFixed(1) + " dB" : "none yet"}) : KP("☎", "Contacts / channels", cc ? `${cc.contacts ?? "—"} / ${cc.channels ?? "—"}` : "—", {text: cc ? `${cc.queued ?? 0} waiting for an app` : ""}),
+      KP("⏱", "Uptime", `<span id="kUp" class="digi" style="font-size:22px">${fmtUp(core.uptime_secs)}</span>`, {text: INFO.reset ? "last restart: " + INFO.reset : ""}),
+      KP("🔋", "Battery", bat ? bat.toFixed(2) + " V" : "—", {cls: batPct != null && batPct < 25 ? "bad" : "", text: batPct != null ? `about ${batPct}% full` : "no battery sensor"})].join("");
+    const snrQ = radio.last_snr == null ? null : Math.max(0, Math.min(100, (radio.last_snr + 15) / 30 * 100));
+    const wifi = net.sta && net.sta.connected ? Math.max(0, Math.min(100, (net.sta.rssi + 95) / 55 * 100)) : null;
+    const dials = [
+      D.gauge(batPct, 0, 100, "Battery", batPct == null ? "—" : batPct + "%", bat ? bat.toFixed(2) + " V" : "", D.level(batPct, 50, 25)),
+      D.gauge(radio.last_snr, -20, 15, "Last signal (SNR)", radio.last_snr == null ? "—" : D.fmt(radio.last_snr), "dB", D.level(radio.last_snr, 5, -5)),
+      D.gauge(airPct, 0, 30, "Channel busy", airPct == null ? "—" : D.fmt(airPct) + "%", "airtime", D.level(airPct, 10, 20, false)),
+      D.gauge(radio.noise_floor, -130, -70, "Noise floor", radio.noise_floor == null ? "—" : radio.noise_floor, "dBm", D.level(radio.noise_floor, -105, -95, false)),
+      has("wifi") ? D.gauge(wifi, 0, 100, "WiFi signal", net.sta && net.sta.connected ? net.sta.rssi : "—", net.sta && net.sta.connected ? "dBm" : "offline", D.level(wifi, 60, 35)) : "",
+      D.gauge(mem.heap_free ? mem.heap_free / 1024 : null, 0, 320, "Memory free", mem.heap_free ? Math.round(mem.heap_free / 1024) : "—", "KB", D.level(mem.heap_free ? mem.heap_free / 1024 : null, 80, 40))].join("");
+    const typeCols = {ADVERT: "#2fe27a", CHAN: "#4aa8ff", MSG: "#a58bff", ACK: "#f2c14e", PATH: "#ff8f5a", TRACE: "#5be3d8", REQ: "#e977c5", RESP: "#e977c5"}, mix = {};
+    (tf.packets || []).forEach(p => mix[p.type] = (mix[p.type] || 0) + 1);
+    const mixParts = Object.entries(mix).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({label: k, value: v, color: typeCols[k] || "#7fa392"}));
+    const fd = [{label: "Flood received", value: pk.flood_rx ?? 0, color: "#2fe27a"}, {label: "Direct received", value: pk.direct_rx ?? 0, color: "#4aa8ff"}, {label: "Flood sent", value: pk.flood_tx ?? 0, color: "#f2c14e"}, {label: "Direct sent", value: pk.direct_tx ?? 0, color: "#a58bff"}];
+    const sig = [{name: "Noise floor (dBm)", color: "#ff8f5a", data: D.series(["noise"], win, bucket, "avg").map(p => [p[0], p[1] + 130])}, {name: "Last signal (RSSI, dBm)", color: "#2fe27a", data: D.series(["rssi"], win, bucket, "avg").map(p => [p[0], p[1] + 130])}];
+    const connRows = conn.map(c => `<div><i class="dot ${c.ok ? "ok" : c.warn ? "warn" : "bad"}"></i><b>${esc(c.name)}</b><span>${esc(c.detail)}</span></div>`).join("");
+    const neighRows = neigh && neigh.length ? neigh.slice(0, 8).map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name || "name not heard yet")}</b> <span class="tr">${esc(n.id)}</span></td><td>${n.snr.toFixed(1)} dB</td><td><div class="bar"><i style="width:${Math.max(4, Math.min(100, (n.snr + 20) * 3))}%"></i></div></td><td>${esc(n.ago)}</td></tr>`).join("") : `<tr><td colspan="5" class="tr">No neighbours heard yet.</td></tr>`;
+    const act = (tf.packets || []).slice(0, 9).map(p => `<tr><td><span class="tag ${p.tx ? "tx" : ""}">${p.tx ? "TX" : "RX"}</span></td><td>${esc(p.type)}</td><td>${p.flood ? "flood" : "direct"}</td><td>${p.tx ? "—" : p.hops + " hop" + (p.hops === 1 ? "" : "s")}</td><td>${p.tx ? "—" : p.rssi + " / " + (+p.snr).toFixed(1)}</td><td>${p.age}s</td></tr>`).join("") || `<tr><td colspan="6" class="tr">No packets yet.</td></tr>`;
+    const nodes = []; const sta = net.sta || {}, ap = net.ap || {};
+    if (has("wifi")) nodes.push({title: "WiFi / LAN", sub: sta.connected ? `${sta.ssid} · ${sta.rssi} dBm` : ap.active ? "hotspot " + ap.ssid : "offline", ok: !!sta.connected || !!ap.active});
+    if (roleOk(CL)) nodes.push({title: "Phone / PC apps", sub: links ? `${links.tcp ? links.tcp.clients : 0} WiFi · Bluetooth ${links.ble && links.ble.connected ? "connected" : "idle"}` : "—", ok: !!links && (links.tcp?.clients > 0 || links.ble?.connected)});
+    else nodes.push({title: "This page / apps", sub: "web interface", ok: true});
+    if (has("mqtt")) nodes.push({title: "MQTT / UMC Net", sub: snap.mqttText, ok: snap.mqttUp});
+    if (has("bridge")) nodes.push({title: "Bridge", sub: bridge, ok: /^on|enabled|1/.test(bridge)});
+    const flow = D.flow({nodes, rx: rxNow, tx: txNow, freq, name: val(snap.name) || INFO.name, role: INFO.role});
+    $("#dBody").innerHTML = `<div class="kpis">${kpis}</div>
+      <div class="panels">
+        <div class="pn s7"><h3>Traffic <em>packets per minute</em></h3>${D.area([{name: "Received", color: "#2fe27a", data: rxS}, {name: "Sent", color: "#f2c14e", data: txS}], {unit: "/min"})}</div>
+        <div class="pn s5"><h3>Airtime <em>share of the last hour, per minute</em></h3>${D.bars(D.series(["rxair"], 3600, 120, "pct"), D.series(["txair"], 3600, 120, "pct"))}</div>
+        <div class="pn s12"><h3>Dials <em>live</em></h3><div class="dials">${dials}</div></div>
+        <div class="pn s7"><h3>Data flow <em>what moves where, right now</em></h3>${flow}</div>
+        <div class="pn s5"><h3>Connections</h3><div class="conn">${connRows}</div></div>
+        <div class="pn s6"><h3>Traffic mix <em>last ${(tf.packets || []).length} packets</em></h3>${D.donut(mixParts, String((tf.packets || []).length), "packets")}</div>
+        <div class="pn s6"><h3>Flood and direct <em>since boot</em></h3>${D.donut(fd, String((pk.recv ?? 0) + (pk.sent ?? 0)), "packets")}</div>
+        <div class="pn s12"><h3>Signal <em>noise floor and last RSSI, dBm</em></h3>${D.area(sig, {w: 1100, h: 230, fmt: v => Math.round(v - 130)})}</div>
+        <div class="pn s6"><h3>${roleOk(RS) ? "Neighbours" : "Radio"}</h3>${roleOk(RS) ? `<table><thead><tr><th>#</th><th>Repeater</th><th>SNR</th><th></th><th>Heard</th></tr></thead><tbody>${neighRows}</tbody></table>` :
+          `<table><tbody><tr><td>Frequency</td><td>${esc(freq)}</td></tr><tr><td>Last RSSI / SNR</td><td>${radio.last_rssi ?? "—"} / ${radio.last_snr ?? "—"}</td></tr><tr><td>TX power</td><td>${esc(val(snap.tx))} dBm</td></tr></tbody></table>`}</div>
+        <div class="pn s6"><h3>Recent activity <em>newest first</em></h3><table><thead><tr><th></th><th>Type</th><th>Route</th><th>Hops</th><th>RSSI / SNR</th><th>Age</th></tr></thead><tbody>${act}</tbody></table></div>
+        <div class="pn s12"><h3>Quick actions</h3><div class="qa">${roleOk(CL) ? `<button class="tool" data-go="chat">Open messages</button><button class="tool" data-q="advert.flood">Flood advert</button><button class="tool" data-q="advert">Zero-hop advert</button>` : `<button class="tool" data-q="advert">Flood advert</button><button class="tool" data-q="advert.zerohop">Zero-hop advert</button>`}
+          <button class="tool" data-q="clocksync">Set clock from this browser</button></div></div>
+      </div>`;
+    $("#dName").textContent = val(snap.name) || INFO.name;
+    $("#dSub").textContent = `${INFO.board} · ${INFO.role} · ${isClient() ? "Ultimate MeshCore Client" : "Ultimate MeshCore"} ${INFO.umc}  ·  ${D.rows.length} history samples kept in this browser`;
+    const live = $("#dLive"); live.className = "pl ok"; live.innerHTML = `<i class="dot ok"></i> live · ${new Date().toLocaleTimeString()}`;
+  };
   const refresh = async () => {
-    const cmds = ["get name", "get update.status", "clock", "stats-core", "stats-radio", "stats-packets", "get radio", "get tx", "get net.status", "memory"];
-    if (roleOk(RS)) cmds.push("get repeat", "neighbors");
-    if (roleOk(CL)) cmds.push("get contacts.count", "get app.links");
-    if (has("mqtt")) cmds.push("get mqtt.status");
-    const r = await api.cli(cmds); const g = i => r[i] || "";
-    const core = parseJson(g(3)) || {}, radio = parseJson(g(4)) || {}, pk = parseJson(g(5)) || {}, net = parseJson(g(8)) || {};
-    $("#dName").textContent = val(g(0)); $("#dSub").textContent = `${INFO.board} · ${INFO.role} · ${isClient() ? "Ultimate MeshCore Client" : "Ultimate MeshCore"} ${INFO.umc}`;
-    if (val(g(1)).startsWith("available") && !$("#dUpd")) {
-      const d = document.createElement("div"); d.id = "dUpd"; d.className = "warnbox";
-      d.innerHTML = `A firmware update is available. <a href="#fw">Open Firmware &amp; maintenance</a> to install it.`;
-      $("#dName").parentElement.prepend(d);
-      d.querySelector("a").onclick = e => { e.preventDefault(); go("fw"); };
-    }
-    const batt = core.battery_mv ? (core.battery_mv / 1000).toFixed(2) + " V" : "—";
-    let neigh = "—"; if (roleOk(RS)) { const t = val(g(11)); neigh = t === "-none-" || !t ? "0" : String(t.split("\n").filter(Boolean).length); }
-    const cc = roleOk(CL) ? parseJson(g(10)) || {} : null, links = roleOk(CL) ? parseJson(g(11)) || {} : null;
-    $("#dStats").innerHTML = stat(fmtUp(core.uptime_secs), INFO.reset ? "Uptime · last restart: " + INFO.reset : "Uptime") + stat(batt, "Battery") + stat(val(g(2)), "Clock (UTC)") +
-      stat((pk.recv ?? "—") + " / " + (pk.sent ?? "—"), "Packets rx / tx") + (cc ? stat(`${cc.contacts ?? "—"} / ${cc.channels ?? "—"}`, "Contacts / channels") +
-        stat(links.ble ? (links.ble.connected ? "connected" : links.ble.on ? "waiting" : "off") : "—", "Bluetooth app") + stat(links.tcp ? links.tcp.clients : "—", "WiFi apps") +
-        stat(cc.queued ?? "—", "Waiting for an app") : stat(neigh, "Neighbours")) + stat(core.queue_len ?? "—", "TX queue") +
-      (roleOk(RS) ? stat(val(g(10)), "Repeat") : "") + stat((() => { const m = parseJson(g(9)); return m && m.heap_free ? Math.round(m.heap_free / 1024) + " KB free" : "—"; })(), "Memory");
-    const sta = net.sta || {}, ap = net.ap || {};
-    if ($("#dNet")) $("#dNet").innerHTML = stat(sta.connected ? sta.ssid : "not connected", "WiFi") + stat(sta.ip || "—", "LAN IP") + stat(sta.connected ? sta.rssi + " dBm" : "—", "WiFi signal") +
-      stat(ap.active ? ap.ssid : "off", "Access point") + stat(net.hostname ? net.hostname + ".local" : "—", "mDNS name") +
-      (has("mqtt") ? stat(val(g(roleOk(RS) ? 12 : 10)).slice(0, 40), "MQTT") : "");
-    const [fr, bw, sf, cr] = val(g(6)).split(",").map(Number); const p = presetFor(fr, bw, sf, cr) || presetLoose(fr, bw, sf);
-    $("#dRadio").innerHTML = stat(p ? p[0] : "Custom", "Preset") + stat(`${fr ? fr.toFixed(3) : "?"} MHz`, "Frequency") + stat(`${bw} kHz · SF${sf} · 4/${cr}`, "BW · SF · CR") +
-      stat(val(g(7)) + " dBm", "TX power") + stat((radio.noise_floor ?? "—") + " dBm", "Noise floor") + stat(radio.last_rssi != null ? `${radio.last_rssi} / ${radio.last_snr}` : "—", "Last RSSI / SNR") +
-      stat((radio.tx_air_secs ?? "—") + " s", "TX airtime");
+    const q = [["name", "get name"], ["upd", "get update.status"], ["clock", "clock"], ["radio", "get radio"], ["tx", "get tx"], ["net", "get net.status"]];
+    if (roleOk(RS)) q.push(["neigh", "neighbors"]); if (roleOk(CL)) q.push(["cc", "get contacts.count"], ["links", "get app.links"]);
+    if (has("mqtt")) q.push(["mqtt", "get mqtt.status"], ["umcnet", "get mqtt.custom.bridge"]); if (has("bridge")) q.push(["bridge", "get bridge.enabled"], ["btype", "get bridge.type"]);
+    const [stats, r] = await Promise.all([D.fetch(), api.cli(q.map(x => x[1]))]), g = {}; q.forEach((x, i) => g[x[0]] = r[i] || "");
+    let tf = {packets: []}; try { tf = await api.traffic(); } catch {}
+    const net = parseJson(g.net) || {}, [fr, bw, sf, cr] = val(g.radio).split(",").map(Number), links = roleOk(CL) ? parseJson(g.links) || {} : null, cc = roleOk(CL) ? parseJson(g.cc) || {} : null;
+    if (roleOk(RS) && Date.now() - D.routesAt > 300000) { D.routesAt = Date.now(); try { D.routes = (await api.routes()).routes || []; } catch {} }
+    let neigh = null;
+    if (roleOk(RS)) { const t = val(g.neigh); neigh = (t === "-none-" || !t) ? [] : t.split("\n").filter(Boolean).map(l => l.split(":")).map(([k, secs, snr]) => { const a = Math.max(0, +secs || 0), rt = (D.routes || []).find(x => x.key.startsWith(k.toLowerCase())); return {id: k, name: rt && rt.name, snr: +snr / 4, ago: a < 120 ? a + " s ago" : a < 7200 ? Math.round(a / 60) + " min ago" : Math.round(a / 3600) + " h ago"}; }).sort((x, y) => y.snr - x.snr); }
+    const m = D.parseMqtt(g.mqtt), mqUp = [m.p, m.s].some(x => x === "up"), mqTxt = has("mqtt") ? (mqUp ? "connected" : m.p || m.s ? [m.p, m.s].filter(x => x && x !== "-").join(" / ") || "idle" : "idle") : "";
+    const nb = String(g.umcnet || "").replace(/^>\s*/, ""), nbOk = /^on,/.test(nb), conn = [];
+    conn.push({name: "LoRa radio", ok: true, detail: `${fr ? fr.toFixed(3) : "?"} MHz · SF${sf} · BW ${bw} kHz`});
+    if (has("wifi")) { const sta = net.sta || {}, ap = net.ap || {}; conn.push(sta.connected ? {name: "WiFi", ok: true, detail: `${sta.ssid} · ${sta.ip} · ${sta.rssi} dBm`} : {name: "WiFi", ok: false, warn: !!ap.active, detail: ap.active ? "not joined, hotspot is up" : "offline"});
+      if (ap.active) conn.push({name: "Hotspot", ok: true, detail: `${ap.ssid} · ${ap.clients ?? 0} client(s)`}); }
+    if (links) { conn.push({name: "Bluetooth app", ok: !!(links.ble && links.ble.connected), warn: !!(links.ble && links.ble.on), detail: links.ble ? (links.ble.connected ? "connected" : links.ble.on ? "waiting for a phone" : "off") : "—"});
+      conn.push({name: "WiFi apps", ok: !!(links.tcp && links.tcp.clients), warn: !!(links.tcp && links.tcp.on), detail: links.tcp ? `${links.tcp.clients} connected · port ${links.tcp.port}` : "—"}); }
+    if (has("mqtt")) conn.push({name: "MQTT uplink", ok: mqUp, warn: !mqUp && m.wifi === "up", detail: mqTxt || "idle"});
+    if (has("mqtt") && nbOk) conn.push({name: "UMC Net bridge", ok: true, detail: nb.replace(/^on, /, "")});
+    if (has("bridge")) conn.push({name: "Bridge", ok: /^(on|enabled|1)/i.test(val(g.bridge)), detail: `${val(g.bridge) || "off"} · ${val(g.btype) || ""}`});
+    if (val(g.upd).startsWith("available") && !$("#dUpd")) { const d = document.createElement("div"); d.id = "dUpd"; d.className = "warnb"; d.innerHTML = `A firmware update is available. <a href="#fw">Open Firmware &amp; maintenance</a> to install it.`; $("#dBody").before(d); d.querySelector("a").onclick = e => { e.preventDefault(); go("fw"); }; }
+    snap = {...stats, name: g.name, tx: g.tx, net, links, cc, neigh, tf, conn, freq: `${fr ? fr.toFixed(3) : "?"} MHz · SF${sf}`, bridge: has("bridge") ? val(g.bridge) || "off" : "", mqttText: mqTxt, mqttUp: mqUp};
+    draw();
   };
   view.addEventListener("click", async e => {
+    const rb = e.target.closest("#dRng button"); if (rb) { D.range = +rb.dataset.r; view.querySelectorAll("#dRng button").forEach(b => b.classList.toggle("on", b === rb)); draw(); return; }
     const gto = e.target.closest("[data-go]")?.dataset.go; if (gto) return go(gto);
     const q = e.target.closest("[data-q]")?.dataset.q; if (!q) return;
     try {
@@ -595,8 +826,16 @@ async function renderDash(view) {
       const r = await one(q); toast(r, isErr(r) ? "bad" : "ok");
     } catch (err) { toast(err.message, "bad"); }
   });
+  view.addEventListener("mousemove", e => {                               // a tooltip on the charts
+    const c = e.target.closest(".chart"), tip = c && c.querySelector(".tip"); view.querySelectorAll(".tip").forEach(t => { if (t !== tip) t.style.display = "none"; }); if (!c) return;
+    const m = JSON.parse(c.dataset.m), svg = c.querySelector("svg"), rc = svg.getBoundingClientRect(), x = (e.clientX - rc.left) / rc.width * m.W;
+    const t = m.x0 + (x - m.L) / ((m.W - m.L - m.R) || 1) * (m.x1 - m.x0); if (t < m.x0 - 60 || t > m.x1 + 60) { tip.style.display = "none"; return; }
+    const rows = m.s.map(s => { const p = s.d.reduce((b, q) => Math.abs(q[0] - t) < Math.abs(b[0] - t) ? q : b, s.d[0] || [0, 0]); return `<span style="color:${s.c}">●</span> ${esc(s.n)}: <b>${D.fmt(p[1])}${esc(m.f)}</b>`; }).join("<br>");
+    tip.innerHTML = `${D.hm(t)}<br>${rows}`; tip.style.display = "block"; tip.style.left = Math.min(e.clientX - c.getBoundingClientRect().left + 14, c.clientWidth - 170) + "px"; tip.style.top = "8px";
+  });
   await refresh();
-  dashTimer = setInterval(() => refresh().catch(() => {}), 15000);
+  let n = 0;
+  dashTimer = setInterval(() => { const u = $("#kUp"); if (u && uptimeBase != null) u.textContent = fmtUp(uptimeBase + (Date.now() - uptimeAt) / 1000); if (++n % 15 === 0) refresh().catch(() => { const l = $("#dLive"); if (l) { l.className = "pl bad"; l.innerHTML = `<i class="dot bad"></i> not answering`; } }); }, 1000);
 }
 
 async function renderNeigh(view) {
@@ -2116,6 +2355,7 @@ function buildNav() {
 }
 async function go(id) {
   current = id; location.hash = id; clearInterval(dashTimer);
+  document.querySelector("main").style.maxWidth = "";
   document.querySelectorAll("#navItems button").forEach(b => b.classList.toggle("on", b.dataset.sec === id));
   const sec = SECTIONS.find(s => s.id === id) || SECTIONS[0];
   $("#title").textContent = sec.title;
