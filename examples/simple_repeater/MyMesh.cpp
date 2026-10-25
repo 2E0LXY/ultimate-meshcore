@@ -1410,6 +1410,7 @@ void MyMesh::begin(FILESYSTEM *fs, ArchiveStorage* archive) {
   mqtt.setNetworkStateProvider(&network);
 #endif
   mqtt.begin(_fs);
+  mqtt.setInjectCallback(&MyMesh::injectFromNetThunk, this);
 #if defined(ESP_PLATFORM) && defined(TBEAM_SUPREME_SX1262)
   if (mqtt.isActive()) {
     network.loop(true);
@@ -1746,6 +1747,21 @@ bool MyMesh::healthCommand(const char *command, char *reply, size_t reply_size) 
   }
   return umc_health.command(command, reply, reply_size);
 }
+
+#ifdef WITH_MQTT_UPLINK
+// A packet another repeater heard, handed over by the uplink from the main loop. It is treated as
+// if it had arrived by radio after the bridge delay: the mesh drops what it has already seen, and
+// forwards the rest by its normal rules (hop limit, regions, duty cycle).
+void MyMesh::injectFromNet(const uint8_t* raw, size_t len) {
+  mesh::Packet* pkt = _mgr->allocNew();
+  if (pkt == nullptr) return;
+  if (pkt->readFrom(raw, len)) {
+    _mgr->queueInbound(pkt, millis() + _prefs.bridge_delay);
+  } else {
+    _mgr->free(pkt);
+  }
+}
+#endif
 
 // "RF 64 bursts: floor -113, lows to -121, highs to -71 | last highs: -108 -107 ..."
 void MyMesh::formatRfReply(char *reply, size_t reply_size) {
@@ -2832,6 +2848,14 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     } else {
       strcpy(reply, "Err - bad mqtt.custom.transport");
     }
+  } else if (strcmp(command, "get mqtt.custom.bridge") == 0) {
+    mqtt.formatBridgeReply(reply, 160);
+  } else if (strcmp(command, "get mqtt.custom.rate") == 0) {
+    sprintf(reply, "> %u", static_cast<unsigned>(mqtt.getCustomRate()));
+  } else if (memcmp(command, "set mqtt.custom.bridge ", 23) == 0) {
+    strcpy(reply, mqtt.setCustomBridge(&command[23]) ? "OK" : "Err - bad mqtt.custom.bridge (on|off)");
+  } else if (memcmp(command, "set mqtt.custom.rate ", 21) == 0) {
+    strcpy(reply, mqtt.setCustomRate(&command[21]) ? "OK" : "Err - mqtt.custom.rate is 1 to 120 a minute");
   } else if (memcmp(command, "set mqtt.custom.username ", 25) == 0) {
     if (mqtt.setCustomUsername(&command[25])) {
       strcpy(reply, "OK");

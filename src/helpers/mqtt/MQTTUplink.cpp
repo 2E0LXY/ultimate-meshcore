@@ -1,4 +1,5 @@
 #include "MQTTUplink.h"
+#include "NetPacket.h"
 #include "MQTTCaCerts.h"
 
 #ifdef WITH_MQTT_UPLINK
@@ -140,10 +141,13 @@ const MQTTUplink::BrokerSpec MQTTUplink::kBrokerSpecs[kBrokerCount] = {
     {"custom", "custom", nullptr, nullptr, kCustomBit, true, 0},
 };
 
+MQTTUplink* MQTTUplink::_self = nullptr;
+
 MQTTUplink::MQTTUplink(mesh::RTCClock& rtc, mesh::LocalIdentity& identity)
     : _fs(nullptr), _rtc(&rtc), _identity(&identity), _running(false), _last_status_publish(0),
       _token_refresh_count(0), _abandoned_client_count(0), _token_refresh_active_until_ms(0), _last_status{}, _node_name(nullptr), _network(nullptr)
        {
+  _self = this;
   memset(_device_id, 0, sizeof(_device_id));
   MQTTPrefsStore::setDefaults(_prefs);
   for (size_t i = 0; i < kBrokerCount; ++i) {
@@ -847,6 +851,18 @@ void MQTTUplink::handleMqttEvent(void* handler_args, esp_event_base_t, int32_t e
       broker->connected_since_ms = now_ms;
       MQTT_LOG("%s connected", broker->spec->label);
       logMqttMemorySnapshot("connected", broker->spec->label);
+      if (_self != nullptr && broker->spec->custom && _self->_prefs.custom_bridge && broker->client != nullptr) {
+        char topic[40];                                   // every repeater's raw packets in this area
+        snprintf(topic, sizeof(topic), "meshcore/%s/+/raw", _self->_prefs.iata);
+        esp_mqtt_client_subscribe(broker->client, topic, 0);
+        MQTT_LOG("%s subscribed to %s", broker->spec->label, topic);
+      }
+      break;
+    case MQTT_EVENT_DATA:
+      if (_self != nullptr && broker->spec->custom && event != nullptr) {
+        _self->onNetMessage(event->topic, event->topic_len, event->data, event->data_len, event->current_data_offset,
+                            event->total_data_len);
+      }
       break;
     case MQTT_EVENT_DISCONNECTED:
       broker->connected = false;
@@ -1096,6 +1112,7 @@ void MQTTUplink::loop(const MQTTStatusSnapshot& snapshot) {
   if (!_running) {
     return;
   }
+  drainNet();
 
   _last_status = snapshot;
 
@@ -1454,6 +1471,95 @@ bool MQTTUplink::setCustomTransport(const char* transport) {
   return saved;
 }
 
+// Runs on the network task: keep it short and touch nothing of the mesh. The topic is
+// meshcore/<iata>/<sender id>/raw and the payload is the observer JSON, whose "data" is the packet in hex.
+void MQTTUplink::onNetMessage(const char* topic, int topic_len, const char* data, int data_len, int offset,
+                              int total) {
+  if (!_prefs.custom_bridge || topic == nullptr || data == nullptr) return;
+  if (offset != 0 || data_len != total) return;                       // a message split in pieces: skip it
+  if (!umcnet::topicIsRaw(topic, topic_len)) return;
+  if (umcnet::topicHasId(topic, topic_len, _device_id)) return;       // our own packet coming back
+  uint8_t tmp[255];
+  const int n = umcnet::packetFromRawJson(data, data_len, tmp, (int)sizeof(tmp));
+  if (n == 0) return;
+  _net_heard++;
+  const uint8_t next = (uint8_t)((_net_head + 1) % kNetInbox);
+  if (next == _net_tail) {                                            // the loop is behind: drop, never block
+    _net_dropped++;
+    return;
+  }
+  _net_inbox[_net_head].len = (uint8_t)n;
+  memcpy(_net_inbox[_net_head].data, tmp, n);
+  __sync_synchronize();
+  _net_head = next;
+}
+
+// Main loop: hand queued packets to the mesh, but never more than the configured rate, so
+// a busy network cannot eat this repeater's airtime.
+void MQTTUplink::drainNet() {
+  if (_net_tail == _net_head) return;
+  const unsigned long now = millis();
+  const float rate = getCustomRate();
+  _net_tokens += (float)(now - _net_tokens_at) * rate / 60000.0f;
+  _net_tokens_at = now;
+  const float cap = rate / 4.0f < 3.0f ? 3.0f : rate / 4.0f;
+  if (_net_tokens > cap) _net_tokens = cap;
+  while (_net_tail != _net_head) {
+    const NetPacket& pkt = _net_inbox[_net_tail];
+    if (_inject_fn != nullptr && _net_tokens >= 1.0f) {
+      _inject_fn(_inject_ctx, pkt.data, pkt.len);
+      _net_tokens -= 1.0f;
+      _net_passed++;
+    } else {
+      _net_dropped++;
+    }
+    _net_tail = (uint8_t)((_net_tail + 1) % kNetInbox);
+  }
+}
+
+bool MQTTUplink::setCustomBridge(const char* value) {
+  if (value == nullptr) {
+    return false;
+  }
+  uint8_t parsed;
+  if (strcasecmp(value, "on") == 0) {
+    parsed = 1;
+  } else if (strcasecmp(value, "off") == 0) {
+    parsed = 0;
+  } else {
+    return false;
+  }
+  const bool changed = _prefs.custom_bridge != parsed;
+  _prefs.custom_bridge = parsed;
+  const bool saved = savePrefs();
+  if (saved && changed) {                                             // reconnect so the subscription follows the setting
+    for (BrokerState& broker : _brokers) {
+      if (broker.spec != nullptr && broker.spec->bit == kCustomBit) {
+        destroyBroker(broker);
+      }
+    }
+  }
+  return saved;
+}
+
+bool MQTTUplink::setCustomRate(const char* value) {
+  if (value == nullptr) {
+    return false;
+  }
+  const long n = strtol(value, nullptr, 10);
+  if (n < 1 || n > 120) {
+    return false;
+  }
+  _prefs.custom_rate = (uint8_t)n;
+  return savePrefs();
+}
+
+void MQTTUplink::formatBridgeReply(char* reply, size_t reply_size) const {
+  snprintf(reply, reply_size, "> %s, heard %lu, passed on %lu, dropped %lu, up to %u a minute",
+           _prefs.custom_bridge ? "on" : "off", (unsigned long)_net_heard, (unsigned long)_net_passed,
+           (unsigned long)_net_dropped, (unsigned)getCustomRate());
+}
+
 bool MQTTUplink::setCustomUsername(const char* username) {
   if (username == nullptr) {
     return false;
@@ -1546,6 +1652,9 @@ bool MQTTUplink::setOwnerEmail(const char*) { return false; }
 bool MQTTUplink::setCustomHost(const char*) { return false; }
 bool MQTTUplink::setCustomPort(const char*) { return false; }
 bool MQTTUplink::setCustomUsername(const char*) { return false; }
+bool MQTTUplink::setCustomBridge(const char*) { return false; }
+bool MQTTUplink::setCustomRate(const char*) { return false; }
+void MQTTUplink::formatBridgeReply(char* reply, size_t reply_size) const { snprintf(reply, reply_size, "> unsupported"); }
 bool MQTTUplink::setCustomPassword(const char*) { return false; }
 bool MQTTUplink::sendStatusNow() { return false; }
 bool MQTTUplink::isAnyBrokerConnected() const { return false; }

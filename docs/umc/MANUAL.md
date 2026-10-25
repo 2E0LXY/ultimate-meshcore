@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.11** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.12** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -374,6 +374,19 @@ MQTT uploads what the repeater hears to network maps and analysers.
 4. Optional: `mqtt.owner <64-hex public key>` and `mqtt.email <address>` identify you to brokers that use JWT authentication.
 
 Custom broker: `set mqtt.custom on`, `mqtt.custom.host`, `mqtt.custom.port`, `mqtt.custom.transport tcp|wss`, `mqtt.custom.username`, `mqtt.custom.password`.
+
+**UMC Net: joining repeaters over the internet.** Point the custom broker at a broker you run (the `server/umcnet` folder of this repository sets one up in a few minutes: `wss://net.<your domain>/mqtt`), then:
+
+| Setting | Meaning |
+|---|---|
+| `set mqtt.iata <code>` | The area. Repeaters only exchange packets with others using the same code. |
+| `set mqtt.raw on` | Publish every packet this repeater hears (as `meshcore/<area>/<device id>/raw`), so others can pick them up. |
+| `set mqtt.tx off` | Publish only what it hears by radio, not what it transmits (avoids the same packet arriving twice). |
+| `set mqtt.custom.bridge on` | **Also listen** for the other repeaters' packets and pass them to the mesh as if they had arrived by radio. The mesh drops anything it has already seen, so nothing loops, and forwards the rest by its normal rules (hop limit, regions, duty cycle). Off by default. |
+| `set mqtt.custom.rate <1-120>` | Most packets a minute passed on from the network (default 20). Extras are dropped and counted. |
+| `get mqtt.custom.bridge` | Whether it is on, and how many packets were heard, passed on and dropped. |
+
+Packets from the network are transmitted over the air, so they count against the repeater's duty cycle on 869 MHz; the rate limit and the mesh's own airtime budget keep that in check. Give each repeater its own broker account bound to its device id (`umcnet-user add <name> repeater --device <id>`), so it can only publish under its own topic.
 
 Status: `get mqtt.status` shows WiFi, time sync, location code and each broker (`conn` = connecting, `up` = connected). Topics are `meshcore/<IATA>/<device>/packets|raw|status`.
 
@@ -887,6 +900,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get/set loop.detect off\|minimal\|moderate\|strict` | Loop detection *(R)* |
 | `memory` | Heap / PSRAM usage (JSON) |
 | `get/set mqtt.custom on\|off`, `.host`, `.port`, `.transport tcp\|wss`, `.username`, `.password` | Custom MQTT broker |
+| `get/set mqtt.custom.bridge on\|off`, `get/set mqtt.custom.rate <1-120>` | Pass other repeaters' packets on the broker to the mesh (UMC Net) |
 | `get/set mqtt.eastmesh-au\|meshmapper\|waev\|letsmesh-eu\|letsmesh-us on\|off` | Preset MQTT brokers |
 | `get/set mqtt.email <addr>`, `mqtt.owner <hex>` | MQTT identity |
 | `get/set mqtt.iata <code>` | MQTT location code (`UNSET` = idle) |

@@ -74,6 +74,17 @@ public:
   bool setCustomUsername(const char* username);
   const char* getCustomUsername() const { return _prefs.custom_username; }
   bool setCustomPassword(const char* password);
+
+  // UMC Net: with `mqtt.custom.bridge on`, the uplink also listens on the custom broker for the
+  // raw packets other repeaters publish, and hands each one to this callback (from the main
+  // loop, not the network task), at no more than `mqtt.custom.rate` a minute.
+  typedef void (*InjectFn)(void* ctx, const uint8_t* raw, size_t len);
+  void setInjectCallback(InjectFn fn, void* ctx) { _inject_fn = fn; _inject_ctx = ctx; }
+  bool setCustomBridge(const char* value);   // on | off
+  bool getCustomBridge() const { return _prefs.custom_bridge != 0; }
+  bool setCustomRate(const char* value);     // packets a minute, 1..120
+  uint8_t getCustomRate() const { return _prefs.custom_rate ? _prefs.custom_rate : 20; }
+  void formatBridgeReply(char* reply, size_t reply_size) const;
   bool hasCustomPassword() const { return _prefs.custom_password[0] != 0; }
   bool sendStatusNow();
   bool isAnyBrokerConnected() const;
@@ -132,6 +143,23 @@ private:
   MQTTStatusSnapshot _last_status;
   char _device_id[65];
   const char* _node_name;
+
+  // packets heard from the broker, waiting for the main loop (the network task writes, the loop reads)
+  struct NetPacket {
+    uint8_t len;
+    uint8_t data[255];
+  };
+  static constexpr uint8_t kNetInbox = 8;
+  NetPacket _net_inbox[kNetInbox];
+  volatile uint8_t _net_head = 0, _net_tail = 0;
+  InjectFn _inject_fn = nullptr;
+  void* _inject_ctx = nullptr;
+  uint32_t _net_heard = 0, _net_passed = 0, _net_dropped = 0;
+  float _net_tokens = 0;
+  unsigned long _net_tokens_at = 0;
+  static MQTTUplink* _self;
+  void onNetMessage(const char* topic, int topic_len, const char* data, int data_len, int offset, int total);
+  void drainNet();
   NetworkStateProvider* _network;
 
 #if defined(ESP_PLATFORM)

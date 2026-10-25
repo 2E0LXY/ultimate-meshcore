@@ -194,6 +194,11 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks, public WebPanelComm
 #endif
 #ifdef WITH_MQTT_UPLINK
   MQTTUplink mqtt;
+  // a packet another repeater heard (UMC Net, `mqtt.custom.bridge`), handled as if it arrived by radio
+  static void injectFromNetThunk(void* ctx, const uint8_t* raw, size_t len) {
+    static_cast<MyMesh*>(ctx)->injectFromNet(raw, len);
+  }
+  void injectFromNet(const uint8_t* raw, size_t len);
 #endif
 #if defined(ESP_PLATFORM)
   NetworkService network;

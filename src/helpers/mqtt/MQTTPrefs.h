@@ -38,6 +38,8 @@ struct MQTTPrefs {
   // read back as zero here, which drives one-time migrations (see load()).
   uint8_t brokers_migrated;
   uint8_t mqtt_bridge_uplink_migrated;
+  uint8_t custom_bridge;   // 1: also listen to the other repeaters on the custom broker and pass their packets to the mesh
+  uint8_t custom_rate;     // most packets a minute passed on from the broker (0 = the default, 20)
 };
 
 class MQTTPrefsStore {
