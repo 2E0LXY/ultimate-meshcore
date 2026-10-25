@@ -2117,8 +2117,9 @@ function loadLeaflet() {
   });
 }
 async function renderMap(view) {
-  view.innerHTML = `<div class="card" style="padding:0;overflow:hidden"><div id="mapBox" style="height:calc(100vh - 170px);min-height:380px"></div></div>
-    <p class="val" id="mapNote">Loading map…</p>`;
+  document.querySelector("main").style.maxWidth = "none";                    // a map wants the whole window
+  view.innerHTML = `<div class="card" style="padding:0;overflow:hidden"><div id="mapBox" style="height:calc(100vh - 190px);min-height:380px"></div></div>
+    <p class="val" id="mapNote" style="margin:8px 2px 0">Loading map…</p>`;
   const points = [];
   if (isClient()) {
     MC.start();
@@ -2407,6 +2408,7 @@ async function go(id) {
   const sec = SECTIONS.find(s => s.id === id) || SECTIONS[0];
   $("#title").textContent = sec.title;
   const old = $("#view"), view = old.cloneNode(false); old.replaceWith(view);  // drop old listeners
+  view.className = "";                                                       // cloneNode copies the class: the dashboard's must not leak onto other pages
   view.innerHTML = `<p class="val">Loading…</p>`;
   try {
     const fn = {dash: renderDash, clregion: renderClientRegion, clroutes: renderClientRoutes, map: renderMap, chat: renderChat, contacts: renderContacts, channels: renderChannels, neigh: renderNeigh, routes: renderRoutes, traffic: renderTraffic, regions: renderRegions, net: renderNet, console: renderConsole, fw: renderFw, backup: renderBackup}[sec.special];
