@@ -8,6 +8,11 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 - ✅ Fixed pages inheriting the Dashboard's styling after it had been opened (the page container kept the dashboard's class, so the Map and others got its padding and green background); the Map now fills its box and the whole window, and fits the window height so its heading stays in view
 
+## Done in 0.1.20
+
+- ✅ **Network map.** The radio's Map page draws a line from this device to every node it knows, coloured by hops (green direct, blue one hop, purple two, amber three, orange more), with a legend. The UMC Net dashboard has a **Network** tab: a map of every node the connected repeaters hear, with a link for each pair coloured the same way (filter by hop count or by one repeater, line weight by packets, dashed when stale), a table of links (heard by, node, nearest hops, packets, SNR, packet types) and the journey of each recent packet (sender, the repeaters that passed it on, the repeater that heard it). Positions come from the nodes' own adverts and, for repeaters with control set up, from asking them
+- ✅ Fixed: the dashboard's "Saved" message disappeared at once; two unused imports
+
 ## Done in 0.1.19
 
 - ✅ Remote control: the repeater now accepts 60 commands a minute (was 20), so the dashboard can read every setting in one go; found by testing on a real repeater

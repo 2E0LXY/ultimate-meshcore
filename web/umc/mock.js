@@ -150,9 +150,9 @@
       {age: 75, tx: false, type: "ACK", flood: false, hops: 2, rssi: -103, snr: -2.25, len: 12, via: "3F"},
       {age: 110, tx: false, type: "ADVERT", flood: true, hops: 0, rssi: -74, snr: 11, len: 140, key: "93438DC6"}]};
     if (url === "/api/routes") return {routes: [
-      {key: "271e2ee5a1b2", name: "Leeds Hill", type: "repeater", hops: 0, hash: 1, path: "", pin: "", snr: 12.5, ago: 95, adverts: 4},
-      {key: "da8f72dfcc34", name: "Wakefield Roof", type: "repeater", hops: 1, hash: 1, path: "27", pin: "", snr: 11.8, ago: 320, adverts: 2},
-      {key: "9f00ab120011", name: "Bob phone", type: "client", hops: 2, hash: 1, path: "da,27", pin: "27,da,27", snr: 6.0, ago: 4000, adverts: 1}]};
+      {key: "271e2ee5a1b2", lat: 53.8008, lon: -1.5491, name: "Leeds Hill", type: "repeater", hops: 0, hash: 1, path: "", pin: "", snr: 12.5, ago: 95, adverts: 4},
+      {key: "da8f72dfcc34", lat: 53.683, lon: -1.4977, name: "Wakefield Roof", type: "repeater", hops: 1, hash: 1, path: "27", pin: "", snr: 11.8, ago: 320, adverts: 2},
+      {key: "9f00ab120011", lat: 53.72, lon: -1.86, name: "Bob phone", type: "client", hops: 2, hash: 1, path: "da,27", pin: "27,da,27", snr: 6.0, ago: 4000, adverts: 1}]};
     if (url === "/api/cli") return body.split("\n").map(cmd);
     if (client && url.startsWith("/api/app")) return method === "POST" ? radio.post(body) : radio.poll(url);
     throw new Error("mock: unknown " + url);

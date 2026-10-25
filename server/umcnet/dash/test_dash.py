@@ -111,6 +111,65 @@ class Packets(unittest.TestCase):
         for raw in (b"", b"\x05", bytes([(5 << 2) | 1, 5, 1])): self.assertIsNone(dash.parse_packet(raw))
 
 
+class Network(unittest.TestCase):
+    KEY_A = "11" * 32
+    KEY_B = "22" * 32
+
+    def advert(self, key_hex, name, lat=None, lon=None, hops=(), atype=2):
+        import struct
+        flags = 0x80 | atype | (0x10 if lat is not None else 0)
+        loc = struct.pack("<ii", int(lat * 1e6), int(lon * 1e6)) if lat is not None else b""
+        body = bytes.fromhex(key_hex) + bytes(4) + bytes(64) + bytes([flags]) + loc + name.encode()
+        return bytes([(4 << 2) | 1, len(hops)]) + bytes(hops) + body
+
+    def setUp(self):
+        dash.NODES.clear(); dash.LINKS.clear(); dash.JOURNEYS.clear()
+
+    def test_an_advert_gives_its_position_and_kind(self):
+        i = dash.parse_packet(self.advert(self.KEY_A, "Hill", 53.7012, -1.5534))
+        self.assertEqual((self.KEY_A.upper(), 2, "Hill"), (i["fkey"], i["atype"], i["name"]))
+        self.assertAlmostEqual(53.7012, i["lat"], 4); self.assertAlmostEqual(-1.5534, i["lon"], 4)
+
+    def test_an_advert_without_a_position_has_none_and_nonsense_is_ignored(self):
+        self.assertNotIn("lat", dash.parse_packet(self.advert(self.KEY_A, "Hill")))
+        self.assertNotIn("lat", dash.parse_packet(self.advert(self.KEY_A, "Hill", 0.0, 0.0)))     # 0,0 means "not set"
+        self.assertNotIn("lat", dash.parse_packet(self.advert(self.KEY_A, "Hill", 91.0, 10.0)))
+
+    def test_a_link_records_the_nearest_hop_count_and_the_best_signal(self):
+        recv = "AA" * 32
+        for hops, snr in ((2, 3.0), (0, 8.5), (1, 5.0)):
+            dash.note_network(recv, dash.parse_packet(self.advert(self.KEY_A, "Hill", 53.7, -1.5, hops=[7] * hops)), snr, -100, time.time())
+        l = dash.LINKS[(recv, self.KEY_A.upper())]
+        self.assertEqual((3, 0, 8.5), (l["n"], l["hops_min"], l["snr"]))
+        self.assertEqual("Hill", dash.NODES[self.KEY_A.upper()]["name"])
+
+    def test_a_repeater_does_not_link_to_itself(self):
+        dash.note_network(self.KEY_A.upper(), dash.parse_packet(self.advert(self.KEY_A, "Me", hops=[1])), 1, -90, time.time())
+        self.assertEqual({}, dash.LINKS)
+
+    def test_a_hash_names_a_node_only_when_exactly_one_fits(self):
+        dash.NODES.update({"1A" + "00" * 31: {"name": "One"}, "1B" + "00" * 31: {"name": "Two"}, "1A" + "FF" * 31: {"name": "Three"}})
+        self.assertEqual("1B" + "00" * 31, dash.node_for_hash("1b"))
+        self.assertIsNone(dash.node_for_hash("1A"))          # two nodes start 1A
+        self.assertIsNone(dash.node_for_hash("EE"))
+        self.assertEqual("One", dash.hop_name("1B") and "One")  # an unresolved hash is shown as itself
+        self.assertEqual("1A", dash.hop_name("1A"))
+
+    def test_a_response_links_to_the_node_its_sender_hash_names(self):
+        recv = "AA" * 32
+        dash.NODES[self.KEY_B.upper()] = {"key": self.KEY_B.upper(), "name": "B", "type": 2, "lat": None, "lon": None, "first": 0, "last": 0, "adverts": 1}
+        raw = bytes([(1 << 2) | 1, 1, 0x33, 0xAA, 0x22, 9, 9])               # RESP: destination AA, sender 22, via 33
+        dash.note_network(recv, dash.parse_packet(raw), 4.0, -95, time.time())
+        self.assertIn((recv, self.KEY_B.upper()), dash.LINKS)
+        self.assertEqual("B", dash.network_view()["nodes"][0]["name"])
+
+    def test_the_view_lists_nodes_links_and_journeys(self):
+        dash.note_network("AA" * 32, dash.parse_packet(self.advert(self.KEY_A, "Hill", 53.7, -1.5, hops=[0x44])), 6.0, -97, time.time())
+        v = dash.network_view()
+        self.assertEqual((1, 1, 1), (len(v["nodes"]), len(v["links"]), len(v["journeys"])))
+        self.assertEqual(1, v["links"][0]["hops"]); self.assertEqual("44", v["journeys"][0]["path"][0]["h"])
+
+
 class AdminHelper(unittest.TestCase):
     def test_password_hash_round_trip(self):
         h = adm.pbkdf2("Correct-horse-9"); self.assertTrue(adm.check_password("Correct-horse-9", h)); self.assertFalse(adm.check_password("Correct-horse-8", h)); self.assertFalse(adm.check_password("x", "garbage"))

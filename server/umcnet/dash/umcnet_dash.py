@@ -5,7 +5,7 @@ Reads the broker as a read-only 'monitor' account (its $SYS statistics and the m
 broker's log for who connects and who is refused, samples the machine, and serves a JSON API and the page on
 127.0.0.1 for Caddy to put behind a login. Python standard library only: no packages to install.
 """
-import collections, csv, hashlib, hmac, io, json, os, re, secrets, select, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.request
+import collections, csv, hashlib, hmac, io, json, os, re, secrets, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -23,7 +23,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.0"
+VERSION = "2.1"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -40,6 +40,9 @@ MQTT = {"state": "starting", "since": 0, "reconnects": 0, "error": ""}
 LATENCY = collections.deque(maxlen=300)    # seconds between a device's timestamp and our clock
 DB = None
 
+NODES = {}                                 # full public key -> what its adverts said about it (name, kind, position)
+LINKS = {}                                 # (hearing device, heard node) -> counts, nearest hop count, signal
+JOURNEYS = collections.deque(maxlen=300)   # recent packets as a chain: sender, repeaters on the way, receiver
 PTYPES = {0: "REQ", 1: "RESP", 2: "MSG", 3: "ACK", 4: "ADVERT", 5: "CHAN", 6: "CHDATA", 7: "ANON", 8: "PATH", 9: "TRACE", 10: "MULTI", 11: "CTRL"}
 
 # ----------------------------------------------------------------------------- packets
@@ -58,14 +61,101 @@ def parse_packet(raw):
         if ptype in (0, 1, 2, 8) and len(p) >= 2: out["dst"], out["src"] = "%02X" % p[0], "%02X" % p[1]
         elif ptype in (5, 6) and p: out["chan"] = "%02X" % p[0]
         elif ptype == 4 and len(p) > 100:
-            out["key"] = p[:4].hex().upper(); j = 100; f = p[j]; j += 1
-            if f & 0x10: j += 8
+            out["key"] = p[:4].hex().upper(); out["fkey"] = p[:32].hex().upper(); j = 100; f = p[j]; j += 1
+            out["atype"] = f & 0x0F
+            if f & 0x10:
+                if j + 8 <= len(p):
+                    la, lo = struct.unpack("<ii", p[j:j + 8]); la, lo = la / 1e6, lo / 1e6
+                    if (la or lo) and abs(la) <= 90 and abs(lo) <= 180: out["lat"], out["lon"] = la, lo
+                j += 8
             if f & 0x20: j += 2
             if f & 0x40: j += 2
             if f & 0x80 and j < len(p): out["name"] = p[j:].decode("utf-8", "replace").rstrip("\0").strip()
         return out
     except Exception:
         return None
+
+def node_for_hash(h):
+    """The one known node whose key starts with this hash, or None when it fits none or several."""
+    if not h: return None
+    hits = [k for k in NODES if k.startswith(h.upper())]
+    return hits[0] if len(hits) == 1 else None
+
+def hop_name(h):
+    k = node_for_hash(h)
+    return (NODES[k]["name"] or h) if k else h
+
+def note_network(did, info, snr, rssi, now):
+    """Called for every packet a connected repeater heard: learn the node behind an advert, and the link to it."""
+    if not info: return
+    sender = None
+    if info.get("fkey"):
+        k = info["fkey"]; n = NODES.get(k)
+        if n is None:
+            if len(NODES) >= 3000: return
+            n = NODES[k] = {"key": k, "name": "", "type": 0, "lat": None, "lon": None, "first": now, "last": 0, "adverts": 0}
+        n["last"] = now; n["adverts"] += 1
+        if info.get("name"): n["name"] = info["name"]
+        if info.get("atype"): n["type"] = info["atype"]
+        if info.get("lat") is not None: n["lat"], n["lon"] = info["lat"], info["lon"]
+        sender = k
+    elif info.get("src"): sender = node_for_hash(info["src"])
+    if sender and sender != did:
+        l = LINKS.get((did, sender))
+        if l is None: l = LINKS[(did, sender)] = {"n": 0, "hops_min": 99, "hops_last": 0, "snr": None, "rssi": None, "first": now, "last": 0, "types": collections.Counter()}
+        l["n"] += 1; l["hops_min"] = min(l["hops_min"], info["hops"]); l["hops_last"] = info["hops"]; l["last"] = now; l["types"][info["type"]] += 1
+        try:
+            if snr is not None and (l["snr"] is None or float(snr) > l["snr"]): l["snr"] = float(snr)
+            if rssi is not None and (l["rssi"] is None or int(rssi) > l["rssi"]): l["rssi"] = int(rssi)
+        except (ValueError, TypeError): pass
+    if sender or info.get("path"):
+        JOURNEYS.append({"t": now, "type": info["type"], "flood": info["flood"], "hops": info["hops"], "from": sender or (info.get("src") or info.get("chan") or ""), "path": [{"h": h, "n": hop_name(h)} for h in info.get("path", [])], "to": did, "snr": snr, "rssi": rssi})
+
+def nodes_path(): return os.path.join(CFG["data"], "nodes.json")
+def nodes_save():
+    try:
+        with LOCK: data = {"nodes": NODES, "links": [{"r": a, "s": b, **{k: v for k, v in l.items() if k != "types"}, "types": dict(l["types"])} for (a, b), l in LINKS.items()]}
+        tmp = nodes_path() + ".tmp"; json.dump(data, open(tmp, "w")); os.replace(tmp, nodes_path())
+    except Exception as e: sys.stderr.write("nodes: %s\n" % e)
+def nodes_load():
+    try: d = json.load(open(nodes_path()))
+    except Exception: return
+    NODES.update(d.get("nodes", {}))
+    for l in d.get("links", []):
+        LINKS[(l["r"], l["s"])] = {"n": l["n"], "hops_min": l["hops_min"], "hops_last": l.get("hops_last", 0), "snr": l.get("snr"), "rssi": l.get("rssi"), "first": l.get("first", 0), "last": l["last"], "types": collections.Counter(l.get("types", {}))}
+
+def network_view():
+    now = time.time()
+    with LOCK:
+        nodes = []; seen = set()
+        for k, n in NODES.items():
+            d = DEV.get(k); seen.add(k)
+            nodes.append({"key": k, "name": (d["name"] if d and d["name"] else n["name"]) or k[:8], "type": n["type"], "lat": n["lat"], "lon": n["lon"], "last": n["last"], "adverts": n["adverts"], "connected": bool(d and d["last"] and now - d["last"] < CONF["stale_minutes"] * 60)})
+        for k, d in DEV.items():
+            if k not in seen: nodes.append({"key": k, "name": d["name"] or k[:8], "type": 2, "lat": d.get("lat"), "lon": d.get("lon"), "last": d["last"], "adverts": 0, "connected": bool(d["last"] and now - d["last"] < CONF["stale_minutes"] * 60)})
+        for n in nodes:                                       # a connected repeater's position may come from the control channel
+            d = DEV.get(n["key"])
+            if d and n["lat"] is None and d.get("lat") is not None: n["lat"], n["lon"] = d["lat"], d["lon"]
+        links = [{"recv": a, "node": b, "hops": l["hops_min"], "hops_last": l["hops_last"], "n": l["n"], "snr": l["snr"], "rssi": l["rssi"], "first": l["first"], "last": l["last"], "types": dict(l["types"])} for (a, b), l in LINKS.items()]
+        journeys = [dict(j) for j in list(JOURNEYS)[-80:]][::-1]
+    return {"now": now, "nodes": nodes, "links": links, "journeys": journeys}
+
+def locate_loop():
+    """Ask each repeater that has a control key where it is, until we know (for the map)."""
+    time.sleep(120)
+    while True:
+        try:
+            for dev in list(KEYS):
+                d = DEV.get(dev); n = NODES.get(dev)
+                if not d or not d["last"] or time.time() - d["last"] > 600 or d.get("lat") is not None or (n and n["lat"] is not None): continue
+                got = {}
+                for axis in ("lat", "lon"):
+                    r = send_command(dev, "get " + axis, "locator", timeout=10)
+                    try: got[axis] = float(str(r.get("reply", "")).lstrip("> ").strip()) if r.get("ok") else None
+                    except ValueError: got[axis] = None
+                if got.get("lat") and got.get("lon") and abs(got["lat"]) <= 90 and abs(got["lon"]) <= 180: d["lat"], d["lon"] = got["lat"], got["lon"]
+        except Exception as e: sys.stderr.write("locate: %s\n" % e)
+        time.sleep(1200)
 
 def note_rate(name, n=1):
     now = time.time()
@@ -132,6 +222,7 @@ def on_publish(topic, payload, retained=False):
             try: d["rssi"] = int(j["RSSI"]) if "RSSI" in j else d["rssi"]; d["snr"] = float(j["SNR"]) if "SNR" in j else d["snr"]
             except (ValueError, TypeError): pass
             if direction == "rx" and raw:
+                note_network(did, info, j.get("SNR"), j.get("RSSI"), now)
                 h = hashlib.sha1(raw).hexdigest()[:16]
                 e = HEARD.get(h)
                 if e is None: e = HEARD[h] = {"t": now, "devs": {}, "type": info.get("type", "?")}; note_rate("unique")
@@ -390,6 +481,7 @@ def sampler_loop():
     while True:
         time.sleep(60)
         try:
+            if int(time.time()) % 300 < 60: nodes_save()
             now = int(time.time()); vals = snapshot_values()
             DB.executemany("INSERT INTO samples VALUES(?,?,?)", [(now, k, float(v)) for k, v in vals.items()])
             if now % 3600 < 60:
@@ -779,6 +871,7 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path); q = parse_qs(u.query)
         try:
+            if u.path == "/api/network": return self.send(200, json.dumps(network_view()))
             if u.path == "/api/audit":
                 secs = max(60, min(90 * 86400, int(q.get("range", ["604800"])[0])))
                 rows = DB.execute("SELECT ts,who,action,target,detail,ok FROM audit WHERE ts>=? ORDER BY ts DESC LIMIT 500", (int(time.time()) - secs,)).fetchall()
@@ -811,8 +904,8 @@ def export_accounts_soon():
     pass                                         # the account list is re-read from its copy on every request
 
 def main():
-    db_init(); conf_load(); keys_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
-    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop): threading.Thread(target=fn, daemon=True).start()
+    db_init(); conf_load(); keys_load(); nodes_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
+    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)
     try: srv.serve_forever()

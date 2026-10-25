@@ -87,7 +87,7 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 const D = {uid: 0};
 const $ = s => document.querySelector(s), esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const S = {o: null, hist: {}, range: 3600, tab: "overview", ev: [], evKind: "", logq: "", pq: "", t: 0, err: "", sel: "", vals: {}, log: [], audit: [], setup: "", created: null, msg: "", busy: false};
-const TABS = [["overview", "Overview"], ["repeaters", "Repeaters"], ["control", "Control"], ["clients", "Clients"], ["accounts", "Accounts"], ["traffic", "Traffic"], ["diagnostics", "Diagnostics"], ["broker", "Broker"], ["system", "System"], ["log", "Log"], ["settings", "Settings"]];
+const TABS = [["overview", "Overview"], ["network", "Network"], ["repeaters", "Repeaters"], ["control", "Control"], ["clients", "Clients"], ["accounts", "Accounts"], ["traffic", "Traffic"], ["diagnostics", "Diagnostics"], ["broker", "Broker"], ["system", "System"], ["log", "Log"], ["settings", "Settings"]];
 const bytes = n => n == null ? "—" : n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? (n / 1e3).toFixed(1) + " kB" : Math.round(n) + " B";
 const dur = s => { s = Math.round(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d}d ${h}h ${m}m` : h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; };
 const ago = t => !t ? "never" : dur(Math.max(0, Date.now() / 1000 - t)) + " ago";
@@ -176,6 +176,8 @@ const HELP = {
   log: ["The broker's own log: logins, disconnects and warnings.", "Type to filter. Newest lines are first.", "The place to look for why one particular repeater can't connect."],
   flow: ["A picture of the network: repeaters on the left, the secure web front (Caddy) and the broker in the middle, and who listens on the right.", "A line moves while data flows, faster for busier repeaters. Grey means no data lately.", "Shows at a glance who is talking to whom."],
   events: ["Connections, disconnections, refused logins and warnings, kept for 14 days.", "Filter by kind. Refused logins show the address they came from.", "A pattern of refused logins from one address is someone guessing passwords."],
+  network: ["A map of the repeaters on this network and every node they hear, with a line for each link coloured by how many hops the packet took: green is heard directly, blue one hop, purple two, amber three, orange four or more.", "Pick which hop counts to show, or one repeater's view. Hover a line or a dot for details. Positions come from the adverts nodes send, so only nodes that share a location are on the map; the rest are in the tables.", "It shows how the repeaters really connect over the air, which repeaters reach furthest, and where the gaps are, from what they actually heard rather than from guesses."],
+  journeys: ["Recent packets as a chain: the sender, each repeater that passed it on, and the repeater that reported it.", "Read left to right. A name in the chain is a repeater matched from its one-byte code; a bare code means more than one known node fits.", "Shows the real route a message took across your network."],
   control: ["Remote control of one repeater through the broker: read and change its settings, send an advert, run a command, restart it.", "Pick a repeater. Read settings fills the boxes with what it has now; change one and press Apply. Risky actions ask you to confirm.", "You can look after repeaters on hills and rooftops without going to them. Every action is signed, limited to a safe list of commands, and recorded in the audit log."],
   setup: ["The commands to paste into a repeater's Console page so that it joins UMC Net and accepts signed commands from this dashboard.", "Press Control setup, copy the text, paste it into the repeater's Console (or send it over USB), then press Read settings to check it answers.", "The control key is what proves a command came from you. Keep it private; renew it here if it leaks."],
   approve: ["A repeater account that has connected but has not been tied to a device yet. It can listen, but it cannot publish or be controlled until you approve it.", "Check the device id shown matches the repeater you expect (it is on its display, and under Identity as Public key), paste the full 64-character id and approve.", "Without approval a repeater is held at the door, so a leaked password alone cannot add a fake repeater to your network."],
@@ -451,8 +453,8 @@ document.addEventListener("click", async e => {
     const d = S.o.devices.find(x => x.id === S.sel); const acct = (S.o.accounts.find(a => a.device === S.sel) || {}).name || "";
     const r = await post("/api/control/setup", {device: S.sel, account: acct, newkey: act === "renew"}); S.setup = r.text || r.error; await tick(); return;
   }
-  if (act === "copy") { const t = $("#setupText"); t.select(); try { await navigator.clipboard.writeText(t.value); } catch { document.execCommand("copy"); } flash("ctlMsg", "Copied", true); return; }
-  if (act === "label") { const r = await post("/api/config", {labels: Object.assign({}, S.o.config.labels, {[S.sel]: {label: $("#labLabel").value, note: $("#labNote").value}})}); flash("ctlMsg", r.ok ? "Saved" : r.error, !!r.ok); await tick(); return; }
+  if (act === "copy") { const t = $("#setupText"); t.select(); try { await navigator.clipboard.writeText(t.value); } catch { document.execCommand("copy"); } S.msg = "Copied"; flash("ctlMsg", "Copied", true); return; }
+  if (act === "label") { const r = await post("/api/config", {labels: Object.assign({}, S.o.config.labels, {[S.sel]: {label: $("#labLabel").value, note: $("#labNote").value}})}); S.msg = r.ok ? "Saved" : r.error; await tick(); return; }
   if (act === "addacc") {
     const name = $("#newName").value.trim(), role = $("#newRole").value, device = $("#newDev").value.trim();
     const r = await post("/api/accounts/add", {name, role, device}); if (!r.ok) { alert(r.error || r.output || "Could not add it"); return; }
@@ -460,7 +462,7 @@ document.addEventListener("click", async e => {
   }
   if (act === "savecfg") {
     const patch = {alerts: {}}; document.querySelectorAll("[data-cfg]").forEach(el => { const k = el.dataset.cfg, v = el.type === "checkbox" ? el.checked : el.value; (el.dataset.al ? patch.alerts : patch)[k] = v; });
-    const r = await post("/api/config", patch); flash("cfgMsg", r.ok ? "Saved" : r.error, !!r.ok); if (r.ok) await tick(); return;
+    const r = await post("/api/config", patch); if (r.ok) await tick(); flash("cfgMsg", r.ok ? "Saved" : r.error, !!r.ok); return;
   }
   if (act === "alerttest") { const r = await post("/api/alerts/test", {}); flash("altMsg", r.ok ? "Sent. Check your phone." : r.error, !!r.ok); return; }
   if (act === "pw") {
@@ -496,7 +498,68 @@ function pendBanner(o) {
   return `<div class="warnb" style="margin-bottom:12px">${p.length} repeater${p.length > 1 ? "s are" : " is"} waiting for approval: ${p.map(x => esc(x.name) + (x.ip ? " (" + esc(x.ip) + ")" : "")).join(", ")}. <a href="#accounts" data-t="accounts" style="color:#f2c14e;font-weight:600">Review</a></div>`;
 }
 
-const VIEWS = {overview: (o) => pendBanner(o) + vOverview(o), repeaters: vRepeaters, control: vControl, clients: vClients, accounts: vAccounts, settings: vSettings, traffic: vTraffic, diagnostics: vDiag, broker: vBroker, system: vSystem, log: vLog};
+const HOPC = h => h === 0 ? "#2fe27a" : h === 1 ? "#4aa8ff" : h === 2 ? "#a58bff" : h === 3 ? "#f2c14e" : "#ff8f5a";
+const HOPN = h => h === 0 ? "direct" : h === 1 ? "1 hop" : h + " hops";
+const KINDN = {1: "person", 2: "repeater", 3: "room server", 4: "sensor"};
+S.net = null; S.nf = {h0: true, h1: true, h2: true, h3: true, h4: true, conn: false, recv: "", fitted: false}; S.map = null; S.layer = null; S.netUp = false;
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  return new Promise((ok, bad) => {
+    const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"; document.head.appendChild(css);
+    const js = document.createElement("script"); js.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"; js.onload = ok; js.onerror = () => bad(new Error("the map needs this browser to reach the internet")); document.head.appendChild(js);
+  });
+}
+function vNetwork(o) {
+  S.netUp = false; S.map = null; S.layer = null;
+  return `<div class="panels">
+    ${panel("Network map", "who hears whom, by hops", `<div class="row" id="netCtl" style="margin-bottom:8px"></div><div id="netmap" style="height:580px;border-radius:10px;overflow:hidden;background:#0a1511"><div class="empty">Loading the map…</div></div><div class="lgd" id="netLegend" style="margin-top:8px"></div>`, "network")}
+    <div id="netBody" class="s12" style="grid-column:span 12"></div></div>`;
+}
+function netControls() {
+  const f = S.nf, recvs = S.net.nodes.filter(n => n.connected);
+  return [0, 1, 2, 3, 4].map(h => `<label style="color:${HOPC(h)};margin-right:8px"><input type="checkbox" data-nf="h${h}" ${f["h" + h] ? "checked" : ""}> ${h === 4 ? "4+ hops" : HOPN(h)}</label>`).join("") +
+    `<select data-nf="recv" data-keep="1"><option value="">all repeaters</option>${recvs.map(n => `<option value="${n.key}" ${f.recv === n.key ? "selected" : ""}>${esc(n.name)}</option>`).join("")}</select> <label><input type="checkbox" data-nf="conn" ${f.conn ? "checked" : ""}> only links to repeaters on this network</label> <button class="tool" data-act="fit">Fit the map</button>`;
+}
+async function netUpdate() {
+  const n = S.net; if (!n || !$("#netmap")) return;
+  const nodes = Object.fromEntries(n.nodes.map(x => [x.key, x])), f = S.nf, now = n.now;
+  const links = n.links.filter(l => f["h" + Math.min(4, l.hops)] && (!f.recv || l.recv === f.recv) && (!f.conn || (nodes[l.node] && nodes[l.node].connected)));
+  if (!$("#netCtl").dataset.built) { $("#netCtl").innerHTML = netControls(); $("#netCtl").dataset.built = "1"; }
+  else { const sel = $("#netCtl select"); if (sel && sel.options.length !== n.nodes.filter(x => x.connected).length + 1) $("#netCtl").innerHTML = netControls(); }
+  $("#netLegend").innerHTML = [0, 1, 2, 3, 4].map(h => `<span><i style="background:${HOPC(h)}"></i>${h === 4 ? "4 or more hops" : HOPN(h)}</span>`).join("") + `<span><i style="background:#fff;border:2px solid #2fe27a;border-radius:50%"></i>repeater on this network</span><span><i style="background:#9fb7ab;border-radius:50%"></i>other repeater</span><span><i style="background:#c9b8ff;border-radius:50%"></i>room server</span><span><i style="background:#7fa392;border-radius:50%"></i>person or sensor</span><span>dashed = not heard for over an hour</span>`;
+  const placed = n.nodes.filter(x => x.lat != null), unplaced = n.nodes.filter(x => x.lat == null);
+  try { await loadLeaflet(); } catch (e) { $("#netmap").innerHTML = `<div class="empty">${esc(e.message)}. The tables below still work.</div>`; }
+  if (window.L && $("#netmap")) {
+    if (!S.map) { $("#netmap").innerHTML = ""; S.map = L.map("netmap", {zoomControl: true}); L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 18, attribution: "© OpenStreetMap contributors"}).addTo(S.map); S.layer = L.layerGroup().addTo(S.map); S.map.setView([54, -2], 6); }
+    S.layer.clearLayers();
+    links.slice().sort((a, b) => b.hops - a.hops).forEach(l => {                    // far links first so the direct ones are on top
+      const a = nodes[l.recv], b = nodes[l.node]; if (!a || !b || a.lat == null || b.lat == null) return;
+      const stale = now - l.last > 3600;
+      L.polyline([[a.lat, a.lon], [b.lat, b.lon]], {color: HOPC(l.hops), weight: Math.min(7, 2 + Math.log2(1 + l.n)), opacity: stale ? 0.4 : 0.85, dashArray: stale ? "6 8" : null})
+        .bindTooltip(`<b>${esc(a.name)}</b> hears <b>${esc(b.name)}</b><br>${HOPN(l.hops)} · ${l.n} packet${l.n === 1 ? "" : "s"}${l.snr != null ? " · best SNR " + l.snr + " dB" : ""}<br>last ${dur(now - l.last)} ago`, {sticky: true}).addTo(S.layer);
+    });
+    placed.forEach(x => {
+      const m = L.circleMarker([x.lat, x.lon], x.connected ? {radius: 10, color: "#2fe27a", weight: 3, fillColor: "#ffffff", fillOpacity: 1} : {radius: x.type === 2 ? 7 : 5, color: "#0b1511", weight: 1.5, fillColor: x.type === 2 ? "#9fb7ab" : x.type === 3 ? "#c9b8ff" : "#7fa392", fillOpacity: 0.95}).addTo(S.layer);
+      m.bindTooltip(`<b>${esc(x.name)}</b><br>${KINDN[x.type] || "node"}${x.connected ? " · connected" : ""}<br>last heard ${x.last ? dur(now - x.last) + " ago" : "—"}`, x.connected ? {permanent: true, direction: "top", offset: [0, -8]} : {});
+    });
+    if (!S.nf.fitted && placed.length) { S.nf.fitted = true; S.map.fitBounds(placed.map(x => [x.lat, x.lon]), {padding: [40, 40], maxZoom: 12}); }
+  }
+  const dir = n.links.filter(l => l.hops === 0).length, one = n.links.filter(l => l.hops === 1).length, more = n.links.filter(l => l.hops >= 2).length;
+  const kp = [kpi("◎", "Nodes known", n.nodes.length, `${placed.length} with a position`), kpi("⇄", "Links seen", n.links.length, "pairs that hear each other"), kpi("●", "Heard directly", dir, "green lines", "up"), kpi("◐", "One hop", one, "blue lines"), kpi("○", "Two or more hops", more, "purple, amber, orange"), kpi("✉", "Packets followed", n.journeys.length, "latest 80 below")].join("");
+  const name = k => (nodes[k] && nodes[k].name) || k.slice(0, 8);
+  const lrows = links.slice().sort((a, b) => a.hops - b.hops || b.n - a.n).slice(0, 200).map(l => `<tr><td><b>${esc(name(l.recv))}</b></td><td>${esc(name(l.node))} <span class="tr">${KINDN[(nodes[l.node] || {}).type] || ""}</span></td><td><span style="color:${HOPC(l.hops)}">●</span> ${HOPN(l.hops)}</td><td>${l.n}</td><td>${l.snr ?? ""}${l.rssi != null ? " / " + l.rssi : ""}</td><td>${Object.entries(l.types).map(([k, v]) => k + " " + v).join(", ")}</td><td>${ago(l.last)}</td></tr>`);
+  const jrows = n.journeys.slice(0, 60).map(j => `<tr><td>${clock(j.t).split(", ").pop()}</td><td>${esc(j.type)}</td><td style="white-space:normal"><b>${esc(nodes[j.from] ? nodes[j.from].name : j.from || "?")}</b>${j.path.map(p => ` <span class="tr">→</span> <span style="color:${p.n === p.h ? "#7fa392" : "#e9f7ef"}">${esc(p.n)}</span>`).join("")} <span class="tr">→</span> <b>${esc(name(j.to))}</b></td><td><span style="color:${HOPC(j.hops)}">●</span> ${HOPN(j.hops)}</td><td>${j.snr ?? ""}</td></tr>`);
+  const unp = unplaced.length ? panel("Nodes without a position", unplaced.length + " heard, not on the map", `<div class="row" style="gap:6px;flex-wrap:wrap">${unplaced.slice(0, 80).map(x => `<span class="tag">${esc(x.name)}${x.connected ? " ●" : ""}</span>`).join("")}</div><p class="tr" style="margin-top:6px">A node appears on the map once it sends an advert that includes its location, or (for a repeater with control set up) once the dashboard has asked it where it is.</p>`, "", "s12") : "";
+  $("#netBody").innerHTML = `<div class="kpis">${kp}</div><div class="panels">${panel("Links", `${links.length} shown`, table(["Heard by", "Node", "Nearest", "Packets", "SNR / RSSI", "Packet types", "Last"], lrows, "No links yet: they appear as the repeaters report adverts."), "network", "s7")}${panel("Packet journeys", "newest first", table(["When", "Type", "Route", "Hops", "SNR"], jrows, "Nothing yet."), "journeys", "s5")}${unp}</div>`;
+  S.netUp = true;
+}
+document.addEventListener("change", e => {
+  const el = e.target.closest("[data-nf]"); if (!el) return;
+  S.nf[el.dataset.nf] = el.type === "checkbox" ? el.checked : el.value; netUpdate();
+});
+document.addEventListener("click", e => { if (e.target.closest('[data-act="fit"]') && S.net && S.map) { const p = S.net.nodes.filter(x => x.lat != null); if (p.length) S.map.fitBounds(p.map(x => [x.lat, x.lon]), {padding: [40, 40], maxZoom: 12}); } });
+
+const VIEWS = {network: vNetwork, overview: (o) => pendBanner(o) + vOverview(o), repeaters: vRepeaters, control: vControl, clients: vClients, accounts: vAccounts, settings: vSettings, traffic: vTraffic, diagnostics: vDiag, broker: vBroker, system: vSystem, log: vLog};
 function draw() {
   const o = S.o; if (!o) return;
   const active = document.activeElement && document.activeElement.id;
@@ -504,7 +567,8 @@ function draw() {
   document.title = (o.config && o.config.title || "UMC Net") + " dashboard"; $("#sub").textContent = `${o.host} · broker ${o.sys["$SYS/broker/version"] || ""} · dashboard ${o.version}`;
   const bad = o.diagnostics.filter(d => d.level === "bad").length, warn = o.diagnostics.filter(d => d.level === "warn").length;
   $("#live").className = "pl " + (S.err ? "bad" : bad ? "bad" : warn ? "warn" : "ok"); $("#live").innerHTML = `${dot(S.err ? "bad" : bad ? "bad" : warn ? "warn" : "ok")} ${S.err ? "not answering" : bad ? bad + " problem(s)" : warn ? warn + " to look at" : "all fine"} · ${new Date().toLocaleTimeString()}`;
-  $("#body").innerHTML = (VIEWS[S.tab] || vOverview)(o);
+  if (S.tab === "network" && S.netUp && $("#netmap")) { netUpdate(); }
+  else { $("#body").innerHTML = (VIEWS[S.tab] || vOverview)(o); if (S.tab === "network") netUpdate(); }
   if (active && $("#" + active)) { const el = $("#" + active); el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch {} }
 }
 async function loadHist() {
@@ -514,11 +578,12 @@ async function loadHist() {
 async function loadEv() { try { S.ev = await jget("/api/events?range=86400" + (S.evKind ? "&kind=" + S.evKind : "")); } catch {} }
 async function tick(first) {
   try { S.o = await jget("/api/overview"); S.err = ""; } catch (e) { S.err = e.message; }
+  if (S.tab === "network") { try { S.net = await jget("/api/network"); } catch {} }
   if (first || Date.now() - S.t > 30000) { S.t = Date.now(); await loadHist(); if (S.tab === "diagnostics" || first) await loadEv(); }
   if (!hold()) draw();
 }
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-t]"); if (t) { S.tab = t.dataset.t; location.hash = S.tab; if (S.tab === "diagnostics") await loadEv(); if (S.tab === "diagnostics" || S.tab === "control") await loadAudit(); draw(); return; }
+  const t = e.target.closest("[data-t]"); if (t) { S.tab = t.dataset.t; location.hash = S.tab; S.netUp = false; if (S.tab === "network") { try { S.net = await jget("/api/network"); } catch {} } if (S.tab === "diagnostics") await loadEv(); if (S.tab === "diagnostics" || S.tab === "control") await loadAudit(); draw(); return; }
   const r = e.target.closest("#rng button"); if (r) { S.range = +r.dataset.r; document.querySelectorAll("#rng button").forEach(b => b.classList.toggle("on", b === r)); await loadHist(); draw(); return; }
   const k = e.target.closest("[data-ek]"); if (k) { S.evKind = k.dataset.ek; await loadEv(); draw(); return; }
   if (e.target.closest("#refresh")) { S.t = 0; tick(); }

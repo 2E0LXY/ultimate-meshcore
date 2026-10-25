@@ -7,7 +7,7 @@ dashboard's user can open. The helper accepts a short list of operations, checks
 them by calling the same tools an operator would use by hand (umcnet-user, caddy, systemctl).
 Python standard library only.
 """
-import hashlib, hmac, json, os, re, secrets, socket, socketserver, subprocess, sys, threading, time
+import hashlib, hmac, json, os, re, secrets, socketserver, subprocess, threading, time
 
 SOCK = os.environ.get("ADMIN_SOCK", "/run/umcnet-admin/admin.sock")
 USER_TOOL = os.environ.get("ADMIN_USER_TOOL", "/opt/umcnet/umcnet-user")

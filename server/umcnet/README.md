@@ -74,6 +74,7 @@ SQLite under `/var/lib/umcnet-dash`. About 20 MB of memory.
 | Tab | What it shows |
 |---|---|
 | Overview | Repeaters and clients online, packets and messages a minute, dials for CPU, memory, disk, load, certificate and logins, a live data-flow diagram, the checks, charts per repeater and bandwidth, the latest events |
+| Network | A map of every node the repeaters hear, with a line for each link coloured by hops (green direct, blue 1 hop, purple 2, amber 3, orange 4+), filters, a table of links and the journey of each packet |
 | Repeaters | One card per repeater: device id, model, firmware, radio, battery, uptime, noise floor, airtime, counters, clock, packet types; which repeaters hear the same packets and how many hear each |
 | Clients | Everything connected to the broker: account, address, since when, keepalive, protocol, logins in the last hour |
 | Accounts | Every account with its role, bound device id, whether it is online, last login and last data |
