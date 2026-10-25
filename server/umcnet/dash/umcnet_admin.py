@@ -29,6 +29,15 @@ def run(*args, timeout=60):
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
+BCRYPT = re.compile(r"\$2[aby]\$\d\d\$[./A-Za-z0-9]{53}")
+
+
+def bcrypt_from(text):
+    """The bcrypt hash in whatever caddy printed (it may add a notice), or None."""
+    m = BCRYPT.search(text or "")
+    return m.group(0) if m else None
+
+
 def tool(*args):
     rc, out = run(USER_TOOL, *args)
     return {"ok": rc == 0, "output": out, "password": (re.search(r"password: (\S+)", out) or [None, None])[1]}
@@ -63,9 +72,10 @@ def change_dash_password(current, new):
     if not stored or not check_password(current, stored):
         with LOCK: _fails.append(now)
         return {"ok": False, "error": "the current password is not right"}
-    rc, bc = run("caddy", "hash-password", "--plaintext", new)
-    if rc != 0 or not bc.startswith("$2"):
-        return {"ok": False, "error": "could not make the login hash: " + bc[:120]}
+    p = subprocess.run(["caddy", "hash-password", "--plaintext", new], capture_output=True, text=True, timeout=60)
+    bc = bcrypt_from(p.stdout)
+    if p.returncode != 0 or not bc:
+        return {"ok": False, "error": "could not make the login hash: " + (p.stdout + p.stderr).replace(new, "***")[:120]}
     text = open(CADDY_FILE).read()
     new_text, n = re.subn(r"(^\s*admin\s+)\$2[^\s]+", lambda m: m.group(1) + bc, text, count=1, flags=re.M)
     if n != 1:

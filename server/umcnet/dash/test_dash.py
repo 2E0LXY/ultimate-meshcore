@@ -109,6 +109,13 @@ class AdminHelper(unittest.TestCase):
         for bad in ("short1A", "alllowercase123456", "NoDigitsHereAtAll"):
             r = adm.change_dash_password("whatever", bad); self.assertFalse(r["ok"]); self.assertIn("12 or more", r["error"])
 
+    def test_the_hash_is_picked_out_of_whatever_caddy_prints(self):
+        h = "$2a$14$" + "abcdefghijklmnopqrstuv" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ01234"
+        self.assertEqual(h, adm.bcrypt_from(h + "\n"))
+        self.assertEqual(h, adm.bcrypt_from("2026/10/25 notice: something\n" + h + "\nmore text\n"))
+        self.assertIsNone(adm.bcrypt_from("no hash here"))
+        self.assertIsNone(adm.bcrypt_from(None))
+
     def test_names_and_devices_are_checked(self):
         self.assertFalse(adm.handle({"op": "user_add", "name": "Bad Name"})["ok"])
         self.assertFalse(adm.handle({"op": "user_add", "name": "good-name", "role": "admin"})["ok"])
