@@ -41,6 +41,10 @@ class Db:
             self.c.execute("PRAGMA journal_mode=WAL")
         self.c.executescript(SCHEMA)
 
+    def close(self):
+        with self._lock:
+            self.c.close()
+
     # ---- writing
     def _insert(self, table, row):
         keys = list(row)

@@ -37,7 +37,7 @@ class State:
 
 class WebTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.state = State()
         self.state.omit = Runtime(self.tmp.name, now=lambda: NOW)
         self.backend = FakeBackend()
@@ -47,7 +47,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         await self.client.start_server()
 
     async def asyncTearDown(self):
-        self.state.omit.detach()
+        self.state.omit.close()
         await self.client.close()
         self.tmp.cleanup()
 
@@ -202,6 +202,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         await self.client.post("/omit/api/settings", json={"config": {"callsign": "M0TEST"}}, headers=H)
         again = Runtime(self.tmp.name)
         self.assertEqual("M0TEST", again.cfg["callsign"])
+        again.close()
         self.assertEqual(120, len(again.texts["replies"]) * 0 + 120)
 
 

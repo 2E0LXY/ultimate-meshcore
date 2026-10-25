@@ -45,6 +45,11 @@ class Runtime:
             self.engine.stop()
         self.engine, self.backend = None, None
 
+    def close(self):
+        """Let go of the database file (Windows cannot delete or move a file that is still open)."""
+        self.detach()
+        self.db.close()
+
     # ---- settings
     def settings(self):
         """What the page may see. Repeater admin passwords never leave this program: the page only learns

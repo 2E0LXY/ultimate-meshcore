@@ -73,3 +73,8 @@ TEST(NetPacket, RecognisesItsOwnId) {
   EXPECT_FALSE(topicHasId(t, (int)strlen(t), ""));
   EXPECT_FALSE(topicHasId(t, (int)strlen(t), nullptr));
 }
+
+int main(int argc, char **argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
