@@ -8,6 +8,10 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 - ✅ Fixed pages inheriting the Dashboard's styling after it had been opened (the page container kept the dashboard's class, so the Map and others got its padding and green background); the Map now fills its box and the whole window, and fits the window height so its heading stays in view
 
+## Android app 0.1.11
+
+- ✅ Fixes for "the radio is busy" on a flood advert and "can't send to the radio" on Set up Yorkshire: Bluetooth writes are taken one at a time, a late result of an earlier write is no longer mistaken for the next one, and a refused write is retried; an advert, a channel, a name or a location that the radio refuses as busy or out of packet space is asked again (1, 2 and 4 seconds) before the app gives up; setting a channel no longer reports failure if only reading the list back fails; every error now names the radio's own error number and, for a Bluetooth failure, the packet size and the last write status; an advert refused for lack of packet space says how many packets the radio is holding, and the Dashboard shows the radio's transmit queue (red from 8 waiting)
+
 ## Done in 0.1.20
 
 - ✅ **Network map.** The radio's Map page draws a line from this device to every node it knows, coloured by hops (green direct, blue one hop, purple two, amber three, orange more), with a legend. The UMC Net dashboard has a **Network** tab: a map of every node the connected repeaters hear, with a link for each pair coloured the same way (filter by hop count or by one repeater, line weight by packets, dashed when stale), a table of links (heard by, node, nearest hops, packets, SNR, packet types) and the journey of each recent packet (sender, the repeaters that passed it on, the repeater that heard it). Positions come from the nodes' own adverts and, for repeaters with control set up, from asking them

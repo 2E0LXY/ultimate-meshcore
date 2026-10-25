@@ -14,7 +14,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 import uk.umc.app.link.Link
 import uk.umc.app.link.LinkState
 
-class MeshError(message: String) : Exception(message)
+/** [code] is the radio's own error number when it refused a command, otherwise 0. */
+class MeshError(message: String, val code: Int = 0) : Exception(message)
 
 /** A message as the app shows it. */
 /**
@@ -46,6 +47,8 @@ data class RadioStats(
     val recvFlood: Long,
     val recvDirect: Long,
     val recvErrors: Long,
+    val queueLen: Int = -1,          // packets waiting to be sent; -1 when the radio does not say
+    val errFlags: Int = 0,
 )
 
 data class ChatMessage(
@@ -179,12 +182,35 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
             }
             if (!link.send(frame)) {
                 pending.cancel()
-                throw MeshError("could not send to the radio")
+                throw MeshError("could not send to the radio (" + link.diagnostics().ifEmpty { "no link detail" } + ")")
             }
             val r = pending.await() ?: throw MeshError("no reply from the radio")
-            if ((r[0].toInt() and 0xFF) == Resp.ERR) throw MeshError(ErrCode.text(r[1].toInt() and 0xFF))
+            if ((r[0].toInt() and 0xFF) == Resp.ERR) {
+                val code = if (r.size > 1) r[1].toInt() and 0xFF else 0
+                throw MeshError(ErrCode.text(code), code)
+            }
             r
         }
+
+    /**
+     * For commands that are safe to repeat (an advert, setting a channel, a name): when the radio says it
+     * has no space or is busy, it is usually only for a moment, so wait and ask again before giving up.
+     */
+    private suspend fun requestAgain(frame: ByteArray, vararg expect: Int, tries: Int = 4): ByteArray {
+        var wait = 1000L
+        var last: MeshError? = null
+        for (i in 0 until tries) {
+            try {
+                return request(frame, *expect)
+            } catch (e: MeshError) {
+                last = e
+                if (!ErrCode.isTransient(e.code) || i == tries - 1) throw e
+                kotlinx.coroutines.delay(wait)
+                wait = wait * 2
+            }
+        }
+        throw last ?: MeshError("failed")
+    }
 
     /** Waits for a push that arrives later (login result, status, telemetry, trace). */
     private suspend fun waitPush(code: Int, keyPrefix: String?, timeoutMs: Long): ByteArray? =
@@ -329,6 +355,7 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         val packets = request(byteArrayOf(Cmd.GET_STATS.toByte(), 2), Resp.STATS, timeoutMs = 6000)
         val core = request(byteArrayOf(Cmd.GET_STATS.toByte(), 0), Resp.STATS, timeoutMs = 6000)
         if (radio.size < 14 || packets.size < 30 || core.size < 9) return
+        val hasQueue = core.size >= 11            // type, battery 2, uptime 4, error flags 2, queue length 1 after the code
         val r = FrameReader(radio, 2)
         val noise = r.i16()
         val lastRssi = r.i8()
@@ -338,13 +365,15 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         val c = FrameReader(core, 2)
         c.u16()                                       // battery, already shown elsewhere
         val up = c.u32()
+        val errFlags = if (core.size >= 10) c.u16() else 0
+        val queueLen = if (hasQueue) c.u8() else -1
         val p = FrameReader(packets, 2)
         p.u32(); p.u32()                              // totals, we want the breakdown
         radioStats.value = RadioStats(
             noiseFloor = noise, lastRssi = lastRssi, lastSnr = lastSnr,
             txAirSecs = txAir, rxAirSecs = rxAir, upSecs = up,
             sentFlood = p.u32(), sentDirect = p.u32(), recvFlood = p.u32(), recvDirect = p.u32(),
-            recvErrors = p.u32(),
+            recvErrors = p.u32(), queueLen = queueLen, errFlags = errFlags,
         )
     }
 
@@ -553,7 +582,16 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         contacts.value.filter { it.publicKey.startsWith(id.lowercase()) && it.type != ADV_TYPE_CHAT }.joinToString(" / ") { it.name }
 
     suspend fun advert(flood: Boolean) {
-        request(if (flood) FrameBuilder(Cmd.SEND_SELF_ADVERT).u8(1).build() else FrameBuilder(Cmd.SEND_SELF_ADVERT).build(), Resp.OK)
+        try {
+            requestAgain(if (flood) FrameBuilder(Cmd.SEND_SELF_ADVERT).u8(1).build() else FrameBuilder(Cmd.SEND_SELF_ADVERT).build(), Resp.OK)
+        } catch (e: MeshError) {
+            if (e.code != 3) throw e
+            // "no free packet space" for an advert means the radio is holding on to packets it cannot get out
+            runCatching { refreshRadioStats() }
+            val q = radioStats.value?.queueLen?.takeIf { it >= 0 }
+            throw MeshError("the radio has no free packet space (error 3)" + (q?.let { ": $it packet(s) are waiting to be sent" } ?: "") +
+                ". It cannot get its packets out. Look at the Dashboard's noise floor and channel-busy dials, and restart the radio if it stays like this.", 3)
+        }
     }
 
     suspend fun resetPath(contact: Contact) {
@@ -596,17 +634,17 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
     }
 
     suspend fun setChannel(idx: Int, name: String, secret: ByteArray) {
-        request(FrameBuilder(Cmd.SET_CHANNEL).u8(idx).fixed(name, 32).bytes(secret).build(), Resp.OK)
-        refreshChannels()
+        requestAgain(FrameBuilder(Cmd.SET_CHANNEL).u8(idx).fixed(name, 32).bytes(secret).build(), Resp.OK)
+        runCatching { refreshChannels() }                        // the channel is set; a hiccup reading the list back must not undo that
     }
 
     suspend fun setName(name: String) {
-        request(FrameBuilder(Cmd.SET_ADVERT_NAME).text(name).build(), Resp.OK)
+        requestAgain(FrameBuilder(Cmd.SET_ADVERT_NAME).text(name).build(), Resp.OK)
         self.value = self.value?.copy(name = name)
     }
 
     suspend fun setLocation(lat: Double, lon: Double) {
-        request(FrameBuilder(Cmd.SET_ADVERT_LATLON).i32((lat * 1e6).toInt()).i32((lon * 1e6).toInt()).build(), Resp.OK)
+        requestAgain(FrameBuilder(Cmd.SET_ADVERT_LATLON).i32((lat * 1e6).toInt()).i32((lon * 1e6).toInt()).build(), Resp.OK)
         self.value = self.value?.copy(lat = lat, lon = lon)
     }
 

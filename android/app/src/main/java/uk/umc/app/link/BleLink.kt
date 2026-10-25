@@ -11,6 +11,9 @@ import android.bluetooth.BluetoothProfile
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -44,6 +47,12 @@ class BleLink(
     private var gatt: BluetoothGatt? = null
     private var rx: BluetoothGattCharacteristic? = null
     private val writeDone = Channel<Boolean>(Channel.CONFLATED)
+    private val writeLock = Mutex()
+    @Volatile private var mtu = 23
+    @Volatile private var lastStatus = 0
+    @Volatile private var failedWrites = 0
+
+    override fun diagnostics(): String = "Bluetooth packet size $mtu, last write status $lastStatus, $failedWrites failed write(s)"
 
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
@@ -57,6 +66,7 @@ class BleLink(
         }
 
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) this@BleLink.mtu = mtu
             g.discoverServices()
         }
 
@@ -98,6 +108,7 @@ class BleLink(
         }
 
         override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
+            lastStatus = status
             writeDone.trySend(status == BluetoothGatt.GATT_SUCCESS)
         }
     }
@@ -118,19 +129,36 @@ class BleLink(
         gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
     }
 
-    override suspend fun send(frame: ByteArray): Boolean {
+    /**
+     * Android allows one Bluetooth operation at a time: a write started while another is still
+     * going is refused (status 201), and a late result from an earlier write must not be taken for
+     * this one. So writes are taken one at a time, a late result is thrown away first, and a refused
+     * or failed write is tried again a few times before it counts as failed.
+     */
+    override suspend fun send(frame: ByteArray): Boolean = writeLock.withLock {
         val g = gatt ?: return false
         val c = rx ?: return false
-        @Suppress("DEPRECATION")
-        val ok = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            g.writeCharacteristic(c, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
-        } else {
-            c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            c.value = frame
-            g.writeCharacteristic(c)
+        for (attempt in 0 until 5) {
+            while (writeDone.tryReceive().isSuccess) { /* forget any late result of an earlier write */ }
+            @Suppress("DEPRECATION")
+            val started = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                val rc = g.writeCharacteristic(c, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                if (rc != BluetoothGatt.GATT_SUCCESS) lastStatus = rc
+                rc == BluetoothGatt.GATT_SUCCESS
+            } else {
+                c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                c.value = frame
+                g.writeCharacteristic(c)
+            }
+            if (started) {
+                val done = withTimeoutOrNull(8000) { writeDone.receive() }
+                if (done == true) return true
+                if (done == null) lastStatus = -1                 // the radio never confirmed the write
+            }
+            failedWrites++
+            delay(150L * (attempt + 1))                           // let the other operation finish, then try again
         }
-        if (!ok) return false
-        return withTimeoutOrNull(4000) { writeDone.receive() } ?: false
+        false
     }
 
     override fun close() {

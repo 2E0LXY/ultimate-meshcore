@@ -263,6 +263,10 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
                         ))
                         add(Triple("Relaying", if (device?.repeatEnabled == true) "this radio repeats packets" else "client only", dot(device?.repeatEnabled == true, true)))
                         add(Triple("Position", me?.let { if (it.lat != 0.0 || it.lon != 0.0) "%.3f, %.3f".format(it.lat, it.lon) else "not shared" } ?: "—", dot(me?.let { it.lat != 0.0 || it.lon != 0.0 } ?: false, true)))
+                        stats?.queueLen?.takeIf { it >= 0 }?.let { q ->
+                            add(Triple("Transmit queue", if (q == 0) "empty" else "$q packet(s) waiting to be sent" + if (q >= 8) " - the radio cannot get them out" else "",
+                                if (q >= 8) Dc.rd else if (q >= 3) Dc.am else Dc.g))
+                        }
                         add(Triple("Channels", "${channels.size} of ${device?.maxChannels ?: "?"}", Dc.g))
                         add(Triple("Messages", "${messages.count { !it.outgoing }} received · ${messages.size} kept", Dc.g))
                     }

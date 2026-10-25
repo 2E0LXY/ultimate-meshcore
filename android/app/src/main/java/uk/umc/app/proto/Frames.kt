@@ -104,12 +104,15 @@ object ErrCode {
     fun text(code: Int): String = when (code) {
         1 -> "not supported by this radio"
         2 -> "not found"
-        3 -> "no space / busy - try again"
-        4 -> "the radio is busy"
+        3 -> "the radio has no free packet space right now (error 3); wait a few seconds and try again"
+        4 -> "the radio is not ready for that (error 4, busy or in the wrong state); try again in a moment"
         5 -> "storage error"
         6 -> "invalid value"
         else -> "error $code"
     }
+
+    /** Errors that usually pass in a moment: no packet space (3) and busy (4). */
+    fun isTransient(code: Int): Boolean = code == 3 || code == 4
 }
 
 const val ADV_TYPE_CHAT = 1

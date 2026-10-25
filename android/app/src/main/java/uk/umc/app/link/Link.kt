@@ -34,4 +34,7 @@ interface Link {
     suspend fun connect()
     suspend fun send(frame: ByteArray): Boolean
     fun close()
+
+    /** A short account of the link's own state, for error messages (packet size, last write result). */
+    fun diagnostics(): String = ""
 }
