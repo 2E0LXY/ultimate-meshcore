@@ -106,7 +106,7 @@ How it is kept safe:
 | Signature | Each command carries an HMAC-SHA-256 over device id, time, a counter and the command, made with a key only the dashboard and that repeater hold. A wrong signature gets no answer, so it cannot be used to test guesses. |
 | Freshness | The time must be within 5 minutes, later than the repeater's last restart, and the counter must be higher than the last one used: a recorded command cannot be replayed. |
 | Allow-list | Only reads, adverts, stats, clock, restart, and settings for the radio, forwarding, adverts, identity and UMC Net. Passwords, private keys, WiFi, access point, broker address and login, the control key itself, and firmware installs are refused by the repeater whatever the dashboard sends. |
-| Rate limit | 20 commands a minute. |
+| Rate limit | 60 commands a minute (enough to read every setting in one go). |
 | Broker accounts | The `controller` account may only publish to `umcnet/v1/<area>/dev/<id>/cmd` and read `.../resp`. A repeater may read only its own command topic and write only its own answers. |
 
 To put a repeater under control: *Control setup* on its card shows a block of commands (broker address, its account and

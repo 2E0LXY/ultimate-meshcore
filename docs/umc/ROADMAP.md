@@ -8,9 +8,13 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 - ✅ Fixed pages inheriting the Dashboard's styling after it had been opened (the page container kept the dashboard's class, so the Map and others got its padding and green background); the Map now fills its box and the whole window, and fits the window height so its heading stays in view
 
+## Done in 0.1.19
+
+- ✅ Remote control: the repeater now accepts 60 commands a minute (was 20), so the dashboard can read every setting in one go; found by testing on a real repeater
+
 ## Done in 0.1.18
 
-- ✅ **Remote control of repeaters through UMC Net.** The dashboard's Control tab reads and changes a repeater's settings, sends adverts, runs a safe list of commands and restarts it. Commands are signed (HMAC-SHA-256 with a per-repeater key), time-limited, numbered so they cannot be replayed, rate-limited, and checked against a list that never includes passwords, keys, WiFi, broker settings or firmware installs; a bad signature gets no answer at all. Off by default (`mqtt.control`, `mqtt.control.key`), and settings on the MQTT page
+- ✅ **Remote control of repeaters through UMC Net.** The dashboard's Control tab reads and changes a repeater's settings, sends adverts, runs a safe list of commands and restarts it. Commands are signed (HMAC-SHA-256 with a per-repeater key), time-limited, numbered so they cannot be replayed, rate-limited (60 a minute), and checked against a list that never includes passwords, keys, WiFi, broker settings or firmware installs; a bad signature gets no answer at all. Off by default (`mqtt.control`, `mqtt.control.key`), and settings on the MQTT page
 - ✅ **Approval of new repeaters:** an account without a device id waits as *pending* (it may listen, nothing more); the dashboard shows who connected and from where, and you approve it by pasting the repeater's full device id, which must match the one that connected. Block, unblock, new password and remove from the Accounts tab
 - ✅ Dashboard settings (limits for every check, history, confirmation of risky commands), change the dashboard password, an audit log of everything done, alerts to a web address or ntfy, labels and notes for repeaters, CSV and JSON downloads; the privileged parts are a separate small root helper reached over a Unix socket
 

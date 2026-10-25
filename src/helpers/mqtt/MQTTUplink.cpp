@@ -1626,7 +1626,7 @@ void MQTTUplink::drainControl() {
   const uint64_t drift = ts > clock_now ? ts - clock_now : clock_now - ts;
   if (drift > 300 || ts + 2 < _ctl_boot_epoch || n <= _ctl_last_n) { _ctl_old++; publishControlReply(id, false, "refused: too old, or already used"); return; }
   if (now - _ctl_window_at > 60000UL) { _ctl_window_at = now; _ctl_window_count = 0; }
-  if (++_ctl_window_count > 20) { _ctl_busy++; publishControlReply(id, false, "refused: too many commands in a minute"); return; }
+  if (++_ctl_window_count > 60) { _ctl_busy++; publishControlReply(id, false, "refused: too many commands in a minute"); return; }
   _ctl_last_n = n;
   if (!umcctl::commandAllowed(cmd)) { _ctl_denied++; publishControlReply(id, false, "refused: that command cannot be run remotely"); return; }
   if (_ctl_fn == nullptr) { publishControlReply(id, false, "no command handler"); return; }
