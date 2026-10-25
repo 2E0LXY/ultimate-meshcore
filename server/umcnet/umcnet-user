@@ -7,7 +7,7 @@
   umcnet-user list
 
 Roles: admin (everything), repeater (publishes what it hears, takes commands), client (listens),
-viewer (listens only). The topics are the standard MeshCore MQTT layout the firmware already
+viewer (listens only), monitor (the dashboard: reads the broker's statistics and everything under meshcore/). The topics are the standard MeshCore MQTT layout the firmware already
 publishes, so analysers and maps can read them too:
 
   meshcore/<area>/<device id>/raw       a packet the device heard, as JSON with the packet in hex
@@ -24,7 +24,7 @@ HOME = "/opt/umcnet"
 USERS = os.path.join(HOME, "users.json")
 PASSWD = os.path.join(HOME, "passwd")
 ACL = os.path.join(HOME, "acl")
-ROLES = ("admin", "repeater", "client", "viewer")
+ROLES = ("admin", "repeater", "client", "viewer", "monitor")
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,23}$")
 DEVICE = re.compile(r"^[0-9A-F]{64}$")
 
@@ -44,6 +44,8 @@ def save(users):
     with open(tmp, "w") as f:
         json.dump(users, f, indent=1, sort_keys=True)
     os.chmod(tmp, 0o640)
+    try: shutil.chown(tmp, group="umcnet-dash")     # the dashboard reads the account list; nobody else needs to
+    except (LookupError, PermissionError): pass
     os.replace(tmp, USERS)
 
 
@@ -65,6 +67,8 @@ def acl_for(name, info):
                 "topic read meshcore/+/+/status",
                 f"topic read umcnet/v1/+/node/{name}/cmd",
                 f"topic write umcnet/v1/+/node/{name}/resp"]
+    elif role == "monitor":
+        out += ["topic read $SYS/#", "topic read meshcore/#"]
     else:   # client and viewer listen
         out += ["topic read meshcore/+/+/raw",
                 "topic read meshcore/+/+/packets",

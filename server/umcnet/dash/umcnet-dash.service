@@ -1,0 +1,22 @@
+[Unit]
+Description=UMC Net dashboard
+After=umcnet-mosquitto.service network.target
+Wants=umcnet-mosquitto.service
+
+[Service]
+User=umcnet-dash
+Group=umcnet-dash
+SupplementaryGroups=systemd-journal
+ExecStart=/usr/bin/python3 /opt/umcnet-dash/umcnet_dash.py
+Restart=always
+RestartSec=3
+# it only listens on loopback and writes only its own history
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/umcnet-dash
+MemoryMax=150M
+
+[Install]
+WantedBy=multi-user.target

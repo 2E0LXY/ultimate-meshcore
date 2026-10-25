@@ -30,6 +30,7 @@ data class HeardPacket(
     val kind: String,                // ADV, MSG, ACK, TRC, PTH, GRP, REQ, RSP or RAW
     val size: Int,
     val flood: Boolean,
+    val info: PacketInfo? = null,    // who it came from and by which repeater, as far as the packet says
 )
 
 /** The radio's own view of its channel: noise, airtime and what it has sent and heard. */
@@ -317,7 +318,7 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
             11 -> "CTRL"
             else -> "RAW"
         }
-        val p = HeardPacket(System.currentTimeMillis(), snr, rssi, kind, f.size - 3, route == 1 || route == 0)
+        val p = HeardPacket(System.currentTimeMillis(), snr, rssi, kind, f.size - 3, route == 1 || route == 0, PacketInfo.parse(f.copyOfRange(3, f.size)))
         // an hour of traffic is plenty to draw, and keeps the list from growing without end
         heard.value = (heard.value + p).takeLast(600)
     }

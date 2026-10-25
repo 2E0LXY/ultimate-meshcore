@@ -8,6 +8,12 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 - ✅ Fixed pages inheriting the Dashboard's styling after it had been opened (the page container kept the dashboard's class, so the Map and others got its padding and green background); the Map now fills its box and the whole window, and fits the window height so its heading stays in view
 
+## Done in 0.1.17
+
+- ✅ A **?** beside every setting, card, dial and panel (what it is, how to use it, why it matters) and a description under every page title, on the web interface and so in the Desktop app; the UMC Net bridge and its rate limit are now settings on the MQTT page
+- ✅ Senders everywhere: the Live traffic page, the repeater's OLED traffic screen and the T-Deck signal screen name who a packet is from and which repeater passed it on; the Android app does the same on its dashboard (app 0.1.10)
+- ✅ UMC Net dashboard on the server (`server/umcnet/dash`): the broker's statistics, every repeater, who is connected, accounts, live packets, diagnostics, system and log, in the same design
+
 ## Done in 0.1.15
 
 - ✅ Dashboard: Neighbours gains **In radio range**: the repeaters that handed us packets directly (the last hop of what was received), counted over the last 24 h in the browser, because a repeater's own neighbour list only holds adverts heard with no hops and so can be empty while repeaters are clearly in range; an advert's key is matched to the full node name, and our own packets show the node's full name

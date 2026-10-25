@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>UMC Net dashboard</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%A1%3C/text%3E%3C/svg%3E">
+<style>/* ---- Dashboard: dials, charts, connections and data flow ---- */
+.dash2{--g:#2fe27a;--g2:#8dffb0;--cd:#0d1b17;--ln:#1b3a30;--tx:#e9f7ef;--mu:#7fa392;--am:#f2c14e;--bl:#4aa8ff;--pu:#a58bff;--rd:#ff5d6c;color:var(--tx);border-radius:16px;padding:16px;
+  background:radial-gradient(1100px 480px at 15% -8%,#10301f 0,transparent 62%),radial-gradient(900px 420px at 100% 0,#0b2a2a 0,transparent 60%),#07100d}
+.dash2 a{color:var(--g)}
+.dash2 .hd{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px}
+.dash2 .hd h1{margin:0;font-size:26px;letter-spacing:.2px}.dash2 .hd h1 span{color:var(--g)}
+.dash2 .hd p{margin:2px 0 0;color:var(--mu);font-size:13px}
+.dash2 .hd .sp{flex:1}
+.dash2 .pl{display:inline-flex;gap:6px;align-items:center;padding:4px 11px;border-radius:99px;background:#0d2219;border:1px solid var(--ln);color:var(--mu);font-size:12px}
+.dash2 .pl.ok{color:var(--g)}.dash2 .pl.warn{color:var(--am)}.dash2 .pl.bad{color:var(--rd)}
+.dash2 .dot{width:8px;height:8px;border-radius:50%;background:var(--mu);display:inline-block;box-shadow:0 0 8px currentColor}
+.dash2 .dot.ok{background:var(--g);color:var(--g)}.dash2 .dot.warn{background:var(--am);color:var(--am)}.dash2 .dot.bad{background:var(--rd);color:var(--rd)}.dash2 .dot.idle{background:#4d6a5c;color:#4d6a5c;box-shadow:none}
+.dash2 .rng button,.dash2 .tool{background:#0d2219;color:var(--mu);border:1px solid var(--ln);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px}
+.dash2 .rng button.on{color:#06140c;background:var(--g);border-color:var(--g)}
+.dash2 .tool:hover,.dash2 .rng button:hover{border-color:var(--g);color:var(--tx)}
+.dash2 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(172px,1fr));gap:10px;margin-bottom:12px}
+.dash2 .k,.dash2 .pn{background:linear-gradient(180deg,#0e1f19,#0b1814);border:1px solid var(--ln);border-radius:14px;padding:14px;box-shadow:0 0 0 1px #08140f inset,0 8px 24px #0006}
+.dash2 .k{display:flex;gap:10px;align-items:center;position:relative;padding:12px}.dash2 .k>div:nth-child(2){min-width:0;flex:1}
+.dash2 .k .ic{flex:none;width:40px;height:40px;border-radius:11px;background:#0f3a28;color:var(--g);display:grid;place-items:center;font-size:21px;box-shadow:0 0 16px #22d36a40;border:1px solid #1f6a45}
+.dash2 .k small{color:var(--mu);font-size:11.5px;display:block}.dash2 .k b{font-size:24px;line-height:1.15;display:block}
+.dash2 .tr{font-size:12px;color:var(--mu)}.dash2 .tr.up{color:var(--g)}.dash2 .tr.down{color:var(--am)}.dash2 .tr.bad{color:var(--rd)}
+.dash2 .k svg.sp{position:absolute;right:10px;bottom:8px;width:56px;height:22px;opacity:.85}
+.dash2 .panels{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
+.dash2 .s12{grid-column:span 12}.dash2 .s8{grid-column:span 8}.dash2 .s7{grid-column:span 7}.dash2 .s6{grid-column:span 6}.dash2 .s5{grid-column:span 5}.dash2 .s4{grid-column:span 4}
+@media(max-width:1000px){.dash2 .s8,.dash2 .s7,.dash2 .s6,.dash2 .s5,.dash2 .s4{grid-column:span 12}}
+.dash2 .pn h3{margin:0 0 8px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}.dash2 .pn h3 em{font-style:normal;color:var(--mu);font-weight:400;font-size:12px;margin-left:auto}
+.dash2 .chart{position:relative}.dash2 .chart svg{width:100%;height:auto;display:block}
+.dash2 .gl{stroke:#17342a;stroke-width:1}.dash2 .ax{fill:#6f9483;font-size:10px}
+.dash2 .ln{filter:drop-shadow(0 0 4px currentColor)}
+.dash2 .empty{padding:36px 10px;text-align:center;color:var(--mu);font-size:13px}
+.dash2 .tip{position:absolute;pointer-events:none;background:#06130d;border:1px solid var(--g);border-radius:8px;padding:6px 9px;font-size:12px;white-space:nowrap;z-index:5;display:none}
+.dash2 .lgd{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mu);margin-top:4px}.dash2 .lgd i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.dash2 .dials{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px}
+.dash2 .gauge{text-align:center}.dash2 .gauge svg{width:100%;max-width:170px}
+.dash2 .gt{fill:none;stroke:#143027;stroke-width:9;stroke-linecap:round}.dash2 .gv{fill:none;stroke-width:9;stroke-linecap:round}
+.dash2 .gn{fill:var(--tx);font-size:19px;font-weight:700}.dash2 .gs{fill:var(--mu);font-size:7.5px}
+.dash2 .gl2{color:var(--mu);font-size:12px;margin-top:-6px}
+.dash2 .dn{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.dash2 .dn svg{width:150px;flex:none}
+.dash2 .dn ul{list-style:none;margin:0;padding:0;font-size:12.5px;flex:1;min-width:140px}.dash2 .dn li{display:flex;gap:7px;align-items:center;padding:2px 0}.dash2 .dn li b{margin-left:auto;font-weight:600}.dash2 .dn li s{text-decoration:none;color:var(--mu)}
+.dash2 .dn .ct{fill:var(--tx);font-size:18px;font-weight:700}.dash2 .dn .cs{fill:var(--mu);font-size:7px}
+.dash2 table{width:100%;border-collapse:collapse;font-size:13px}.dash2 th{color:var(--mu);font-weight:500;text-align:left;font-size:12px;padding:4px 6px}.dash2 td{white-space:nowrap}.dash2 td b{white-space:normal}.dash2 td{padding:6px;border-top:1px solid #12291f}
+.dash2 .bar{height:7px;border-radius:4px;background:#12291f;min-width:70px}.dash2 .bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#1fb85c,var(--g2))}
+.dash2 .tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;background:#10301f;color:var(--g)}.dash2 .tag.tx{background:#33280f;color:var(--am)}
+.dash2 .conn{display:flex;flex-direction:column;gap:2px}.dash2 .conn div{display:flex;gap:10px;align-items:center;padding:7px 4px;border-top:1px solid #12291f}.dash2 .conn div:first-child{border-top:0}
+.dash2 .conn b{font-weight:600}.dash2 .conn span{color:var(--mu);font-size:12px;margin-left:auto;text-align:right}
+.dash2 .flow svg{width:100%;height:auto}
+.dash2 .fn rect{fill:#0c2018;stroke:#1f6a45;stroke-width:1.2}.dash2 .fn.off rect{stroke:#2a3a34;fill:#0a1511}.dash2 .fn text{fill:var(--tx);font-size:12px;font-weight:600}.dash2 .fn .sb{fill:var(--mu);font-size:10px;font-weight:400}
+.dash2 .fn.hub rect{stroke:var(--g);stroke-width:2;filter:drop-shadow(0 0 10px #2fe27a66)}
+.dash2 .fe{fill:none;stroke:#1d3d31;stroke-width:2.2}.dash2 .fe.on{stroke:var(--g);stroke-dasharray:7 9;animation:dfl var(--d,1.6s) linear infinite;filter:drop-shadow(0 0 3px #2fe27a88)}
+.dash2 .fe.tx.on{stroke:var(--am);filter:drop-shadow(0 0 3px #f2c14e88)}.dash2 .fe.net.on{stroke:var(--bl);filter:drop-shadow(0 0 3px #4aa8ff88)}
+.dash2 .fl{fill:var(--mu);font-size:10px}
+@keyframes dfl{to{stroke-dashoffset:-32}}
+.dash2 .digi{white-space:nowrap;font-family:ui-monospace,Consolas,monospace;font-size:30px;letter-spacing:2px;color:var(--g2);text-shadow:0 0 14px #2fe27a88}
+.dash2 .qa{display:flex;gap:8px;flex-wrap:wrap}
+.dash2 .warnb{background:#33280f;border:1px solid var(--am);color:var(--am);border-radius:10px;padding:8px 12px;margin-bottom:12px}
+.dash2 .fe.on{marker-end:url(#dar-g)}.dash2 .fe.tx.on{marker-end:url(#dar-a)}.dash2 .fe.net.on{marker-end:url(#dar-b)}
+
+
+body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:1500px;margin:0 auto;padding:14px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}.tabs button{background:#0d2219;color:#7fa392;border:1px solid #1b3a30;border-radius:9px;padding:7px 14px;cursor:pointer;font-size:13px}
+.tabs button.on{background:#2fe27a;color:#06140c;border-color:#2fe27a}.tabs button:hover{border-color:#2fe27a;color:#e9f7ef}.tabs button.on:hover{color:#06140c}
+.s3{grid-column:span 3}.s5{grid-column:span 5}
+@media(max-width:1000px){.dash2 .s3{grid-column:span 12}}
+.q{display:inline-grid;place-items:center;width:18px;height:18px;margin-left:7px;border-radius:50%;border:1px solid #2a5a46;background:transparent;color:#8fb3a1;font:700 11px/1 system-ui,sans-serif;cursor:pointer;vertical-align:middle;padding:0}
+.q:hover{background:#2fe27a;border-color:#2fe27a;color:#06140c}
+.helppop{position:absolute;z-index:60;width:min(380px,92vw);padding:12px 14px;border-radius:12px;background:#07130d;border:1px solid #2fe27a;color:#e9f7ef;box-shadow:0 12px 36px #000a;font-size:13px;line-height:1.45}
+.helppop h4{margin:0 0 2px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#2fe27a}.helppop p{margin:0 0 9px}.helppop p:last-child{margin:0}
+.dash2 code{background:#0d2219;border:1px solid #1b3a30;border-radius:6px;padding:1px 6px;font-size:12px;color:#8dffb0}
+.dash2 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.dash2 .tr{color:var(--mu)}.dash2 .conn b{white-space:nowrap}
+</style></head>
+<body><div class="wrap"><div class="dash2">
+<svg width="0" height="0" style="position:absolute"><defs><filter id="dglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<marker id="dar-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#2fe27a"/></marker><marker id="dar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#f2c14e"/></marker><marker id="dar-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#4aa8ff"/></marker></defs></svg>
+<div class="hd"><div><h1><span>UMC Net</span> Dashboard</h1><p id="sub"></p></div><div class="sp"></div>
+<div class="rng" id="rng"><button data-r="3600" class="on">1 h</button> <button data-r="21600">6 h</button> <button data-r="86400">24 h</button> <button data-r="604800">7 d</button></div>
+<span class="pl" id="live"><i class="dot"></i> loading</span><button class="tool" id="refresh">Refresh</button></div>
+<div class="tabs" id="tabs"></div><div id="body"></div></div></div>
+<script>
+const D = {uid: 0};
+const $ = s => document.querySelector(s), esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const S = {o: null, hist: {}, range: 3600, tab: "overview", ev: [], evKind: "", logq: "", pq: "", t: 0, err: ""};
+const TABS = [["overview", "Overview"], ["repeaters", "Repeaters"], ["clients", "Clients"], ["accounts", "Accounts"], ["traffic", "Traffic"], ["diagnostics", "Diagnostics"], ["broker", "Broker"], ["system", "System"], ["log", "Log"]];
+const bytes = n => n == null ? "—" : n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? (n / 1e3).toFixed(1) + " kB" : Math.round(n) + " B";
+const dur = s => { s = Math.round(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d}d ${h}h ${m}m` : h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; };
+const ago = t => !t ? "never" : dur(Math.max(0, Date.now() / 1000 - t)) + " ago";
+const clock = t => t ? new Date(t * 1000).toLocaleString([], {day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit"}) : "—";
+const num = (o, k, d = 0) => { const v = parseFloat(o.sys[k]); return isNaN(v) ? d : v; };
+const dot = l => `<i class="dot ${l}"></i>`;
+
+D.fmt = v => v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, "");
+D.hm = t => new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+D.nice = v => { const p = 10 ** Math.floor(Math.log10(Math.max(v, 1e-9))); return ([1, 2, 5, 10].find(k => k * p >= v) || 10) * p; };
+D.empty = t => `<div class="empty">${esc(t)}</div>`;
+D.area = (series, o = {}) => {
+  const W = o.w || 640, H = o.h || 230, L = 38, R = 12, T = 12, B = 26, id = "dg" + (++D.uid), pts = series.flatMap(s => s.data);
+  if (pts.length < 2) return D.empty("Collecting data. The chart fills in as this page stays open (one point a minute).");
+  const x0 = Math.min(...pts.map(p => p[0])), x1 = Math.max(...pts.map(p => p[0])), ym = D.nice(Math.max(...pts.map(p => p[1]), o.min || 1) * 1.05);
+  const X = t => L + (t - x0) / ((x1 - x0) || 1) * (W - L - R), Y = v => T + (1 - v / ym) * (H - T - B), f = o.fmt || D.fmt;
+  let g = ""; for (let i = 0; i <= 4; i++) { const v = ym * i / 4, y = Y(v); g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" class="gl"/><text x="${L - 6}" y="${y + 3}" class="ax" text-anchor="end">${f(v)}</text>`; }
+  for (let i = 0; i <= 4; i++) { const t = x0 + (x1 - x0) * i / 4; g += `<text x="${X(t)}" y="${H - 7}" class="ax" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${D.hm(t)}</text>`; }
+  const defs = series.map((s, i) => `<linearGradient id="${id}${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".42"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient>`).join("");
+  const body = series.map((s, i) => { if (!s.data.length) return ""; const d = s.data.map((p, j) => (j ? "L" : "M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1)).join(" "), last = s.data[s.data.length - 1];
+    return `<path d="${d} L${X(last[0]).toFixed(1)} ${Y(0)} L${X(s.data[0][0]).toFixed(1)} ${Y(0)}Z" fill="url(#${id}${i})"/><path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" class="ln" style="color:${s.color}"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="3.6" fill="${s.color}"/>`; }).join("");
+  const meta = esc(JSON.stringify({x0, x1, L, R, W, f: o.unit || "", s: series.map(s => ({n: s.name, c: s.color, d: s.data}))}));
+  return `<div class="chart" data-m="${meta}"><svg viewBox="0 0 ${W} ${H}"><defs>${defs}</defs>${g}${body}</svg><div class="tip"></div></div>
+    <div class="lgd">${series.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>`;
+};
+D.bars = (rx, tx, o = {}) => {
+  const W = 640, H = o.h || 230, L = 38, R = 12, T = 12, B = 26, map = new Map();
+  rx.forEach(([t, v]) => map.set(Math.round(t), [v, 0])); tx.forEach(([t, v]) => { const a = map.get(Math.round(t)) || [0, 0]; a[1] = v; map.set(Math.round(t), a); });
+  const rows = [...map].sort((a, b) => a[0] - b[0]); if (rows.length < 2) return D.empty("Collecting data.");
+  const ym = D.nice(Math.max(...rows.map(r => r[1][0] + r[1][1]), 1) * 1.1), bw = Math.max(2, (W - L - R) / rows.length - 2), Y = v => T + (1 - v / ym) * (H - T - B);
+  let g = ""; for (let i = 0; i <= 4; i++) { const v = ym * i / 4; g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" class="gl"/><text x="${L - 6}" y="${Y(v) + 3}" class="ax" text-anchor="end">${D.fmt(v)}%</text>`; }
+  const id = "db" + (++D.uid); const bars = rows.map(([t, [a, b]], i) => { const x = L + i * ((W - L - R) / rows.length) + 1; return `<rect x="${x.toFixed(1)}" y="${Y(a + b).toFixed(1)}" width="${bw.toFixed(1)}" height="${(Y(0) - Y(a + b)).toFixed(1)}" rx="2" fill="url(#${id}a)"/><rect x="${x.toFixed(1)}" y="${Y(b).toFixed(1)}" width="${bw.toFixed(1)}" height="${(Y(0) - Y(b)).toFixed(1)}" rx="2" fill="url(#${id}b)"/>`; }).join("");
+  const xs = [0, 1, 2, 3, 4].map(i => { const r = rows[Math.min(rows.length - 1, Math.round((rows.length - 1) * i / 4))]; return `<text x="${L + (W - L - R) * i / 4}" y="${H - 7}" class="ax" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${D.hm(r[0])}</text>`; }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}"><defs><linearGradient id="${id}a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8dffb0"/><stop offset="1" stop-color="#1fb85c"/></linearGradient><linearGradient id="${id}b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2c14e"/><stop offset="1" stop-color="#b8861c"/></linearGradient></defs>${g}${bars}${xs}</svg>
+    <div class="lgd"><span><i style="background:#2fe27a"></i>Receiving</span><span><i style="background:#f2c14e"></i>Transmitting</span></div>`;
+};
+D.spark = (vals, color = "#2fe27a") => {
+  if (vals.length < 2) return ""; const mx = Math.max(...vals, 1e-9), mn = Math.min(...vals, 0), W = 70, H = 28;
+  const d = vals.map((v, i) => (i ? "L" : "M") + (i / (vals.length - 1) * W).toFixed(1) + " " + (H - 3 - (v - mn) / ((mx - mn) || 1) * (H - 6)).toFixed(1)).join(" ");
+  return `<svg class="sp" viewBox="0 0 ${W} ${H}"><path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" style="filter:drop-shadow(0 0 3px ${color})"/></svg>`;
+};
+D.gauge = (v, min, max, label, text, sub, color) => {
+  const pct = v == null || !isFinite(v) ? 0 : Math.max(0, Math.min(1, (v - min) / (max - min))), r = 42, cx = 55, cy = 55, a0 = 135, sw = 270;
+  const pt = a => [cx + r * Math.cos(a * Math.PI / 180), cy + r * Math.sin(a * Math.PI / 180)];
+  const arc = (a, b) => { const [x1, y1] = pt(a), [x2, y2] = pt(b); return `M${x1.toFixed(2)} ${y1.toFixed(2)} A${r} ${r} 0 ${b - a > 180 ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`; };
+  return `<div class="gauge"><svg viewBox="0 0 110 100"><path d="${arc(a0, a0 + sw)}" class="gt"/>${pct > 0.004 ? `<path d="${arc(a0, a0 + sw * Math.min(pct, 0.9999))}" class="gv" stroke="${color}" filter="url(#dglow)"/>` : ""}
+    <text x="55" y="55" class="gn" text-anchor="middle">${esc(text)}</text><text x="55" y="67" class="gs" text-anchor="middle">${esc(sub)}</text></svg><div class="gl2">${esc(label)}</div></div>`;
+};
+D.level = (v, good, warn, higherIsBetter = true) => v == null ? "#7fa392" : (higherIsBetter ? (v >= good ? "#2fe27a" : v >= warn ? "#f2c14e" : "#ff5d6c") : (v <= good ? "#2fe27a" : v <= warn ? "#f2c14e" : "#ff5d6c"));
+D.donut = (parts, centre, sub) => {
+  const tot = parts.reduce((s, p) => s + p.value, 0); if (!tot) return D.empty("Nothing yet.");
+  const r = 42, C = 2 * Math.PI * r; let off = 0;
+  const segs = parts.filter(p => p.value > 0).map(p => { const len = p.value / tot * C, s = `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${p.color}" stroke-width="13" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 60 60)"/>`; off += len; return s; }).join("");
+  return `<div class="dn"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="${r}" fill="none" stroke="#12291f" stroke-width="13"/>${segs}<text x="60" y="62" class="ct" text-anchor="middle">${esc(centre)}</text><text x="60" y="74" class="cs" text-anchor="middle">${esc(sub)}</text></svg>
+    <ul>${parts.map(p => `<li><i style="background:${p.color};width:9px;height:9px;border-radius:50%;display:inline-block"></i>${esc(p.label)}<b>${p.value}</b><s>${(p.value / tot * 100).toFixed(0)}%</s></li>`).join("")}</ul></div>`;
+};
+D.flowEdge = (x1, y1, x2, y2, cls, rate, on, bend = 0) => {
+  const dur = Math.max(.5, Math.min(3, 2.6 - Math.log10(1 + (rate || 0)) * 1.1)).toFixed(2), mx = (x1 + x2) / 2;
+  return `<path class="fe ${cls} ${on ? "on" : ""}" style="--d:${dur}s" d="M${x1} ${y1} C${mx} ${y1 + bend} ${mx} ${y2 + bend} ${x2} ${y2}"/>`;
+};
+D.flow = (f) => {
+  const W = 720, H = 70 + f.nodes.length * 62, cy = H / 2, hub = [360, cy];
+  const right = f.nodes.map((n, i) => ({...n, x: 600, y: 45 + i * ((H - 90) / Math.max(1, f.nodes.length - 1 || 1)) + (f.nodes.length === 1 ? (H - 90) / 2 : 0)}));
+  let e = D.flowEdge(170, cy - 22, 270, cy - 22, "rx", f.rx, f.rx > 0, -6) + D.flowEdge(270, cy + 22, 170, cy + 22, "tx", f.tx, f.tx > 0, 6);
+  right.forEach(n => { e += D.flowEdge(450, cy, 520, n.y, "net", n.rate || 1, n.ok, 0); });
+  const box = (x, y, w, h, title, sub, cls = "") => `<g class="fn ${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12"/><text x="${x + w / 2}" y="${y + h / 2 - 2}" text-anchor="middle">${esc(title)}</text><text x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle" class="sb">${esc(sub)}</text></g>`;
+  const mk = (id, c) => `<marker id="dar-${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`;
+  return `<div class="flow"><svg viewBox="0 0 ${W} ${H}"><defs>${mk("g", "#2fe27a")}${mk("a", "#f2c14e")}${mk("b", "#4aa8ff")}</defs>${e}
+    ${box(30, cy - 36, 140, 72, "LoRa radio", f.freq, f.rx > 0 || f.tx > 0 ? "" : "")}${box(270, cy - 44, 180, 88, f.name, f.role, "hub")}
+    <text x="220" y="${cy - 30}" class="fl" text-anchor="middle">in ${D.fmt(f.rx)}/min</text><text x="220" y="${cy + 40}" class="fl" text-anchor="middle">out ${D.fmt(f.tx)}/min</text>
+    ${right.map(n => box(520, n.y - 24, 180, 48, n.title, n.sub, n.ok ? "" : "off")).join("")}</svg></div>`;
+};
+
+
+
+const HELP = {
+  repeaters: ["Repeaters that publish what they hear to this broker. Each has its own account bound to its device id.", "Read the table; open a card for details. Online means data arrived in the last 15 minutes.", "Shows which repeaters are alive, how busy they are and how healthy their radios look."],
+  clients: ["Everything connected to the broker right now, taken from the broker's log: repeaters, the dashboard and any app or test tool.", "Read who, from where, since when and how often it reconnects.", "A client that reconnects often has a weak link; one you don't recognise is a security matter."],
+  accounts: ["The login accounts on the broker, their role and (for repeaters) the device id they are allowed to write under.", "Manage them on the server with the umcnet-user tool.", "Accounts are what keep a stranger from injecting packets into your mesh."],
+  traffic: ["The packets repeaters have just reported, decoded as far as is possible without decrypting.", "From shows an advert's sender, or a short code matched to a known repeater. Via is the repeater that handed it on.", "Shows what is moving through the network and how many repeaters heard each packet."],
+  diag: ["Automatic checks of the broker, the server, the certificate and the repeaters.", "Green is fine, amber needs a look, red needs action.", "The quickest way to find out why something stopped working."],
+  heard: ["How many repeaters heard each distinct packet in the last 15 minutes.", "Mostly 1 means the repeaters cover different places; many 2s and 3s mean overlapping coverage.", "Overlap is good for reliability but wastes airtime if there is too much."],
+  overlap: ["For each pair of repeaters, how many packets both heard.", "Read across a row: a big number means those two repeaters hear the same part of the mesh.", "Shows which repeaters could stand in for each other."],
+  broker: ["The broker's own statistics: connections, messages, bandwidth, memory.", "Search the table for a name. Values update every few seconds.", "Tells you how hard the broker is working and whether it is dropping anything."],
+  system: ["The server the broker runs on: processor, memory, disk, network, services and certificate.", "Read the dials; green is fine.", "A full disk or a certificate that is about to expire stops the whole network."],
+  log: ["The broker's own log: logins, disconnects and warnings.", "Type to filter. Newest lines are first.", "The place to look for why one particular repeater can't connect."],
+  flow: ["A picture of the network: repeaters on the left, the secure web front (Caddy) and the broker in the middle, and who listens on the right.", "A line moves while data flows, faster for busier repeaters. Grey means no data lately.", "Shows at a glance who is talking to whom."],
+  events: ["Connections, disconnections, refused logins and warnings, kept for 14 days.", "Filter by kind. Refused logins show the address they came from.", "A pattern of refused logins from one address is someone guessing passwords."],
+  latency: ["The difference between the time a repeater put on a message and the time it reached this server.", "Small is good. Large numbers mean a slow link or a repeater whose clock is wrong.", "A wrong clock on a repeater also makes its packets look old to others."],
+};
+const q = key => HELP[key] ? `<button type="button" class="q" data-hk="${key}" aria-label="What is this?" title="What is this?">?</button>` : "";
+let pop = null;
+document.addEventListener("click", e => {
+  const b = e.target.closest(".q");
+  if (!b) { if (!e.target.closest(".helppop") && pop) { pop.remove(); pop = null; } return; }
+  const same = pop && pop.dataset.k === b.dataset.hk; if (pop) { pop.remove(); pop = null; } if (same) return;
+  const h = HELP[b.dataset.hk]; pop = document.createElement("div"); pop.className = "helppop"; pop.dataset.k = b.dataset.hk;
+  pop.innerHTML = ["What it is", "How to use it", "Why it matters"].map((t, i) => `<h4>${t}</h4><p>${esc(h[i])}</p>`).join(""); document.body.appendChild(pop);
+  const r = b.getBoundingClientRect(); pop.style.left = Math.max(8, Math.min(r.left + scrollX - 10, scrollX + innerWidth - pop.offsetWidth - 8)) + "px"; pop.style.top = (r.bottom + scrollY + 8) + "px";
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && pop) { pop.remove(); pop = null; } });
+
+async function jget(u) { const r = await fetch(u, {cache: "no-store"}); if (!r.ok) throw new Error(u + " " + r.status); return r.json(); }
+const panel = (title, note, inner, hk = "", cls = "s12") => `<div class="pn ${cls}"><h3>${esc(title)}${hk ? q(hk) : ""} <em>${esc(note || "")}</em></h3>${inner}</div>`;
+const table = (heads, rows, empty = "Nothing yet.") => `<div style="overflow-x:auto"><table><thead><tr>${heads.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="${heads.length}" class="tr">${esc(empty)}</td></tr>`}</tbody></table></div>`;
+const kpi = (ic, label, value, note, nc = "") => `<div class="k"><div class="ic">${ic}</div><div><small>${esc(label)}</small><b>${value}</b><span class="tr ${nc}">${note || ""}</span></div></div>`;
+const series = (k, color, name, scale = 1) => ({name, color, data: (S.hist[k] || []).map(([t, v]) => [t, v * scale])});
+
+function devName(o, id) { const d = o.devices.find(x => x.id === id); return d ? (d.name || id.slice(0, 8)) : id.slice(0, 8); }
+function resolveHash(o, hex) {
+  if (!hex) return "";
+  const hits = o.devices.filter(d => d.id.toLowerCase().startsWith(hex.toLowerCase()));
+  return hits.length === 1 ? (hits[0].name || hex) : hits.length > 1 ? hex + " (" + hits.length + " repeaters)" : hex;
+}
+function who(o, p) {
+  if (p.name) return p.name;
+  if (p.key) { const r = resolveHash(o, p.key); if (r !== p.key) return r; return p.key; }
+  if (p.src) return resolveHash(o, p.src) + (p.dst ? " → " + resolveHash(o, p.dst) : "");
+  if (p.chan) return "channel " + p.chan;
+  return "—";
+}
+const level = (v, good, warn, hib = false) => v == null ? "#7fa392" : (hib ? (v >= good ? "#2fe27a" : v >= warn ? "#f2c14e" : "#ff5d6c") : (v <= good ? "#2fe27a" : v <= warn ? "#f2c14e" : "#ff5d6c"));
+
+function flowNet(o) {
+  const devs = o.devices.slice(0, 6), W = 820, H = 70 + Math.max(devs.length, 3) * 56, cy = H / 2;
+  const edge = (x1, y1, x2, y2, cls, rate, on) => D.flowEdge(x1, y1, x2, y2, cls, rate, on);
+  let e = "", nodes = "";
+  const box = (x, y, w, h, t, sub, cls = "") => `<g class="fn ${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11"/><text x="${x + w / 2}" y="${y + h / 2 - 1}" text-anchor="middle">${esc(t.length > 20 ? t.slice(0, 19) + "…" : t)}</text><text x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle" class="sb">${esc(sub.length > 26 ? sub.slice(0, 25) + "…" : sub)}</text></g>`;
+  devs.forEach((d, i) => { const y = 40 + i * ((H - 80) / Math.max(1, devs.length - 1 || 1)) + (devs.length === 1 ? (H - 80) / 2 : 0), on = d.age < 300; e += edge(190, y, 330, cy, "rx", d.pm + 1, on); nodes += box(10, y - 24, 180, 48, d.name || d.id.slice(0, 8), on ? d.pm.toFixed(1) + " packets/min" : "quiet " + dur(d.age), on ? "" : "off"); });
+  const msgs = o.rates.messages, cl = num(o, "$SYS/broker/clients/connected"), up = o.mqtt.state === "connected";
+  e += edge(450, cy, 520, cy, "net", msgs + 1, msgs > 0 || cl > 0);
+  const subs = o.clients.filter(c => c.state === "connected" && c.user !== "dash");
+  e += edge(650, cy - 30, 700, cy - 52, "tx", 1, up) + edge(650, cy + 30, 700, cy + 52, "net", subs.length, subs.length > 0);
+  nodes += box(330, cy - 36, 120, 72, "Caddy", o.cert && o.cert.days != null ? "TLS " + Math.round(o.cert.days) + " d left" : "TLS ?", "") +
+    box(520, cy - 44, 130, 88, "Mosquitto", cl + " clients · " + msgs.toFixed(0) + "/min", "hub") +
+    box(700, cy - 76, 112, 48, "This dashboard", up ? "monitoring" : "disconnected", up ? "" : "off") +
+    box(700, cy + 28, 112, 48, "Other listeners", subs.length + " connected", subs.length ? "" : "off");
+  return `<div class="flow"><svg viewBox="0 0 ${W} ${H}">${e}${nodes}</svg></div>`;
+}
+
+function vOverview(o) {
+  const reps = o.accounts.filter(a => a.role === "repeater"), on = o.devices.filter(d => d.age < 900);
+  const cl = num(o, "$SYS/broker/clients/connected"), up = num(o, "$SYS/broker/uptime"), sys = o.system, cert = o.cert || {};
+  const bad = o.diagnostics.filter(d => d.level === "bad").length, warn = o.diagnostics.filter(d => d.level === "warn").length;
+  const kpis = [kpi("⌖", "Repeaters online", `${on.length} / ${Math.max(reps.length, on.length)}`, `${o.devices.length} have sent data`),
+    kpi("⇄", "Clients connected", cl, `of ${num(o, "$SYS/broker/clients/total")} known · most ${num(o, "$SYS/broker/clients/maximum")}`),
+    kpi("⇩", "Packets heard / min", o.rates.packets.toFixed(1), `${o.rates.unique.toFixed(1)} distinct / min`),
+    kpi("✉", "Broker messages / min", o.rates.messages.toFixed(0), `${num(o, "$SYS/broker/subscriptions/count")} subscriptions`),
+    kpi("⏱", "Broker uptime", `<span class="digi" style="font-size:20px">${up ? dur(up) : "—"}</span>`, "since last restart"),
+    kpi("🔒", "Certificate", cert.days != null ? Math.round(cert.days) + " days" : "?", cert.issuer || cert.error || "", cert.days != null && cert.days < 14 ? "down" : "")].join("");
+  const dials = [D.gauge(sys.cpu, 0, 100, "CPU", sys.cpu == null ? "—" : Math.round(sys.cpu) + "%", "server", level(sys.cpu, 50, 80)),
+    D.gauge(100 * (1 - sys.mem_avail / sys.mem_total), 0, 100, "Memory used", Math.round(100 * (1 - sys.mem_avail / sys.mem_total)) + "%", bytes(sys.mem_total - sys.mem_avail), level(100 * (1 - sys.mem_avail / sys.mem_total), 70, 85)),
+    D.gauge(100 * (1 - sys.disk_free / sys.disk_total), 0, 100, "Disk used", Math.round(100 * (1 - sys.disk_free / sys.disk_total)) + "%", bytes(sys.disk_free) + " free", level(100 * (1 - sys.disk_free / sys.disk_total), 70, 85)),
+    D.gauge(sys.load[0], 0, (sys.cores || 1) * 2, "Load (1 min)", sys.load[0].toFixed(2), (sys.cores || 1) + " core(s)", level(sys.load[0], sys.cores || 1, (sys.cores || 1) * 1.5)),
+    D.gauge(cert.days, 0, 90, "Certificate", cert.days != null ? Math.round(cert.days) : "—", "days left", level(cert.days, 30, 14, true)),
+    D.gauge(num(o, "$SYS/broker/load/connections/1min"), 0, 60, "Logins / min", num(o, "$SYS/broker/load/connections/1min").toFixed(1), "broker 1 min avg", level(num(o, "$SYS/broker/load/connections/1min"), 5, 15))].join("");
+  const top = o.devices.slice(0, 6), colors = ["#2fe27a", "#4aa8ff", "#f2c14e", "#a58bff", "#ff8f5a", "#5be3d8"];
+  const dg = o.diagnostics.filter(d => d.level !== "ok").slice(0, 8), okn = o.diagnostics.filter(d => d.level === "ok").length;
+  const diag = `<div class="conn">${dg.map(d => `<div>${dot(d.level)}<b>${esc(d.title)}</b><span>${esc(d.detail)}</span></div>`).join("") || `<div>${dot("ok")}<b>Everything checked is fine</b><span>${okn} checks</span></div>`}</div>`;
+  const evs = o.events.filter(e => e.kind !== "start").slice(0, 8);
+  return `<div class="kpis">${kpis}</div><div class="panels">
+    ${panel("Packets and messages", "per minute, " + rangeLabel(), D.area([series("pkts_pm", "#2fe27a", "Packets heard"), series("unique_pm", "#4aa8ff", "Distinct packets"), series("msgs_pm", "#f2c14e", "Broker messages")], {unit: "/min", w: 700}), "", "s7")}
+    ${panel("Clients and repeaters", "online now and before", D.area([series("clients", "#4aa8ff", "Clients connected"), series("repeaters", "#2fe27a", "Repeaters sending")], {unit: "", w: 460, min: 2}), "", "s5")}
+    ${panel("Dials", "the server, live", `<div class="dials">${dials}</div>`, "system")}
+    ${panel("Data flow", "who talks to whom, right now", flowNet(o), "flow", "s7")}
+    ${panel("Checks", `${bad} red · ${warn} amber · ${okn} fine`, diag, "diag", "s5")}
+    ${panel("Each repeater", "packets per minute", D.area(top.map((d, i) => series("dev:" + d.id.slice(0, 16), colors[i], d.name || d.id.slice(0, 8))), {unit: "/min", w: 700}), "repeaters", "s7")}
+    ${panel("Bandwidth", "bytes per minute through the broker", D.area([series("bytes_rx_1m", "#2fe27a", "Received"), series("bytes_tx_1m", "#f2c14e", "Sent")], {w: 460, fmt: v => v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? (v / 1e3).toFixed(0) + "k" : Math.round(v)}), "", "s5")}
+    ${panel("Latest events", "connections, refusals, warnings", table(["When", "Kind", "Who", "What"], evs.map(e => `<tr><td>${clock(e.t)}</td><td><span class="tag ${e.kind === "auth_fail" || e.kind === "warn" ? "tx" : ""}">${esc(e.kind)}</span></td><td>${esc(e.user || e.client || "")}${e.ip ? ` <span class="tr">${esc(e.ip)}</span>` : ""}</td><td>${esc(e.text)}</td></tr>`)), "events")}
+  </div>`;
+}
+const rangeLabel = () => ({3600: "last hour", 21600: "last 6 hours", 86400: "last 24 hours", 604800: "last 7 days"}[S.range]);
+
+function vRepeaters(o) {
+  const cards = o.devices.map((d, i) => {
+    const st = d.stats || {}, on = d.age < 900, ty = Object.entries(d.types).sort((a, b) => b[1] - a[1]), tot = ty.reduce((s, x) => s + x[1], 0), colors = {ADVERT: "#2fe27a", CHAN: "#4aa8ff", RESP: "#e977c5", REQ: "#e977c5", MSG: "#a58bff", ACK: "#f2c14e", PATH: "#ff8f5a", TRACE: "#5be3d8"};
+    const rows = [["Device id", `<code style="font-size:11px;word-break:break-all">${d.id}</code>`], ["Area", d.area], ["Model / firmware", `${esc(d.model || "—")} · ${esc(d.fw || "—")}`], ["Radio", esc(d.radio || "—")], ["Repeating", esc(d.repeat || "—")],
+      ["Reports", esc(d.status)], ["Last data", ago(d.last)], ["Last status", d.last_status ? ago(d.last_status) : "never"], ["Uptime", st.uptime_secs != null ? dur(st.uptime_secs) : "—"], ["Battery", st.battery_mv ? (st.battery_mv / 1000).toFixed(2) + " V" : "—"],
+      ["Noise floor", st.noise_floor != null ? st.noise_floor + " dBm" : "—"], ["Airtime (tx / rx)", st.tx_air_secs != null ? `${dur(st.tx_air_secs)} / ${dur(st.rx_air_secs)}` : "—"], ["Packets (device count)", st.packets_received != null ? `${st.packets_received} in · ${st.packets_sent} out` : "—"],
+      ["Receive errors", st.recv_errors ?? "—"], ["Last RSSI / SNR", d.rssi != null ? `${d.rssi} dBm / ${d.snr ?? "—"} dB` : "—"], ["Seen here", `${d.n_rx} received · ${d.n_tx} sent · ${d.topics.raw || 0} raw · ${d.topics.packets || 0} decoded · ${d.topics.status || 0} status`],
+      ["Clock vs server", d.skew != null ? d.skew.toFixed(1) + " s" : "—"], ["First seen", clock(d.first)]];
+    return panel(d.name || d.id.slice(0, 12), on ? `${d.pm.toFixed(1)} packets/min` : "quiet", `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">${dot(on ? "ok" : "warn")}<span class="tr">${on ? "online" : "no data for " + dur(d.age)}</span></div>
+      <table><tbody>${rows.map(r => `<tr><td class="tr" style="width:44%">${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</tbody></table>
+      ${tot ? `<div style="margin-top:8px">${D.donut(ty.slice(0, 6).map(([k, v]) => ({label: k, value: v, color: colors[k] || "#7fa392"})), String(tot), "packets")}</div>` : ""}`, "", "s6");
+  }).join("");
+  const ids = o.overlap.ids;
+  const mat = ids.length > 1 ? table([""].concat(o.overlap.names.map(n => esc(n.slice(0, 14)))), o.overlap.m.map((row, i) => `<tr><td><b>${esc(o.overlap.names[i])}</b></td>${row.map(v => v == null ? `<td class="tr">·</td>` : `<td style="background:rgba(47,226,122,${Math.min(.55, v / Math.max(1, ...o.overlap.m.flat().filter(x => x)) * .55)})">${v}</td>`).join("")}</tr>`)) : `<p class="tr">Needs two repeaters sending packets.</p>`;
+  const hb = Object.entries(o.heard_by), hbt = hb.reduce((s, x) => s + x[1], 0);
+  return `<div class="panels">${cards || panel("Repeaters", "", `<div class="empty">No repeater has sent anything since the dashboard started.</div>`, "repeaters")}
+    ${panel("Who hears the same packets", "packets both repeaters heard, last 15 minutes", mat, "overlap", "s7")}
+    ${panel("Heard by how many", hbt + " distinct packets, last 15 minutes", hbt ? D.donut(hb.map(([k, v], i) => ({label: k + (k === "1" ? " repeater" : " repeaters"), value: v, color: ["#2fe27a", "#4aa8ff", "#f2c14e", "#a58bff", "#ff8f5a"][i % 5]})), String(hbt), "packets") : `<div class="empty">Nothing yet.</div>`, "heard", "s5")}</div>`;
+}
+
+function vClients(o) {
+  const acc = Object.fromEntries(o.accounts.map(a => [a.name, a]));
+  const rows = o.clients.map(c => `<tr><td>${dot(c.state === "connected" ? "ok" : "idle")}</td><td><b>${esc(c.user || "—")}</b> <span class="tr">${esc(acc[c.user] ? acc[c.user].role : "")}</span></td><td class="tr" style="max-width:240px;overflow:hidden;text-overflow:ellipsis">${esc(c.client)}</td><td>${esc(c.ip || "")}</td><td>${c.state === "connected" ? dur(c.age) : esc(c.why || "disconnected")}</td><td>${c.keepalive ?? ""}s</td><td>MQTT 3.1.${c.proto === 4 ? "1" : c.proto === 5 ? "x" : "?"}</td><td>${c.recent}</td><td>${c.connects}</td></tr>`);
+  return `<div class="panels">${panel("Connected and recent clients", "from the broker's log", table(["", "Account", "Client id", "From", "Connected for / ended", "Keepalive", "Protocol", "Logins last hour", "Logins total"], rows, "No connection seen since the dashboard started."), "clients")}</div>`;
+}
+
+function vAccounts(o) {
+  const rows = o.accounts.map(a => `<tr><td>${dot(a.online ? "ok" : "idle")}</td><td><b>${esc(a.name)}</b></td><td><span class="tag">${esc(a.role)}</span></td><td>${a.device ? `<code style="font-size:11px">${a.device.slice(0, 16)}…</code> ${esc(a.device_name || "")}` : a.role === "repeater" ? `<span class="tr" style="color:#f2c14e">not bound</span>` : "—"}</td><td>${a.online ? "online · " + esc(a.ip) : "offline"}</td><td>${a.last ? ago(a.last) : "not since the dashboard started"}</td><td>${a.device_seen ? ago(a.device_seen) : "—"}</td></tr>`);
+  return `<div class="panels">${panel("Accounts", `${o.accounts.length} on the broker`, table(["", "Account", "Role", "Device id", "Now", "Last login", "Last data"], rows), "accounts")}
+    ${panel("Managing accounts", "on the server", `<table><tbody><tr><td><code>umcnet-user list</code></td><td>show accounts</td></tr><tr><td><code>umcnet-user add NAME repeater --device &lt;64 hex&gt;</code></td><td>create or reset a repeater, bound to its device id (it can write only there)</td></tr><tr><td><code>umcnet-user add NAME viewer</code></td><td>read-only listener</td></tr><tr><td><code>umcnet-user device NAME &lt;64 hex&gt;</code></td><td>change a repeater's device id</td></tr><tr><td><code>umcnet-user remove NAME</code></td><td>delete an account</td></tr></tbody></table><p class="tr" style="margin-top:8px">Roles: admin (everything), repeater (publishes under its own id, reads everyone's raw packets and status), client and viewer (listen only), monitor (this dashboard: reads the broker's statistics and everything under meshcore/).</p>`, "", "s12")}</div>`;
+}
+
+function vTraffic(o) {
+  const f = S.pq.toLowerCase(), rows = o.packets.filter(p => !f || JSON.stringify(p).toLowerCase().includes(f)).slice(0, 60).map(p => `<tr><td>${clock(p.t).split(", ").pop()}</td><td>${esc(devName(o, p.dev))}</td><td><span class="tag ${p.dir === "tx" ? "tx" : ""}">${p.dir.toUpperCase()}</span></td><td>${esc(p.type)} <span class="tr">${p.flood ? "flood" : "direct"}</span></td><td><b>${esc(who(o, p))}</b></td><td>${esc(p.via ? resolveHash(o, p.via) : p.hops === 0 ? "direct" : "—")}</td><td>${p.hops}</td><td>${p.rssi ?? ""} / ${p.snr ?? ""}</td><td>${p.len ?? ""}</td></tr>`);
+  const ty = Object.entries(o.types).sort((a, b) => b[1] - a[1]), colors = {ADVERT: "#2fe27a", CHAN: "#4aa8ff", RESP: "#e977c5", REQ: "#e977c5", MSG: "#a58bff", ACK: "#f2c14e", PATH: "#ff8f5a", TRACE: "#5be3d8"};
+  const l = o.latency;
+  return `<div class="panels">${panel("Live packets", "newest first", `<div class="row" style="margin-bottom:8px"><input id="pq" placeholder="Filter by name, type, repeater…" value="${esc(S.pq)}" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 10px;width:260px"></div>` + table(["Time", "Heard by", "Dir", "Type", "From", "Via", "Hops", "RSSI / SNR", "Bytes"], rows), "traffic", "s8")}
+    ${panel("Packet types", "since the dashboard started", ty.length ? D.donut(ty.slice(0, 7).map(([k, v]) => ({label: k, value: v, color: colors[k] || "#7fa392"})), String(ty.reduce((s, x) => s + x[1], 0)), "packets") : `<div class="empty">Nothing yet.</div>`, "", "s4")}
+    ${panel("Delivery delay", "device clock to this server", l.n ? `<div class="dials">${D.gauge(l.avg, 0, 10, "Average", l.avg + " s", l.n + " messages", level(l.avg, 2, 6))}${D.gauge(l.max, 0, 30, "Slowest", l.max + " s", "", level(l.max, 5, 15))}</div>` : `<div class="empty">No timestamps seen yet.</div>`, "latency", "s4")}</div>`;
+}
+
+function vDiag(o) {
+  const lv = {bad: 0, warn: 1, ok: 2}, dg = o.diagnostics.slice().sort((a, b) => lv[a.level] - lv[b.level]);
+  const ips = {}; S.ev.filter(e => e.kind === "auth_fail").forEach(e => { const k = e.ip || "unknown"; ips[k] = (ips[k] || 0) + 1; });
+  const ipRows = Object.entries(ips).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([ip, n]) => `<tr><td>${esc(ip)}</td><td>${n}</td></tr>`);
+  const kinds = ["", "connect", "disconnect", "timeout", "auth_fail", "warn"];
+  return `<div class="panels">${panel("All checks", dg.filter(d => d.level !== "ok").length + " need attention", `<div class="conn">${dg.map(d => `<div>${dot(d.level)}<b>${esc(d.title)}</b><span>${esc(d.detail)}</span></div>`).join("")}</div>`, "diag", "s7")}
+    ${panel("Refused logins by address", "last 24 hours", table(["Address", "Refusals"], ipRows, "None. Nobody has been refused.") + `<p class="tr" style="margin-top:8px">Many refusals from one address is someone guessing passwords. Consider fail2ban or limiting the address in Caddy.</p>`, "events", "s5")}
+    ${panel("Event history", "kept 14 days", `<div class="rng" style="margin-bottom:8px">${kinds.map(k => `<button data-ek="${k}" class="${S.evKind === k ? "on" : ""}">${k || "all"}</button>`).join(" ")}</div>` + table(["When", "Kind", "Who", "From", "What"], S.ev.slice(0, 150).map(e => `<tr><td>${clock(e.ts)}</td><td><span class="tag ${e.kind === "auth_fail" || e.kind === "warn" ? "tx" : ""}">${esc(e.kind)}</span></td><td>${esc(e.user || e.client)}</td><td>${esc(e.ip)}</td><td>${esc(e.text)}</td></tr>`), "No events in this period."), "events")}</div>`;
+}
+
+function vBroker(o) {
+  const f = (S.bq || "").toLowerCase(), rows = Object.entries(o.sys).filter(([k]) => !f || k.toLowerCase().includes(f)).sort().map(([k, v]) => `<tr><td class="tr">${esc(k.replace("$SYS/broker/", ""))}</td><td>${esc(v)}</td></tr>`);
+  const l = n => ["1min", "5min", "15min"].map(w => num(o, `$SYS/broker/load/${n}/${w}`).toFixed(1)).join(" · ");
+  const sum = [["Version", esc(o.sys["$SYS/broker/version"] || "")], ["Uptime", dur(num(o, "$SYS/broker/uptime"))], ["Clients connected / total / most", `${num(o, "$SYS/broker/clients/connected")} / ${num(o, "$SYS/broker/clients/total")} / ${num(o, "$SYS/broker/clients/maximum")}`],
+    ["Subscriptions", num(o, "$SYS/broker/subscriptions/count")], ["Retained messages", num(o, "$SYS/broker/retained messages/count")], ["Messages received / sent", `${num(o, "$SYS/broker/messages/received")} / ${num(o, "$SYS/broker/messages/sent")}`],
+    ["Publishes received / sent", `${num(o, "$SYS/broker/publish/messages/received")} / ${num(o, "$SYS/broker/publish/messages/sent")}`], ["Bytes received / sent", `${bytes(num(o, "$SYS/broker/bytes/received"))} / ${bytes(num(o, "$SYS/broker/bytes/sent"))}`],
+    ["Messages dropped", num(o, "$SYS/broker/publish/messages/dropped")], ["Stored messages", `${num(o, "$SYS/broker/store/messages/count")} (${bytes(num(o, "$SYS/broker/store/messages/bytes"))})`], ["Heap now / most", `${bytes(num(o, "$SYS/broker/heap/current"))} / ${bytes(num(o, "$SYS/broker/heap/maximum"))}`],
+    ["Sockets open", num(o, "$SYS/broker/sockets/count", num(o, "$SYS/broker/clients/connected"))], ["Logins per minute (1·5·15)", l("connections")], ["Publishes in per minute (1·5·15)", l("publish/received")], ["Publishes out per minute (1·5·15)", l("publish/sent")], ["Bytes in per minute (1·5·15)", l("bytes/received")], ["Bytes out per minute (1·5·15)", l("bytes/sent")]];
+  return `<div class="panels">${panel("Summary", "the broker", `<table><tbody>${sum.map(r => `<tr><td class="tr" style="width:48%">${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</tbody></table>`, "broker", "s5")}
+    ${panel("Every statistic", Object.keys(o.sys).length + " values", `<div class="row" style="margin-bottom:8px"><input id="bq" placeholder="Search…" value="${esc(S.bq || "")}" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 10px;width:240px"></div>` + table(["Name", "Value"], rows), "", "s7")}
+    ${panel("Broker history", rangeLabel(), D.area([series("pub_rx_1m", "#2fe27a", "Publishes in /min"), series("pub_tx_1m", "#f2c14e", "Publishes out /min"), series("dropped_1m", "#ff5d6c", "Dropped /min")], {unit: "/min", w: 1100}), "", "s12")}</div>`;
+}
+
+function vSystem(o) {
+  const s = o.system, c = o.cert || {};
+  const rows = [["Uptime", dur(s.uptime)], ["CPU", s.cpu == null ? "—" : s.cpu + "%"], ["Cores", s.cores], ["Load", s.load.join(" · ")], ["Memory", `${bytes(s.mem_total - s.mem_avail)} used of ${bytes(s.mem_total)}`], ["Swap", `${bytes(s.swap_total - s.swap_free)} of ${bytes(s.swap_total)}`], ["Disk", `${bytes(s.disk_total - s.disk_free)} used of ${bytes(s.disk_total)}`],
+    ["Broker process", `${bytes(s.broker_rss)} memory · ${s.broker_fds ?? "—"} open files`], ["This dashboard", `${bytes(s.dash_rss)} memory · history database ${bytes(s.db_bytes)}`], ["Dashboard link to broker", `${o.mqtt.state}${o.mqtt.reconnects ? " · " + o.mqtt.reconnects + " reconnects" : ""}`]];
+  const svc = Object.entries(s.services).map(([k, v]) => `<tr><td>${dot(v === "active" ? "ok" : "bad")}</td><td><b>${esc(k)}</b></td><td>${esc(v)}</td></tr>`);
+  const net = Object.entries(s.net).filter(([k]) => k !== "lo").map(([k, v]) => `<tr><td><b>${esc(k)}</b></td><td>${bytes(v.rx)}</td><td>${bytes(v.tx)}</td></tr>`);
+  const cs = c.error ? `<div class="empty">${esc(c.error)}</div>` : `<table><tbody><tr><td class="tr">Host</td><td>${esc(c.host)}</td></tr><tr><td class="tr">Issuer</td><td>${esc(c.issuer || "")}</td></tr><tr><td class="tr">Expires</td><td>${clock(c.expires)}</td></tr><tr><td class="tr">Days left</td><td>${c.days}</td></tr></tbody></table>`;
+  return `<div class="panels">${panel("Server", "", `<table><tbody>${rows.map(r => `<tr><td class="tr" style="width:40%">${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</tbody></table>`, "system", "s5")}
+    ${panel("Services", "", table(["", "Service", "State"], svc), "", "s4")}${panel("Certificate", "", cs, "", "s3")}
+    ${panel("Processor, memory and disk", rangeLabel(), D.area([series("cpu", "#2fe27a", "CPU %"), series("mem_pct", "#4aa8ff", "Memory %"), series("disk_pct", "#f2c14e", "Disk %")], {unit: "%", w: 1100}), "", "s12")}
+    ${panel("Network interfaces", "bytes since boot", table(["Interface", "Received", "Sent"], net), "", "s6")}</div>`;
+}
+
+function vLog(o) {
+  const f = S.logq.toLowerCase(), rows = o.log.filter(l => !f || l.line.toLowerCase().includes(f)).map(l => `<tr><td style="white-space:nowrap">${clock(l.t).split(", ").pop()}</td><td style="white-space:normal;font-family:ui-monospace,Consolas,monospace;font-size:12px">${esc(l.line)}</td></tr>`);
+  return `<div class="panels">${panel("Broker log", "newest first", `<div class="row" style="margin-bottom:8px"><input id="lq" placeholder="Filter…" value="${esc(S.logq)}" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 10px;width:260px"></div>` + table(["Time", "Line"], rows), "log")}</div>`;
+}
+
+const VIEWS = {overview: vOverview, repeaters: vRepeaters, clients: vClients, accounts: vAccounts, traffic: vTraffic, diagnostics: vDiag, broker: vBroker, system: vSystem, log: vLog};
+function draw() {
+  const o = S.o; if (!o) return;
+  const active = document.activeElement && document.activeElement.id;
+  $("#tabs").innerHTML = TABS.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? "on" : ""}">${l}</button>`).join("");
+  $("#sub").textContent = `${o.host} · broker ${o.sys["$SYS/broker/version"] || ""} · dashboard ${o.version}`;
+  const bad = o.diagnostics.filter(d => d.level === "bad").length, warn = o.diagnostics.filter(d => d.level === "warn").length;
+  $("#live").className = "pl " + (S.err ? "bad" : bad ? "bad" : warn ? "warn" : "ok"); $("#live").innerHTML = `${dot(S.err ? "bad" : bad ? "bad" : warn ? "warn" : "ok")} ${S.err ? "not answering" : bad ? bad + " problem(s)" : warn ? warn + " to look at" : "all fine"} · ${new Date().toLocaleTimeString()}`;
+  $("#body").innerHTML = (VIEWS[S.tab] || vOverview)(o);
+  if (active && $("#" + active)) { const el = $("#" + active); el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch {} }
+}
+async function loadHist() {
+  const keys = ["pkts_pm", "unique_pm", "msgs_pm", "clients", "repeaters", "bytes_rx_1m", "bytes_tx_1m", "pub_rx_1m", "pub_tx_1m", "dropped_1m", "cpu", "mem_pct", "disk_pct"].concat((S.o ? S.o.devices.slice(0, 6) : []).map(d => "dev:" + d.id.slice(0, 16)));
+  try { S.hist = await jget("/api/history?range=" + S.range + "&k=" + keys.join(",")); } catch {}
+}
+async function loadEv() { try { S.ev = await jget("/api/events?range=86400" + (S.evKind ? "&kind=" + S.evKind : "")); } catch {} }
+async function tick(first) {
+  try { S.o = await jget("/api/overview"); S.err = ""; } catch (e) { S.err = e.message; }
+  if (first || Date.now() - S.t > 30000) { S.t = Date.now(); await loadHist(); if (S.tab === "diagnostics" || first) await loadEv(); }
+  draw();
+}
+document.addEventListener("click", async e => {
+  const t = e.target.closest("[data-t]"); if (t) { S.tab = t.dataset.t; location.hash = S.tab; if (S.tab === "diagnostics") await loadEv(); draw(); return; }
+  const r = e.target.closest("#rng button"); if (r) { S.range = +r.dataset.r; document.querySelectorAll("#rng button").forEach(b => b.classList.toggle("on", b === r)); await loadHist(); draw(); return; }
+  const k = e.target.closest("[data-ek]"); if (k) { S.evKind = k.dataset.ek; await loadEv(); draw(); return; }
+  if (e.target.closest("#refresh")) { S.t = 0; tick(); }
+});
+document.addEventListener("input", e => { if (e.target.id === "pq") { S.pq = e.target.value; draw(); } else if (e.target.id === "bq") { S.bq = e.target.value; draw(); } else if (e.target.id === "lq") { S.logq = e.target.value; draw(); } });
+document.addEventListener("mousemove", e => {
+  const c = e.target.closest(".chart"), tip = c && c.querySelector(".tip"); document.querySelectorAll(".tip").forEach(t => { if (t !== tip) t.style.display = "none"; }); if (!c) return;
+  const m = JSON.parse(c.dataset.m), svg = c.querySelector("svg"), rc = svg.getBoundingClientRect(), x = (e.clientX - rc.left) / rc.width * m.W, t = m.x0 + (x - m.L) / ((m.W - m.L - m.R) || 1) * (m.x1 - m.x0);
+  if (t < m.x0 - 60 || t > m.x1 + 60) { tip.style.display = "none"; return; }
+  const rows = m.s.map(s => { const p = s.d.reduce((b, q) => Math.abs(q[0] - t) < Math.abs(b[0] - t) ? q : b, s.d[0] || [0, 0]); return `<span style="color:${s.c}">●</span> ${esc(s.n)}: <b>${D.fmt(p[1])}${esc(m.f)}</b>`; }).join("<br>");
+  tip.innerHTML = `${D.hm(t)}<br>${rows}`; tip.style.display = "block"; tip.style.left = Math.min(e.clientX - c.getBoundingClientRect().left + 14, c.clientWidth - 170) + "px"; tip.style.top = "8px";
+});
+S.tab = (location.hash || "#overview").slice(1); if (!VIEWS[S.tab]) S.tab = "overview";
+tick(true); setInterval(() => tick(), 5000);
+
+</script></body></html>

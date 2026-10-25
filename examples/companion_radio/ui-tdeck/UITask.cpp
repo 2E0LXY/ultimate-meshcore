@@ -1559,6 +1559,37 @@ void UITask::drawInfo() {
 // ---------------------------------------------------------------- home + radio
 
 // The newest received (not transmitted) packet in the log, or NULL when nothing is logged.
+// A contact whose key starts with this one byte, when exactly one does; otherwise false.
+static bool contactNameByHash(uint8_t h, char* out, size_t n) {
+  int hits = 0;
+  ContactInfo c, found;
+  for (int i = 0; the_mesh.getContactByIdx(i, c); i++) {
+    if (c.id.pub_key[0] == h && ++hits == 1) found = c;
+  }
+  if (hits != 1) return false;
+  snprintf(out, n, "%s", found.name);
+  return true;
+}
+
+// Who the newest received packet came from: an advert's name, a contact matched by hash, or the raw code.
+static void describeLastHeard(const UmcTraffic::Entry* e, char* out, size_t n) {
+  if (e == NULL) { snprintf(out, n, "Nothing heard yet"); return; }
+  char who[24] = "";
+  if (e->name[0]) snprintf(who, sizeof(who), "%s", e->name);
+  else if ((e->flags & UmcTraffic::F_ENDS) && !contactNameByHash(e->src, who, sizeof(who))) snprintf(who, sizeof(who), "%02X", e->src);
+  else if ((e->flags & UmcTraffic::F_CHAN) && !who[0]) snprintf(who, sizeof(who), "channel %02X", e->chan);
+  else if (!who[0]) snprintf(who, sizeof(who), "%s", UmcTraffic::typeName(e->type));
+  char via[24] = "";
+  if (e->flags & UmcTraffic::F_VIA) {
+    char vn[24];
+    if (contactNameByHash(e->via, vn, sizeof(vn))) snprintf(via, sizeof(via), " via %s", vn);
+    else snprintf(via, sizeof(via), " via %02X", e->via);
+  } else if (e->hops == 0) {
+    snprintf(via, sizeof(via), " direct");
+  }
+  snprintf(out, n, "Heard: %s%s", who, via);
+}
+
 static const UmcTraffic::Entry* lastReceived() {
   for (int i = 0; i < umc_traffic.count(); i++) {
     const UmcTraffic::Entry* e = umc_traffic.get(i);
@@ -1863,6 +1894,11 @@ void UITask::drawRadio() {
            (unsigned long)the_mesh.getNumSentDirect(), (unsigned long)the_mesh.getNumRecvFlood(),
            (unsigned long)the_mesh.getNumRecvDirect());
   textClip(4, y, 312, buf, C_DIM);
+  y += 12;
+  if (y + 10 <= SCR_H - TAB_H) {                         // one more line, if the screen has room for it
+    describeLastHeard(last_rx, buf, sizeof(buf));
+    textClip(4, y, 312, buf, C_TXT);
+  }
 }
 
 

@@ -116,10 +116,26 @@ public:
     }
   }
 
-  // "RX CHAN F h3 -97/6.2" style line (max ~21 chars for a 128px OLED)
+  // Who sent it, in as few characters as possible: an advert's name, a request/response/message's
+  // "src>dst" hashes, a channel's hash, or empty when the packet doesn't say.
+  static void sender(const Entry& e, char* out, size_t n) {
+    if (e.name[0]) snprintf(out, n, "%s", e.name);
+    else if (e.flags & F_ENDS) snprintf(out, n, "%02X>%02X", e.src, e.dst);
+    else if (e.flags & F_KEY) snprintf(out, n, "%02X%02X..", e.key[0], e.key[1]);
+    else if (e.flags & F_CHAN) snprintf(out, n, "ch %02X", e.chan);
+    else if (n) out[0] = 0;
+  }
+
+  // "RX ADVERT name" / "RX RESP  B0>A1 F4" / "RX CHAN  F4 v11" style line (about 21 chars for a 128px OLED)
   static void formatShort(const Entry& e, char* out, size_t n) {
+    char who[16];
+    sender(e, who, sizeof(who));
     if (e.tx) {
-      snprintf(out, n, "TX %-6s %s", typeName(e.type), e.flood ? "flood" : "direct");
+      snprintf(out, n, "TX %-6s %s", typeName(e.type), who[0] ? who : (e.flood ? "flood" : "direct"));
+    } else if (who[0]) {
+      snprintf(out, n, "RX %-6s%s %c%d", typeName(e.type), who, e.flood ? 'F' : 'D', e.hops);
+    } else if (e.flags & F_VIA) {
+      snprintf(out, n, "RX %-6s%c%d v%02X %d/%.0f", typeName(e.type), e.flood ? 'F' : 'D', e.hops, e.via, e.rssi, e.snr4 / 4.0f);
     } else {
       snprintf(out, n, "RX %-6s%c%d %d/%.0f", typeName(e.type), e.flood ? 'F' : 'D', e.hops, e.rssi, e.snr4 / 4.0f);
     }

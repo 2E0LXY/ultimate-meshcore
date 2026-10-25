@@ -329,14 +329,19 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
                 DashPanel("Recent activity", "newest first") {
                     val recent = heard.takeLast(10).reversed()
                     if (recent.isEmpty()) EmptyNote("No packets yet.") else recent.forEach { p ->
-                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("RX", color = Dc.g, fontSize = 11.sp, modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Color(0xFF10301F)).padding(horizontal = 8.dp, vertical = 1.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(p.kind, color = Dc.tx, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.width(52.dp))
-                            Text(if (p.flood) "flood" else "direct", color = Dc.mu, fontSize = 12.sp, modifier = Modifier.weight(1f).fillMaxHeight())
-                            Text("${p.rssi} / ${DashMath.fmt(p.snr)}", color = Dc.mu, fontSize = 12.sp)
-                            Spacer(Modifier.width(10.dp))
-                            Text("${((tick - p.at) / 1000).coerceAtLeast(0)}s", color = Dc.mu, fontSize = 12.sp)
+                        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("RX", color = Dc.g, fontSize = 11.sp, modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Color(0xFF10301F)).padding(horizontal = 8.dp, vertical = 1.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(p.kind, color = Dc.mu, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.width(46.dp))
+                                Text(DashWho.who(p, contacts), color = Dc.tx, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+                                Text("${((tick - p.at) / 1000).coerceAtLeast(0)}s", color = Dc.mu, fontSize = 12.sp)
+                            }
+                            val hops = p.info?.hops ?: 0
+                            Text(
+                                "via ${DashWho.via(p, contacts)} · $hops hop${if (hops == 1) "" else "s"} · ${if (p.flood) "flood" else "direct"} · ${p.rssi} / ${DashMath.fmt(p.snr)}",
+                                color = Dc.mu, fontSize = 11.sp, modifier = Modifier.padding(start = 70.dp),
+                            )
                         }
                     }
                 }
