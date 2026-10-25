@@ -43,6 +43,7 @@ object AppState {
         loadScopes()
         loadRegions()
         loadLook()
+        uk.umc.app.ui.DashHistory.init(context)
         ackDisplay.value = prefs.getString("ackShow", "count") ?: "count"
         val last = prefs.getString("last", null)
         savedDevices.value.firstOrNull { it.key() == last }?.let { connect(it) }
@@ -102,6 +103,7 @@ object AppState {
         s.scopeFor = { channel -> channelScope(channel) }
         session.value = s
         s.start()
+        scope.launch { uk.umc.app.ui.DashHistory.run(s) }
         scope.launch { l.state.collect { linkState.value = it } }
         scope.launch { s.events.collect { say(it) } }
         scope.launch { l.connect() }
