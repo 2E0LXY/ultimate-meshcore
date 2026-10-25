@@ -258,6 +258,9 @@ def handle_log(line, at=None):
         cid, why = m.group(1), m.group(2)
         with LOCK:
             c = CLIENTS.get(cid)
+            if c and "already connected" in why:       # the same client id came back: the next 'disconnected' is its old, stale session
+                c["takeover"] = True; return
+            if c and c.pop("takeover", False) and why == "disconnected": return
             if c: c["state"] = "disconnected"; c["last"] = at; c["why"] = why
         event("timeout" if "timeout" in why else "disconnect", why, cid, (c or {}).get("user", ""), (c or {}).get("ip", ""), at); return
     if re.search(r"\b(Error|error|Warning|warning)\b", line): event("warn", line[:200], at=at)
