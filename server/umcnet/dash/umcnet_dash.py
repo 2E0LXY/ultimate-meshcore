@@ -405,10 +405,11 @@ def diagnostics(sysinfo, accs, cert):
             if not a["device"]: add("warn", "Repeater account without a device id: " + a["name"], "bind it with: umcnet-user device %s <64 hex>" % a["name"])
             elif not a["online"]: add("warn", "Repeater offline: " + a["name"], "last connected %s" % (time.strftime("%d %b %H:%M", time.localtime(a["last"])) if a["last"] else "never since this dashboard started"))
     for d in DEV.values():
-        age = now - d["last"]
-        if age > 900: add("warn", "No data from %s" % (d["name"] or d["id"][:12]), "last heard %d min ago" % (age // 60))
+        age = now - d["last"] if d["last"] else None
+        if age is None: add("warn", "No data yet from %s" % (d["name"] or d["id"][:12]), "known only from its saved status message; nothing live since the dashboard started")
+        elif age > 900: add("warn", "No data from %s" % (d["name"] or d["id"][:12]), "last heard %d min ago" % (age // 60))
         if d["skew"] is not None and abs(d["skew"]) > 120: add("warn", "Clock off on %s" % (d["name"] or d["id"][:12]), "%+.0f s against this server (its NTP may be down)" % d["skew"])
-        if d["status"] == "offline" and age > 300: add("warn", "%s reports itself offline" % (d["name"] or d["id"][:12]), "its last status message said offline and nothing has arrived since")
+        if d["status"] == "offline" and (age is None or age > 300): add("warn", "%s reports itself offline" % (d["name"] or d["id"][:12]), "its last status message said offline and nothing has arrived since")
     dr = sysnum("$SYS/broker/load/publish/dropped/1min")
     if dr > 0: add("warn", "Broker is dropping messages", "%.1f a minute (a slow subscriber or full queues)" % dr)
     return out
@@ -418,7 +419,7 @@ def overview():
     with LOCK:
         devs = []
         for d in DEV.values():
-            x = dict(d); x["types"] = dict(d["types"]); x["topics"] = dict(d["topics"]); x["pm"] = round(rate_per_min("pkt:" + d["id"], 300), 2); x["age"] = round(now - d["last"], 1); devs.append(x)
+            x = dict(d); x["types"] = dict(d["types"]); x["topics"] = dict(d["topics"]); x["pm"] = round(rate_per_min("pkt:" + d["id"], 300), 2); x["age"] = round(now - d["last"], 1) if d["last"] else 10 ** 9; devs.append(x)
         devs.sort(key=lambda d: -d["last"])
         clients = []
         for c in CLIENTS.values():

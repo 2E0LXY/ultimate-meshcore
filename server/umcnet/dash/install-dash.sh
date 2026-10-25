@@ -25,7 +25,7 @@ chmod 644 /opt/umcnet-dash/umcnet_dash.py /opt/umcnet-dash/dash.html
 
 # the broker account the dashboard listens with
 if [ ! -s /opt/umcnet-dash/mqtt.pass ]; then
-  pw=$(/opt/umcnet/umcnet-user add dash monitor | sed -n 's/.*password: //p')
+  NEWACCOUNT=1; pw=$(/opt/umcnet/umcnet-user add dash monitor | sed -n 's/.*password: //p')
   install -m 640 -o root -g umcnet-dash /dev/null /opt/umcnet-dash/mqtt.pass; printf '%s' "$pw" > /opt/umcnet-dash/mqtt.pass
 else
   /opt/umcnet/umcnet-user list | grep -q '^dash ' || { echo "the dash account is missing; remove /opt/umcnet-dash/mqtt.pass and run again"; exit 3; }
@@ -55,7 +55,8 @@ else
 fi
 
 systemctl daemon-reload; systemctl enable --now umcnet-dash >/dev/null 2>&1; systemctl restart umcnet-dash
-systemctl reload umcnet-mosquitto 2>/dev/null || systemctl restart umcnet-mosquitto
+# the broker only needs to re-read its permissions when the monitor account was just created; a restart drops every repeater for a minute
+if [ -n "${NEWACCOUNT:-}" ]; then systemctl reload umcnet-mosquitto 2>/dev/null || systemctl restart umcnet-mosquitto; fi
 sleep 3
 systemctl is-active umcnet-dash umcnet-mosquitto caddy
 curl -fsS http://127.0.0.1:9102/api/health && echo
