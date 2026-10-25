@@ -80,11 +80,11 @@ class BrokerLog(unittest.TestCase):
     def test_a_reconnect_with_the_same_client_id_stays_connected(self):
         # the broker logs the new connection first, then closes the old stale one
         dash.handle_log("1: New client connected from 1.1.1.1:1 as c9 (p2, c1, k60, u'rep').")
+        dash.handle_log("2: Client c9 already connected, closing old connection.")      # the order a real broker logs it in
         dash.handle_log("2: New client connected from 1.1.1.1:2 as c9 (p2, c1, k60, u'rep').")
-        dash.handle_log("2: Client c9 already connected, closing old connection.")
-        dash.handle_log("2: Client c9 disconnected.")
+        dash.handle_log("2: Client c9 closed its connection.")
         self.assertEqual("connected", dash.CLIENTS["c9"]["state"])
-        dash.handle_log("9: Client c9 disconnected.")                      # a real, later disconnect still counts
+        dash.handle_log("9: Client c9 closed its connection.")                       # a real, later disconnect still counts
         self.assertEqual("disconnected", dash.CLIENTS["c9"]["state"])
 
     def test_a_disconnect_marks_the_client(self):

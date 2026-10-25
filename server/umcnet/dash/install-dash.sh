@@ -45,15 +45,20 @@ fi
 
 # the dashboard login (user "admin"), kept with the other credentials
 CRED=/root/umcnet-credentials.txt; touch "$CRED"; chmod 600 "$CRED"
-if ! grep -q '^dashboard-login ' "$CRED"; then
+# a login that already exists is never touched by a re-run (it may have been changed from the Settings tab)
+hash=$(sed -n 's/^[[:space:]]*admin[[:space:]]\{1,\}\(\$2[a-z]\$[^[:space:]]*\).*/\1/p' /etc/caddy/conf.d/umcnet.caddy 2>/dev/null | head -1)
+if [ -n "$hash" ]; then
+  webpw="(unchanged: the login you already have)"
+else
   webpw=$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)
+  grep -v '^dashboard-login ' "$CRED" > "$CRED.new" || true; mv "$CRED.new" "$CRED"; chmod 600 "$CRED"
   printf 'dashboard-login admin %s   (https://%s/)\n' "$webpw" "$HOST" >> "$CRED"
+  hash=$(caddy hash-password --plaintext "$webpw")
+  rm -f /etc/umcnet-dash/admin.pbkdf2          # the helper's own check must match the new login
 fi
-webpw=$(grep '^dashboard-login ' "$CRED" | awk '{print $3}')
-hash=$(caddy hash-password --plaintext "$webpw")
 # the admin helper checks the current password with its own salted hash when the login is changed
 install -d -m 700 /etc/umcnet-dash
-[ -s /etc/umcnet-dash/admin.pbkdf2 ] || WEBPW="$webpw" python3 -c "import hashlib,os,secrets;s=secrets.token_bytes(16);print('200000$%s$%s' % (s.hex(), hashlib.pbkdf2_hmac('sha256', os.environ['WEBPW'].encode(), s, 200000).hex()))" > /etc/umcnet-dash/admin.pbkdf2 && chmod 600 /etc/umcnet-dash/admin.pbkdf2
+case "$webpw" in "("*) ;; *) [ -s /etc/umcnet-dash/admin.pbkdf2 ] || WEBPW="$webpw" python3 -c "import hashlib,os,secrets;s=secrets.token_bytes(16);print('200000$%s$%s' % (s.hex(), hashlib.pbkdf2_hmac('sha256', os.environ['WEBPW'].encode(), s, 200000).hex()))" > /etc/umcnet-dash/admin.pbkdf2 && chmod 600 /etc/umcnet-dash/admin.pbkdf2 ;; esac
 
 # publish through Caddy, keeping the old file if Caddy does not like the result
 CF=/etc/caddy/Caddyfile; mkdir -p /etc/caddy/conf.d
@@ -74,4 +79,4 @@ if [ -n "${NEWACCOUNT:-}" ]; then systemctl reload umcnet-mosquitto 2>/dev/null 
 sleep 3
 systemctl is-active umcnet-admin umcnet-dash umcnet-mosquitto caddy
 curl -fsS http://127.0.0.1:9102/api/health && echo
-echo "dashboard: https://$HOST/   login: admin / $webpw   (also in $CRED)"
+echo "dashboard: https://$HOST/   login: admin / $webpw"

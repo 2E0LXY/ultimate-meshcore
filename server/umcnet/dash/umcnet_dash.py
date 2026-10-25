@@ -260,7 +260,7 @@ def handle_log(line, at=None):
             c = CLIENTS.get(cid)
             if c and "already connected" in why:       # the same client id came back: the next 'disconnected' is its old, stale session
                 c["takeover"] = True; return
-            if c and c.pop("takeover", False) and why == "disconnected": return
+            if c and c.pop("takeover", False): return   # the broker logs: "already connected, closing old" -> "New client connected" -> "closed its connection" (the old one)
             if c: c["state"] = "disconnected"; c["last"] = at; c["why"] = why
         event("timeout" if "timeout" in why else "disconnect", why, cid, (c or {}).get("user", ""), (c or {}).get("ip", ""), at); return
     if re.search(r"\b(Error|error|Warning|warning)\b", line): event("warn", line[:200], at=at)
