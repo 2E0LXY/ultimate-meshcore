@@ -722,14 +722,31 @@ D.resolve = (hex, routes) => {                 // a one-byte hash or a key prefi
   return hits.length === 1 ? {name: hits[0].name, sure: true} : hits.length > 1 ? {name: hex.toUpperCase() + " (" + hits.length + " nodes)", sure: false} : {name: hex.toUpperCase(), sure: false};
 };
 D.who = (p, routes) => {
-  if (p.tx) return p.name ? p.name + " (this node)" : "this node";
+  if (p.tx) return (D.self || p.name || "this node") + " (this node)";
+  if (p.key) { const r = D.resolve(p.key, routes); if (r && r.sure) return r.name; }
   if (p.name) return p.name;
-  if (p.key) { const r = D.resolve(p.key, routes); return r && r.sure ? r.name : p.key; }
+  if (p.key) return p.key;
   if (p.src) { const a = D.resolve(p.src, routes), b = p.dst ? D.resolve(p.dst, routes) : null; return a.name + (b ? " → " + b.name : ""); }
   if (p.chan) return "channel " + p.chan;
   return "—";
 };
 D.via = (p, routes) => p.tx ? "—" : p.via ? D.resolve(p.via, routes).name : p.hops === 0 ? "direct" : "—";
+D.hopKey = () => "umc_hops1:" + (INFO ? INFO.name : "");
+D.hops = null;
+D.noteHops = (packets, nowMs) => {              // each received packet's last hop is a repeater we hear directly
+  if (!D.hops) { try { D.hops = JSON.parse(localStorage.getItem(D.hopKey()) || "null") || {n: {}, seen: []}; } catch { D.hops = {n: {}, seen: []}; } }
+  const h = D.hops, seen = new Set(h.seen);
+  for (const p of packets || []) {
+    if (p.tx || !p.via) continue;
+    const sig = [p.type, p.rssi, p.snr, p.len, p.via, Math.round((nowMs / 1000 - p.age) / 2)].join("|");
+    if (seen.has(sig)) continue; seen.add(sig); h.seen.push(sig);
+    const e = h.n[p.via] || (h.n[p.via] = {n: 0, snr: -99, rssi: -999, last: 0});
+    e.n++; e.snr = Math.max(e.snr, +p.snr); e.rssi = Math.max(e.rssi, p.rssi); e.last = Math.max(e.last, Math.round(nowMs / 1000 - p.age));
+  }
+  if (h.seen.length > 300) h.seen = h.seen.slice(-200);
+  const cut = nowMs / 1000 - 86400; for (const k of Object.keys(h.n)) if (h.n[k].last < cut) delete h.n[k];
+  try { localStorage.setItem(D.hopKey(), JSON.stringify(h)); } catch {}
+};
 D.parseMqtt = t => { const m = {}; String(t || "").replace(/^>\s*/, "").split(/\s+/).forEach(w => { const i = w.indexOf(":"); if (i > 0) m[w.slice(0, i)] = w.slice(i + 1); }); return m; };
 
 async function renderDash(view) {
@@ -758,7 +775,7 @@ async function renderDash(view) {
       KP("⇩", "Received this hour", tRx.cur == null ? esc(String(pk.recv ?? "—")) : Math.round(tRx.cur), tRx.cur == null ? {text: "since boot: " + (pk.recv ?? "—")} : trendOf(tRx), D.spark(rxS.slice(-30).map(p => p[1]))),
       KP("⇧", "Sent this hour", tTx.cur == null ? esc(String(pk.sent ?? "—")) : Math.round(tTx.cur), tTx.cur == null ? {text: "since boot: " + (pk.sent ?? "—")} : trendOf(tTx), D.spark(txS.slice(-30).map(p => p[1]), "#f2c14e")),
       KP("◔", "Airtime this hour", airPct == null ? "—" : D.fmt(airPct) + "%", airPct == null ? {text: "collecting history…"} : {text: `receiving ${D.fmt(rxH / 36)}% · sending ${D.fmt(txH / 36)}%`}),
-      roleOk(RS) ? (neigh && neigh.length ? KP("⌖", "Neighbours", neigh.length, {text: "best SNR " + Math.max(...neigh.map(n => n.snr)).toFixed(1) + " dB"}) : KP("⌖", "Nodes known", (D.routes || []).length || "—", {text: (D.routes || []).length ? "none heard directly · nearest " + Math.min(...D.routes.map(r => r.hops)) + " hop(s)" : "none heard directly"})) : KP("☎", "Contacts / channels", cc ? `${cc.contacts ?? "—"} / ${cc.channels ?? "—"}` : "—", {text: cc ? `${cc.queued ?? 0} waiting for an app` : ""}),
+      roleOk(RS) ? (neigh && neigh.length ? KP("⌖", "Neighbours", neigh.length, {text: "best SNR " + Math.max(...neigh.map(n => n.snr)).toFixed(1) + " dB"}) : Object.keys((D.hops && D.hops.n) || {}).length ? KP("⌖", "In radio range", Object.keys(D.hops.n).length, {text: "repeaters heard handing us packets"}) : KP("⌖", "Nodes known", (D.routes || []).length || "—", {text: (D.routes || []).length ? "none heard directly · nearest " + Math.min(...D.routes.map(r => r.hops)) + " hop(s)" : "none heard directly"})) : KP("☎", "Contacts / channels", cc ? `${cc.contacts ?? "—"} / ${cc.channels ?? "—"}` : "—", {text: cc ? `${cc.queued ?? 0} waiting for an app` : ""}),
       KP("⏱", "Uptime", `<span id="kUp" class="digi" style="font-size:22px">${fmtUp(core.uptime_secs)}</span>`, {text: INFO.reset ? "last restart: " + INFO.reset : ""}),
       KP("🔋", "Battery", bat ? bat.toFixed(2) + " V" : "—", {cls: batPct != null && batPct < 25 ? "bad" : "", text: batPct != null ? `about ${batPct}% full` : "no battery sensor"})].join("");
     const snrQ = radio.last_snr == null ? null : Math.max(0, Math.min(100, (radio.last_snr + 15) / 30 * 100));
@@ -776,9 +793,11 @@ async function renderDash(view) {
     const fd = [{label: "Flood received", value: pk.flood_rx ?? 0, color: "#2fe27a"}, {label: "Direct received", value: pk.direct_rx ?? 0, color: "#4aa8ff"}, {label: "Flood sent", value: pk.flood_tx ?? 0, color: "#f2c14e"}, {label: "Direct sent", value: pk.direct_tx ?? 0, color: "#a58bff"}];
     const sig = [{name: "Noise floor (dBm)", color: "#ff8f5a", data: D.series(["noise"], win, bucket, "avg").map(p => [p[0], p[1] + 130])}, {name: "Last signal (RSSI, dBm)", color: "#2fe27a", data: D.series(["rssi"], win, bucket, "avg").map(p => [p[0], p[1] + 130])}];
     const connRows = conn.map(c => `<div><i class="dot ${c.state}"></i><b>${esc(c.name)}</b><span>${esc(c.detail)}</span></div>`).join("");
-    const neighRows = neigh && neigh.length ? neigh.slice(0, 8).map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name || "name not heard yet")}</b> <span class="tr">${esc(n.id)}</span></td><td>${n.snr.toFixed(1)} dB</td><td><div class="bar"><i style="width:${Math.max(4, Math.min(100, (n.snr + 20) * 3))}%"></i></div></td><td>${esc(n.ago)}</td></tr>`).join("") : `<tr><td colspan="5" class="tr">No repeater has been heard directly yet. A repeater only lists neighbours it hears straight from the air (adverts with no hops).</td></tr>`;
+    const neighRows = neigh && neigh.length ? neigh.slice(0, 8).map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name || "name not heard yet")}</b> <span class="tr">${esc(n.id)}</span></td><td>${n.snr.toFixed(1)} dB</td><td><div class="bar"><i style="width:${Math.max(4, Math.min(100, (n.snr + 20) * 3))}%"></i></div></td><td>${esc(n.ago)}</td></tr>`).join("") : `<tr><td colspan="5" class="tr">No repeater advert has been heard with no hops yet. The lists below show who is in range anyway.</td></tr>`;
     const known = (D.routes || []).filter(r => r.ago >= 0 || r.hops >= 0).sort((a, b) => (a.hops - b.hops) || ((a.ago < 0 ? 1e9 : a.ago) - (b.ago < 0 ? 1e9 : b.ago)));
     const agoText = a => a < 0 ? "—" : a < 120 ? a + " s ago" : a < 7200 ? Math.round(a / 60) + " min ago" : a < 172800 ? Math.round(a / 3600) + " h ago" : Math.round(a / 86400) + " days ago";
+    const inRange = Object.entries((D.hops && D.hops.n) || {}).map(([k, e]) => ({k, ...e, who: D.resolve(k, D.routes)})).sort((a, b) => b.snr - a.snr);
+    const rangeRows = inRange.length ? `<h3 style="margin-top:12px">In radio range <em>repeaters that handed us packets directly, last 24 h</em></h3><table><thead><tr><th>Repeater</th><th>Packets</th><th>Best SNR</th><th></th><th>Last heard</th></tr></thead><tbody>${inRange.slice(0, 8).map(r => `<tr><td><b>${esc(r.who.name)}</b></td><td>${r.n}</td><td>${r.snr.toFixed(1)} dB</td><td><div class="bar"><i style="width:${Math.max(4, Math.min(100, (r.snr + 20) * 3))}%"></i></div></td><td>${agoText(Math.max(0, Math.round(Date.now() / 1000 - r.last)))}</td></tr>`).join("")}</tbody></table>` : "";
     const nearRows = known.length ? `<h3 style="margin-top:12px">Nearest known nodes <em>${known.length} known in all, by hops</em></h3><table><thead><tr><th>Node</th><th>Type</th><th>Hops</th><th>SNR</th><th>Last advert</th></tr></thead><tbody>${known.slice(0, 8).map(r => `<tr><td><b>${esc(r.name || r.key)}</b></td><td><span class="tag">${esc(r.type)}</span></td><td>${r.hops === 0 ? "direct" : r.hops}</td><td>${(+r.snr).toFixed(1)} dB</td><td>${agoText(r.ago)}</td></tr>`).join("")}</tbody></table>` : "";
     const act = (tf.packets || []).slice(0, 9).map(p => `<tr><td><span class="tag ${p.tx ? "tx" : ""}">${p.tx ? "TX" : "RX"}</span></td><td>${esc(p.type)}<span class="tr"> ${p.flood ? "flood" : "direct"}</span></td><td><b>${esc(D.who(p, D.routes))}</b></td><td>${esc(D.via(p, D.routes))}</td><td>${p.tx ? "—" : p.hops + " hop" + (p.hops === 1 ? "" : "s")}</td><td>${p.tx ? "—" : p.rssi + " / " + (+p.snr).toFixed(1)}</td><td>${p.age}s</td></tr>`).join("") || `<tr><td colspan="7" class="tr">No packets yet.</td></tr>`;
     const nodes = []; const sta = net.sta || {}, ap = net.ap || {}, busy = rxNow + txNow;
@@ -798,7 +817,7 @@ async function renderDash(view) {
         <div class="pn s6"><h3>Traffic mix <em>last ${(tf.packets || []).length} packets</em></h3>${D.donut(mixParts, String((tf.packets || []).length), "packets")}</div>
         <div class="pn s6"><h3>Flood and direct <em>since boot</em></h3>${D.donut(fd, String((pk.recv ?? 0) + (pk.sent ?? 0)), "packets")}</div>
         <div class="pn s12"><h3>Signal <em>noise floor and last RSSI, dBm</em></h3>${D.area(sig, {w: 1100, h: 230, fmt: v => Math.round(v - 130)})}</div>
-        <div class="pn s6"><h3>${roleOk(RS) ? "Neighbours" : "Radio"} <em>${roleOk(RS) ? "heard directly on air, then the nearest known nodes" : ""}</em></h3>${roleOk(RS) ? `<table><thead><tr><th>#</th><th>Repeater</th><th>SNR</th><th></th><th>Heard</th></tr></thead><tbody>${neighRows}</tbody></table>${nearRows}` :
+        <div class="pn s6"><h3>${roleOk(RS) ? "Neighbours" : "Radio"} <em>${roleOk(RS) ? "heard directly, in radio range, and nearest known" : ""}</em></h3>${roleOk(RS) ? `<table><thead><tr><th>#</th><th>Repeater</th><th>SNR</th><th></th><th>Heard</th></tr></thead><tbody>${neighRows}</tbody></table>${rangeRows}${nearRows}` :
           `<table><tbody><tr><td>Frequency</td><td>${esc(freq)}</td></tr><tr><td>Last RSSI / SNR</td><td>${radio.last_rssi ?? "—"} / ${radio.last_snr ?? "—"}</td></tr><tr><td>TX power</td><td>${esc(val(snap.tx))} dBm</td></tr></tbody></table>`}</div>
         <div class="pn s6"><h3>Recent activity <em>newest first</em></h3><table><thead><tr><th></th><th>Type</th><th>From</th><th>Via</th><th>Hops</th><th>RSSI / SNR</th><th>Age</th></tr></thead><tbody>${act}</tbody></table></div>
         <div class="pn s12"><h3>Quick actions</h3><div class="qa">${roleOk(CL) ? `<button class="tool" data-go="chat">Open messages</button><button class="tool" data-q="advert.flood">Flood advert</button><button class="tool" data-q="advert">Zero-hop advert</button>` : `<button class="tool" data-q="advert">Flood advert</button><button class="tool" data-q="advert.zerohop">Zero-hop advert</button>`}
@@ -814,6 +833,7 @@ async function renderDash(view) {
     if (has("mqtt")) q.push(["mqtt", "get mqtt.status"], ["umcnet", "get mqtt.custom.bridge"]); if (has("bridge")) q.push(["bridge", "get bridge.enabled"], ["btype", "get bridge.type"]);
     const [stats, r] = await Promise.all([D.fetch(), api.cli(q.map(x => x[1]))]), g = {}; q.forEach((x, i) => g[x[0]] = r[i] || "");
     let tf = {packets: []}; try { tf = await api.traffic(); } catch {}
+    D.noteHops(tf.packets, Date.now()); D.self = val(g.name) || INFO.name;
     let net = (INFO && INFO.net) || {}; try { const i = await api.info(); if (i && i.net) net = i.net; } catch {}
     const [fr, bw, sf, cr] = val(g.radio).split(",").map(Number), links = roleOk(CL) ? parseJson(g.links) || {} : null, cc = roleOk(CL) ? parseJson(g.cc) || {} : null;
     if (Date.now() - D.routesAt > 300000) { D.routesAt = Date.now(); try { D.routes = (await api.routes()).routes || []; } catch {} }

@@ -4,6 +4,10 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.15
+
+- ✅ Dashboard: Neighbours gains **In radio range**: the repeaters that handed us packets directly (the last hop of what was received), counted over the last 24 h in the browser, because a repeater's own neighbour list only holds adverts heard with no hops and so can be empty while repeaters are clearly in range; an advert's key is matched to the full node name, and our own packets show the node's full name
+
 ## Done in 0.1.14
 
 - ✅ Dashboard: Recent activity now says **who** a packet is from and **via** which repeater. The radio's traffic log keeps what a packet states about itself: an advert's sender name and key, the one-byte source and destination hashes of requests, responses, messages and paths, a channel's hash, and the last repeater in the path; the page matches those against the nodes it knows (shown with "(n nodes)" when a hash fits more than one)
