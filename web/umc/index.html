@@ -73,7 +73,7 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;
 .dash2 .pl{display:inline-flex;gap:6px;align-items:center;padding:4px 11px;border-radius:99px;background:#0d2219;border:1px solid var(--ln);color:var(--mu);font-size:12px}
 .dash2 .pl.ok{color:var(--g)}.dash2 .pl.warn{color:var(--am)}.dash2 .pl.bad{color:var(--rd)}
 .dash2 .dot{width:8px;height:8px;border-radius:50%;background:var(--mu);display:inline-block;box-shadow:0 0 8px currentColor}
-.dash2 .dot.ok{background:var(--g);color:var(--g)}.dash2 .dot.warn{background:var(--am);color:var(--am)}.dash2 .dot.bad{background:var(--rd);color:var(--rd)}
+.dash2 .dot.ok{background:var(--g);color:var(--g)}.dash2 .dot.warn{background:var(--am);color:var(--am)}.dash2 .dot.bad{background:var(--rd);color:var(--rd)}.dash2 .dot.idle{background:#4d6a5c;color:#4d6a5c;box-shadow:none}
 .dash2 .rng button,.dash2 .tool{background:#0d2219;color:var(--mu);border:1px solid var(--ln);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px}
 .dash2 .rng button.on{color:#06140c;background:var(--g);border-color:var(--g)}
 .dash2 .tool:hover,.dash2 .rng button:hover{border-color:var(--g);color:var(--tx)}
@@ -762,15 +762,15 @@ async function renderDash(view) {
     const mixParts = Object.entries(mix).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({label: k, value: v, color: typeCols[k] || "#7fa392"}));
     const fd = [{label: "Flood received", value: pk.flood_rx ?? 0, color: "#2fe27a"}, {label: "Direct received", value: pk.direct_rx ?? 0, color: "#4aa8ff"}, {label: "Flood sent", value: pk.flood_tx ?? 0, color: "#f2c14e"}, {label: "Direct sent", value: pk.direct_tx ?? 0, color: "#a58bff"}];
     const sig = [{name: "Noise floor (dBm)", color: "#ff8f5a", data: D.series(["noise"], win, bucket, "avg").map(p => [p[0], p[1] + 130])}, {name: "Last signal (RSSI, dBm)", color: "#2fe27a", data: D.series(["rssi"], win, bucket, "avg").map(p => [p[0], p[1] + 130])}];
-    const connRows = conn.map(c => `<div><i class="dot ${c.ok ? "ok" : c.warn ? "warn" : "bad"}"></i><b>${esc(c.name)}</b><span>${esc(c.detail)}</span></div>`).join("");
+    const connRows = conn.map(c => `<div><i class="dot ${c.state}"></i><b>${esc(c.name)}</b><span>${esc(c.detail)}</span></div>`).join("");
     const neighRows = neigh && neigh.length ? neigh.slice(0, 8).map((n, i) => `<tr><td>${i + 1}</td><td><b>${esc(n.name || "name not heard yet")}</b> <span class="tr">${esc(n.id)}</span></td><td>${n.snr.toFixed(1)} dB</td><td><div class="bar"><i style="width:${Math.max(4, Math.min(100, (n.snr + 20) * 3))}%"></i></div></td><td>${esc(n.ago)}</td></tr>`).join("") : `<tr><td colspan="5" class="tr">No neighbours heard yet.</td></tr>`;
     const act = (tf.packets || []).slice(0, 9).map(p => `<tr><td><span class="tag ${p.tx ? "tx" : ""}">${p.tx ? "TX" : "RX"}</span></td><td>${esc(p.type)}</td><td>${p.flood ? "flood" : "direct"}</td><td>${p.tx ? "—" : p.hops + " hop" + (p.hops === 1 ? "" : "s")}</td><td>${p.tx ? "—" : p.rssi + " / " + (+p.snr).toFixed(1)}</td><td>${p.age}s</td></tr>`).join("") || `<tr><td colspan="6" class="tr">No packets yet.</td></tr>`;
-    const nodes = []; const sta = net.sta || {}, ap = net.ap || {};
-    if (has("wifi")) nodes.push({title: "WiFi / LAN", sub: sta.connected ? `${sta.ssid} · ${sta.rssi} dBm` : ap.active ? "hotspot " + ap.ssid : "offline", ok: !!sta.connected || !!ap.active});
-    if (roleOk(CL)) nodes.push({title: "Phone / PC apps", sub: links ? `${links.tcp ? links.tcp.clients : 0} WiFi · Bluetooth ${links.ble && links.ble.connected ? "connected" : "idle"}` : "—", ok: !!links && (links.tcp?.clients > 0 || links.ble?.connected)});
-    else nodes.push({title: "This page / apps", sub: "web interface", ok: true});
-    if (has("mqtt")) nodes.push({title: "MQTT / UMC Net", sub: snap.mqttText, ok: snap.mqttUp});
-    if (has("bridge")) nodes.push({title: "Bridge", sub: bridge, ok: /^on|enabled|1/.test(bridge)});
+    const nodes = []; const sta = net.sta || {}, ap = net.ap || {}, busy = rxNow + txNow;
+    if (has("wifi")) nodes.push({title: "WiFi / LAN", sub: sta.connected ? `${sta.ssid} · ${sta.rssi} dBm` : ap.active ? "hotspot " + ap.ssid : net.wifi === false ? "switched off" : "looking for a network", ok: !!sta.connected || !!ap.active, rate: busy + 1});
+    if (roleOk(CL)) nodes.push({title: "Phone / PC apps", sub: links ? `${links.tcp ? links.tcp.clients : 0} WiFi · Bluetooth ${links.ble && links.ble.connected ? "connected" : "idle"}` : "—", ok: !!links && (links.tcp?.clients > 0 || links.ble?.connected), rate: busy + 1});
+    else nodes.push({title: "This page / apps", sub: "web interface", ok: true, rate: 1});
+    if (has("mqtt")) nodes.push({title: "MQTT / UMC Net", sub: snap.mqttText, ok: snap.mqttUp, rate: busy + 2});
+    if (has("bridge")) nodes.push({title: "Bridge", sub: bridge, ok: /^(on|enabled|1)/i.test(bridge), rate: busy + 1});
     const flow = D.flow({nodes, rx: rxNow, tx: txNow, freq, name: val(snap.name) || INFO.name, role: INFO.role});
     $("#dBody").innerHTML = `<div class="kpis">${kpis}</div>
       <div class="panels">
@@ -793,25 +793,31 @@ async function renderDash(view) {
     const live = $("#dLive"); live.className = "pl ok"; live.innerHTML = `<i class="dot ok"></i> live · ${new Date().toLocaleTimeString()}`;
   };
   const refresh = async () => {
-    const q = [["name", "get name"], ["upd", "get update.status"], ["clock", "clock"], ["radio", "get radio"], ["tx", "get tx"], ["net", "get net.status"]];
+    const q = [["name", "get name"], ["upd", "get update.status"], ["clock", "clock"], ["radio", "get radio"], ["tx", "get tx"]];
     if (roleOk(RS)) q.push(["neigh", "neighbors"]); if (roleOk(CL)) q.push(["cc", "get contacts.count"], ["links", "get app.links"]);
     if (has("mqtt")) q.push(["mqtt", "get mqtt.status"], ["umcnet", "get mqtt.custom.bridge"]); if (has("bridge")) q.push(["bridge", "get bridge.enabled"], ["btype", "get bridge.type"]);
     const [stats, r] = await Promise.all([D.fetch(), api.cli(q.map(x => x[1]))]), g = {}; q.forEach((x, i) => g[x[0]] = r[i] || "");
     let tf = {packets: []}; try { tf = await api.traffic(); } catch {}
-    const net = parseJson(g.net) || {}, [fr, bw, sf, cr] = val(g.radio).split(",").map(Number), links = roleOk(CL) ? parseJson(g.links) || {} : null, cc = roleOk(CL) ? parseJson(g.cc) || {} : null;
+    let net = (INFO && INFO.net) || {}; try { const i = await api.info(); if (i && i.net) net = i.net; } catch {}
+    const [fr, bw, sf, cr] = val(g.radio).split(",").map(Number), links = roleOk(CL) ? parseJson(g.links) || {} : null, cc = roleOk(CL) ? parseJson(g.cc) || {} : null;
     if (roleOk(RS) && Date.now() - D.routesAt > 300000) { D.routesAt = Date.now(); try { D.routes = (await api.routes()).routes || []; } catch {} }
     let neigh = null;
     if (roleOk(RS)) { const t = val(g.neigh); neigh = (t === "-none-" || !t) ? [] : t.split("\n").filter(Boolean).map(l => l.split(":")).map(([k, secs, snr]) => { const a = Math.max(0, +secs || 0), rt = (D.routes || []).find(x => x.key.startsWith(k.toLowerCase())); return {id: k, name: rt && rt.name, snr: +snr / 4, ago: a < 120 ? a + " s ago" : a < 7200 ? Math.round(a / 60) + " min ago" : Math.round(a / 3600) + " h ago"}; }).sort((x, y) => y.snr - x.snr); }
-    const m = D.parseMqtt(g.mqtt), mqUp = [m.p, m.s].some(x => x === "up"), mqTxt = has("mqtt") ? (mqUp ? "connected" : m.p || m.s ? [m.p, m.s].filter(x => x && x !== "-").join(" / ") || "idle" : "idle") : "";
+    const m = D.parseMqtt(g.mqtt), toks = [m.p, m.s].filter(x => x && x !== "-"), isUp = x => /(^|:)up$/.test(x), mqUp = toks.some(isUp);
+    const mqTxt = !has("mqtt") ? "" : mqUp ? toks.filter(isUp).map(x => x.replace(/:?up$/, "").replace(/:/g, " ")).join(", ") + " · connected" : toks.length ? toks.map(x => x.replace(/:/g, " ")).join(" / ") : "not set up";
     const nb = String(g.umcnet || "").replace(/^>\s*/, ""), nbOk = /^on,/.test(nb), conn = [];
-    conn.push({name: "LoRa radio", ok: true, detail: `${fr ? fr.toFixed(3) : "?"} MHz · SF${sf} · BW ${bw} kHz`});
-    if (has("wifi")) { const sta = net.sta || {}, ap = net.ap || {}; conn.push(sta.connected ? {name: "WiFi", ok: true, detail: `${sta.ssid} · ${sta.ip} · ${sta.rssi} dBm`} : {name: "WiFi", ok: false, warn: !!ap.active, detail: ap.active ? "not joined, hotspot is up" : "offline"});
-      if (ap.active) conn.push({name: "Hotspot", ok: true, detail: `${ap.ssid} · ${ap.clients ?? 0} client(s)`}); }
-    if (links) { conn.push({name: "Bluetooth app", ok: !!(links.ble && links.ble.connected), warn: !!(links.ble && links.ble.on), detail: links.ble ? (links.ble.connected ? "connected" : links.ble.on ? "waiting for a phone" : "off") : "—"});
-      conn.push({name: "WiFi apps", ok: !!(links.tcp && links.tcp.clients), warn: !!(links.tcp && links.tcp.on), detail: links.tcp ? `${links.tcp.clients} connected · port ${links.tcp.port}` : "—"}); }
-    if (has("mqtt")) conn.push({name: "MQTT uplink", ok: mqUp, warn: !mqUp && m.wifi === "up", detail: mqTxt || "idle"});
-    if (has("mqtt") && nbOk) conn.push({name: "UMC Net bridge", ok: true, detail: nb.replace(/^on, /, "")});
-    if (has("bridge")) conn.push({name: "Bridge", ok: /^(on|enabled|1)/i.test(val(g.bridge)), detail: `${val(g.bridge) || "off"} · ${val(g.btype) || ""}`});
+    conn.push({name: "LoRa radio", state: "ok", detail: `${fr ? fr.toFixed(3) : "?"} MHz · SF${sf} · BW ${bw} kHz`});
+    if (has("wifi")) {
+      const sta = net.sta || {}, ap = net.ap || {};
+      conn.push({name: "WiFi (station)", state: sta.connected ? "ok" : net.wifi === false ? "idle" : net.networks > 0 ? "warn" : "idle",
+        detail: sta.connected ? `${sta.ssid} · ${sta.ip} · ${sta.rssi} dBm` : net.wifi === false ? "switched off" : net.networks > 0 ? `not connected, ${net.networks} saved network${net.networks === 1 ? "" : "s"}` : "no network saved"});
+      conn.push({name: "Hotspot (AP)", state: ap.active ? "ok" : "idle", detail: ap.active ? `${ap.ssid} · ${ap.clients ?? 0} client${ap.clients === 1 ? "" : "s"} · ${ap.ip}` : `off · mode ${ap.mode || "auto"}`});
+    }
+    if (links) { conn.push({name: "Bluetooth app", state: links.ble && links.ble.connected ? "ok" : "idle", detail: links.ble ? (links.ble.connected ? "connected" : links.ble.on ? "waiting for a phone" : "off") : "—"});
+      conn.push({name: "WiFi apps", state: links.tcp && links.tcp.clients ? "ok" : "idle", detail: links.tcp ? `${links.tcp.clients} connected · port ${links.tcp.port}` : "—"}); }
+    if (has("mqtt")) conn.push({name: "MQTT uplink", state: mqUp ? "ok" : toks.length ? "warn" : "idle", detail: mqTxt});
+    if (has("mqtt") && /^(on|off),/.test(nb)) conn.push({name: "UMC Net bridge", state: nbOk ? (mqUp ? "ok" : "warn") : "idle", detail: nbOk ? nb.replace(/^on, /, "").replace(/, up to .*$/, "").replace(/, /g, " · ") : "off · set mqtt.custom.bridge on"});
+    if (has("bridge")) { const on = /^(on|enabled|1)/i.test(val(g.bridge)); conn.push({name: "Bridge (" + (val(g.btype) || "link") + ")", state: on ? "ok" : "idle", detail: on ? "on" : "off"}); }
     if (val(g.upd).startsWith("available") && !$("#dUpd")) { const d = document.createElement("div"); d.id = "dUpd"; d.className = "warnb"; d.innerHTML = `A firmware update is available. <a href="#fw">Open Firmware &amp; maintenance</a> to install it.`; $("#dBody").before(d); d.querySelector("a").onclick = e => { e.preventDefault(); go("fw"); }; }
     snap = {...stats, name: g.name, tx: g.tx, net, links, cc, neigh, tf, conn, freq: `${fr ? fr.toFixed(3) : "?"} MHz · SF${sf}`, bridge: has("bridge") ? val(g.bridge) || "off" : "", mqttText: mqTxt, mqttUp: mqUp};
     draw();

@@ -4,6 +4,10 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.13
+
+- ✅ Dashboard fixes: the network state is read from the full status (the radio's `get net.status` reply is cut off at 156 characters, which made WiFi look offline); WiFi (station) and Hotspot (AP) have separate lights; MQTT shows connected when it is (its status words end in `:up`); lights are green (working), amber (trying), grey (off or not set up) and red only for a fault; every link that is up now animates in the data flow
+
 ## Done in 0.1.12
 
 - ✅ Desktop: a Chat page for client radios with an IRC-style feed, a test-reply bot (labelled `[auto]`), optional beacons and a 24-hour dashboard, all set in forms. Ideas from MeshOmit (opensourcera, MIT). It also polls repeaters (battery, uptime, noise floor, trace SNR there and back, best neighbour) and keeps a history. Next: send direct messages from the page; rooms need firmware support for setting channels, which the companion protocol does not offer yet.

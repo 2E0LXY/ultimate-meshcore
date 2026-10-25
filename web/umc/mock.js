@@ -45,7 +45,8 @@
     if (c === "get wifi.status") return "> ssid:HomeNet status:connected code:3 state:connected ip:192.168.1.77 channel:6 rssi:-58 quality:84% signal:excellent gw:ok wd:0";
     if (c === "get ap.status") return "> down mode:auto";
     if (c === "get net.status") return "> " + JSON.stringify(info().net);
-    if (c === "get mqtt.status") return "> wifi:up ntp:ok iata:UNSET p:- s:-";
+    if (c === "get mqtt.status") return "> wifi:up ntp:up iata:LBA p:custom:wss:up s:- status:on tx:off leaked:0";     // as a real repeater reports it
+    if (c === "get mqtt.custom.bridge") return "> on, heard 3, passed on 2, dropped 0, up to 20 a minute";
     if (c === "get mqtt.statuscfg") return "> on";
     if (c === "get mqtt.client_version") return "> umc-0.1.0";
     if (c === "powersaving") return "off";

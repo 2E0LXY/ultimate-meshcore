@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.12** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.13** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
