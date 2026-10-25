@@ -90,3 +90,38 @@ wrong, and messages the broker drops.
 
 Limits: a publish that the access list silently drops is not logged by Mosquitto, so it cannot be shown. The
 history starts when the dashboard is installed.
+
+
+## Controlling repeaters, approvals and settings (dashboard 2.0)
+
+**Control tab.** Pick a repeater, press *Read settings* to fill the boxes with what it has now, change a value and press
+*Apply*, or use a quick action (advert, discover neighbours, stats, restart) or the console. Every command is checked,
+signed and recorded in the audit log; restart, radio, region, bridge and similar commands ask you to confirm first.
+
+How it is kept safe:
+
+| Layer | What it does |
+|---|---|
+| Off by default | The repeater obeys nothing until you set a control key and `set mqtt.control on`. |
+| Signature | Each command carries an HMAC-SHA-256 over device id, time, a counter and the command, made with a key only the dashboard and that repeater hold. A wrong signature gets no answer, so it cannot be used to test guesses. |
+| Freshness | The time must be within 5 minutes, later than the repeater's last restart, and the counter must be higher than the last one used: a recorded command cannot be replayed. |
+| Allow-list | Only reads, adverts, stats, clock, restart, and settings for the radio, forwarding, adverts, identity and UMC Net. Passwords, private keys, WiFi, access point, broker address and login, the control key itself, and firmware installs are refused by the repeater whatever the dashboard sends. |
+| Rate limit | 20 commands a minute. |
+| Broker accounts | The `controller` account may only publish to `umcnet/v1/<area>/dev/<id>/cmd` and read `.../resp`. A repeater may read only its own command topic and write only its own answers. |
+
+To put a repeater under control: *Control setup* on its card shows a block of commands (broker address, its account and
+the control key). Paste it into the repeater's Console page, then press *Read settings*.
+
+**Approving new repeaters.** *Add an account* on the Accounts tab creates a repeater account with no device id. It is
+*pending*: it can connect and listen to statuses, but it cannot publish or be controlled. When the repeater connects, the
+dashboard shows the account, the address it came from and the first characters of its device id; you paste its full
+64-character id (under Identity, or on its display) and press *Approve*. The id must match the one that connected. Until
+then nothing it sends is accepted. *Block* shuts an account out immediately; *New password* and *Remove* are there too.
+
+**Settings tab.** Limits for each check, how long history is kept, whether risky commands need confirming, alerts to a
+web address or an ntfy topic (silent repeater, back again, waiting for approval, many refused logins, certificate,
+disk), the dashboard password, downloads (events, audit log, repeaters as CSV; settings as JSON) and service restarts.
+
+**Privilege.** The dashboard runs unprivileged. Account changes, the dashboard password and service restarts go through
+`umcnet_admin.py`, a small root helper on a Unix socket that only the dashboard's user can open; it accepts a fixed list
+of operations and checks every argument.

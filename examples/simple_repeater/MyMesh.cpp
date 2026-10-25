@@ -1411,6 +1411,7 @@ void MyMesh::begin(FILESYSTEM *fs, ArchiveStorage* archive) {
 #endif
   mqtt.begin(_fs);
   mqtt.setInjectCallback(&MyMesh::injectFromNetThunk, this);
+  mqtt.setControlCallback(&MyMesh::controlThunk, this);
 #if defined(ESP_PLATFORM) && defined(TBEAM_SUPREME_SX1262)
   if (mqtt.isActive()) {
     network.loop(true);
@@ -1749,6 +1750,17 @@ bool MyMesh::healthCommand(const char *command, char *reply, size_t reply_size) 
 }
 
 #ifdef WITH_MQTT_UPLINK
+void MyMesh::runControl(const char* cmd, char* reply, size_t n) {
+  char buf[160];
+  strncpy(buf, cmd, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = 0;
+  char out[200];
+  out[0] = 0;
+  handleCommand(0, buf, out);
+  strncpy(reply, out, n - 1);
+  reply[n - 1] = 0;
+}
+
 // A packet another repeater heard, handed over by the uplink from the main loop. It is treated as
 // if it had arrived by radio after the bridge delay: the mesh drops what it has already seen, and
 // forwards the rest by its normal rules (hop limit, regions, duty cycle).
@@ -2848,6 +2860,12 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     } else {
       strcpy(reply, "Err - bad mqtt.custom.transport");
     }
+  } else if (strcmp(command, "get mqtt.control") == 0) {
+    mqtt.formatControlReply(reply, 160);
+  } else if (memcmp(command, "set mqtt.control.key ", 21) == 0) {
+    strcpy(reply, mqtt.setControlKey(&command[21]) ? "OK" : "Err - the control key is 64 hex characters");
+  } else if (memcmp(command, "set mqtt.control ", 17) == 0) {
+    strcpy(reply, mqtt.setControl(&command[17]) ? "OK" : "Err - on|off, and on needs a control key first");
   } else if (strcmp(command, "get mqtt.custom.bridge") == 0) {
     mqtt.formatBridgeReply(reply, 160);
   } else if (strcmp(command, "get mqtt.custom.rate") == 0) {

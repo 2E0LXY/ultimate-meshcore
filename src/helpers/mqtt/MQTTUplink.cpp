@@ -1,5 +1,6 @@
 #include "MQTTUplink.h"
 #include "NetPacket.h"
+#include "ControlCmd.h"
 #include "MQTTCaCerts.h"
 
 #ifdef WITH_MQTT_UPLINK
@@ -857,6 +858,12 @@ void MQTTUplink::handleMqttEvent(void* handler_args, esp_event_base_t, int32_t e
         esp_mqtt_client_subscribe(broker->client, topic, 0);
         MQTT_LOG("%s subscribed to %s", broker->spec->label, topic);
       }
+      if (_self != nullptr && broker->spec->custom && _self->_prefs.custom_control && _self->_prefs.control_key[0] != 0 && broker->client != nullptr) {
+        char topic[120];                                  // commands for this repeater only
+        snprintf(topic, sizeof(topic), "umcnet/v1/%s/dev/%s/cmd", _self->_prefs.iata, _self->_device_id);
+        esp_mqtt_client_subscribe(broker->client, topic, 0);
+        MQTT_LOG("%s subscribed to %s", broker->spec->label, topic);
+      }
       break;
     case MQTT_EVENT_DATA:
       if (_self != nullptr && broker->spec->custom && event != nullptr) {
@@ -1113,6 +1120,7 @@ void MQTTUplink::loop(const MQTTStatusSnapshot& snapshot) {
     return;
   }
   drainNet();
+  drainControl();
 
   _last_status = snapshot;
 
@@ -1475,7 +1483,23 @@ bool MQTTUplink::setCustomTransport(const char* transport) {
 // meshcore/<iata>/<sender id>/raw and the payload is the observer JSON, whose "data" is the packet in hex.
 void MQTTUplink::onNetMessage(const char* topic, int topic_len, const char* data, int data_len, int offset,
                               int total) {
-  if (!_prefs.custom_bridge || topic == nullptr || data == nullptr) return;
+  if (topic == nullptr || data == nullptr) return;
+  if (_prefs.custom_control && topic_len > 4 && memcmp(topic + topic_len - 4, "/cmd", 4) == 0) {
+    char want[120];
+    const int wl = snprintf(want, sizeof(want), "umcnet/v1/%s/dev/%s/cmd", _prefs.iata, _device_id);
+    if (wl == topic_len && strncasecmp(topic, want, wl) == 0 && offset == 0 && data_len == total) {
+      if (!_ctl_ready && data_len < (int)sizeof(_ctl_in)) {           // one at a time; the main loop checks and runs it
+        memcpy(_ctl_in, data, data_len);
+        _ctl_in_len = data_len;
+        __sync_synchronize();
+        _ctl_ready = true;
+      } else {
+        _ctl_busy++;
+      }
+    }
+    return;
+  }
+  if (!_prefs.custom_bridge) return;
   if (offset != 0 || data_len != total) return;                       // a message split in pieces: skip it
   if (!umcnet::topicIsRaw(topic, topic_len)) return;
   if (umcnet::topicHasId(topic, topic_len, _device_id)) return;       // our own packet coming back
@@ -1558,6 +1582,116 @@ void MQTTUplink::formatBridgeReply(char* reply, size_t reply_size) const {
   snprintf(reply, reply_size, "> %s, heard %lu, passed on %lu, dropped %lu, up to %u a minute",
            _prefs.custom_bridge ? "on" : "off", (unsigned long)_net_heard, (unsigned long)_net_passed,
            (unsigned long)_net_dropped, (unsigned)getCustomRate());
+}
+
+// Main loop: check one waiting command and, if it is genuine, current and allowed, run it and answer.
+// A bad signature gets no answer at all (so the repeater cannot be used to test guesses), the rest do.
+void MQTTUplink::drainControl() {
+  const unsigned long now = millis();
+  if (_ctl_after_at != 0 && (long)(now - _ctl_after_at) >= 0) {       // the answer to a reboot is out: now do it
+    char cmd[40];
+    strncpy(cmd, _ctl_after_cmd, sizeof(cmd));
+    cmd[sizeof(cmd) - 1] = 0;
+    _ctl_after_at = 0;
+    char reply[200];
+    reply[0] = 0;
+    if (_ctl_fn != nullptr) _ctl_fn(_ctl_ctx, cmd, reply, sizeof(reply));
+  }
+  if (!_ctl_ready) return;
+  char msg[448];
+  const int len = _ctl_in_len;
+  memcpy(msg, _ctl_in, len);
+  msg[len] = 0;
+  __sync_synchronize();
+  _ctl_ready = false;
+  if (!_prefs.custom_control) return;
+
+  char id[40] = "", cmd[160] = "", sig[80] = "";
+  uint64_t ts = 0, n = 0;
+  if (!umcctl::jsonString(msg, len, "id", id, sizeof(id)) || !umcctl::jsonString(msg, len, "cmd", cmd, sizeof(cmd)) ||
+      !umcctl::jsonString(msg, len, "sig", sig, sizeof(sig)) || !umcctl::jsonNumber(msg, len, "ts", &ts) || !umcctl::jsonNumber(msg, len, "n", &n)) {
+    _ctl_bad++;
+    return;
+  }
+  uint8_t key[32];
+  if (!umcctl::keyFromHex(_prefs.control_key, key)) { _ctl_bad++; return; }
+  char want[65];
+  umcctl::signature(key, _device_id, ts, n, cmd, want);
+  if (!umcctl::sameSignature(want, sig)) { _ctl_bad_sig++; return; }
+
+  // genuine. Now is it current, in order, and not too many at once?
+  const uint32_t clock_now = (uint32_t)time(nullptr);
+  if (clock_now < 1700000000UL) { publishControlReply(id, false, "the repeater's clock is not set"); return; }
+  if (_ctl_boot_epoch == 0) _ctl_boot_epoch = clock_now - (uint32_t)(millis() / 1000);
+  const uint64_t drift = ts > clock_now ? ts - clock_now : clock_now - ts;
+  if (drift > 300 || ts + 2 < _ctl_boot_epoch || n <= _ctl_last_n) { _ctl_old++; publishControlReply(id, false, "refused: too old, or already used"); return; }
+  if (now - _ctl_window_at > 60000UL) { _ctl_window_at = now; _ctl_window_count = 0; }
+  if (++_ctl_window_count > 20) { _ctl_busy++; publishControlReply(id, false, "refused: too many commands in a minute"); return; }
+  _ctl_last_n = n;
+  if (!umcctl::commandAllowed(cmd)) { _ctl_denied++; publishControlReply(id, false, "refused: that command cannot be run remotely"); return; }
+  if (_ctl_fn == nullptr) { publishControlReply(id, false, "no command handler"); return; }
+  _ctl_ok++;
+  if (strcasecmp(cmd, "reboot") == 0) {                               // answer first, then restart
+    snprintf(_ctl_after_cmd, sizeof(_ctl_after_cmd), "%s", cmd);
+    _ctl_after_at = now + 1500;
+    if (_ctl_after_at == 0) _ctl_after_at = 1;
+    publishControlReply(id, true, "OK - restarting");
+    return;
+  }
+  char reply[200];
+  reply[0] = 0;
+  _ctl_fn(_ctl_ctx, cmd, reply, sizeof(reply));
+  publishControlReply(id, true, reply);
+}
+
+void MQTTUplink::publishControlReply(const char* id, bool ok, const char* text) {
+  char esc[260];
+  size_t o = 0;
+  for (const char* p = text; p != nullptr && *p != 0 && o + 7 < sizeof(esc); p++) {   // quote what needs quoting
+    if (*p == '"' || *p == '\\') { esc[o++] = '\\'; esc[o++] = *p; }
+    else if (*p == '\n' || *p == '\r') { esc[o++] = ' '; }
+    else if ((uint8_t)*p >= 0x20) { esc[o++] = *p; }
+  }
+  esc[o] = 0;
+  char topic[120], json[420];
+  snprintf(topic, sizeof(topic), "umcnet/v1/%s/dev/%s/resp", _prefs.iata, _device_id);
+  snprintf(json, sizeof(json), "{\"id\":\"%s\",\"ok\":%s,\"reply\":\"%s\",\"ts\":%lu}", id, ok ? "true" : "false", esc, (unsigned long)time(nullptr));
+  for (BrokerState& broker : _brokers) {
+    if (broker.spec != nullptr && broker.spec->custom && broker.connected) queuePublish(broker, topic, json, false);
+  }
+}
+
+bool MQTTUplink::setControl(const char* value) {
+  if (value == nullptr) return false;
+  uint8_t parsed;
+  if (strcasecmp(value, "on") == 0) parsed = 1;
+  else if (strcasecmp(value, "off") == 0) parsed = 0;
+  else return false;
+  if (parsed && _prefs.control_key[0] == 0) return false;            // never listen without a key
+  const bool changed = _prefs.custom_control != parsed;
+  _prefs.custom_control = parsed;
+  const bool saved = savePrefs();
+  if (saved && changed) {
+    for (BrokerState& broker : _brokers) {
+      if (broker.spec != nullptr && broker.spec->custom) destroyBroker(broker);   // reconnect so the subscription follows
+    }
+  }
+  return saved;
+}
+
+bool MQTTUplink::setControlKey(const char* hex64) {
+  uint8_t k[32];
+  if (!umcctl::keyFromHex(hex64, k)) return false;
+  StrHelper::strncpy(_prefs.control_key, hex64, sizeof(_prefs.control_key));
+  _ctl_last_n = 0;
+  return savePrefs();
+}
+
+void MQTTUplink::formatControlReply(char* reply, size_t reply_size) const {
+  snprintf(reply, reply_size, "> %s, key %s, obeyed %lu, refused %lu (bad signature %lu, old %lu, not allowed %lu, malformed %lu)",
+           _prefs.custom_control ? "on" : "off", _prefs.control_key[0] ? "set" : "not set", (unsigned long)_ctl_ok,
+           (unsigned long)(_ctl_bad_sig + _ctl_old + _ctl_denied + _ctl_bad + _ctl_busy), (unsigned long)_ctl_bad_sig,
+           (unsigned long)_ctl_old, (unsigned long)_ctl_denied, (unsigned long)_ctl_bad);
 }
 
 bool MQTTUplink::setCustomUsername(const char* username) {
@@ -1654,6 +1788,9 @@ bool MQTTUplink::setCustomPort(const char*) { return false; }
 bool MQTTUplink::setCustomUsername(const char*) { return false; }
 bool MQTTUplink::setCustomBridge(const char*) { return false; }
 bool MQTTUplink::setCustomRate(const char*) { return false; }
+bool MQTTUplink::setControl(const char*) { return false; }
+bool MQTTUplink::setControlKey(const char*) { return false; }
+void MQTTUplink::formatControlReply(char* reply, size_t reply_size) const { snprintf(reply, reply_size, "> unsupported"); }
 void MQTTUplink::formatBridgeReply(char* reply, size_t reply_size) const { snprintf(reply, reply_size, "> unsupported"); }
 bool MQTTUplink::setCustomPassword(const char*) { return false; }
 bool MQTTUplink::sendStatusNow() { return false; }

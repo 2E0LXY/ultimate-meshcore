@@ -85,6 +85,17 @@ public:
   bool setCustomRate(const char* value);     // packets a minute, 1..120
   uint8_t getCustomRate() const { return _prefs.custom_rate ? _prefs.custom_rate : 20; }
   void formatBridgeReply(char* reply, size_t reply_size) const;
+
+  // UMC Net remote control: signed commands arrive on umcnet/v1/<area>/dev/<device id>/cmd and the
+  // answer goes to .../resp. Off by default; needs a 64-hex key shared with whoever operates it.
+  // The commands are checked and run from the main loop (never the network task).
+  typedef void (*ControlFn)(void* ctx, const char* cmd, char* reply, size_t reply_size);
+  void setControlCallback(ControlFn fn, void* ctx) { _ctl_fn = fn; _ctl_ctx = ctx; }
+  bool setControl(const char* value);        // on | off
+  bool setControlKey(const char* hex64);
+  bool getControl() const { return _prefs.custom_control != 0; }
+  bool hasControlKey() const { return _prefs.control_key[0] != 0; }
+  void formatControlReply(char* reply, size_t reply_size) const;
   bool hasCustomPassword() const { return _prefs.custom_password[0] != 0; }
   bool sendStatusNow();
   bool isAnyBrokerConnected() const;
@@ -157,6 +168,20 @@ private:
   uint32_t _net_heard = 0, _net_passed = 0, _net_dropped = 0;
   float _net_tokens = 0;
   unsigned long _net_tokens_at = 0;
+  char _ctl_in[448];
+  volatile int _ctl_in_len = 0;
+  volatile bool _ctl_ready = false;
+  ControlFn _ctl_fn = nullptr;
+  void* _ctl_ctx = nullptr;
+  uint32_t _ctl_ok = 0, _ctl_bad_sig = 0, _ctl_old = 0, _ctl_denied = 0, _ctl_busy = 0, _ctl_bad = 0;
+  uint64_t _ctl_last_n = 0;
+  unsigned long _ctl_window_at = 0;
+  uint8_t _ctl_window_count = 0;
+  unsigned long _ctl_after_at = 0;                // a command that must wait until its answer has been sent (reboot)
+  char _ctl_after_cmd[40] = {0};
+  uint32_t _ctl_boot_epoch = 0;
+  void drainControl();
+  void publishControlReply(const char* id, bool ok, const char* text);
   static MQTTUplink* _self;
   void onNetMessage(const char* topic, int topic_len, const char* data, int data_len, int offset, int total);
   void drainNet();

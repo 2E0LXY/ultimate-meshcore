@@ -5,7 +5,7 @@ Reads the broker as a read-only 'monitor' account (its $SYS statistics and the m
 broker's log for who connects and who is refused, samples the machine, and serves a JSON API and the page on
 127.0.0.1 for Caddy to put behind a login. Python standard library only: no packages to install.
 """
-import collections, hashlib, json, os, re, select, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time
+import collections, csv, hashlib, hmac, io, json, os, re, secrets, select, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -15,14 +15,15 @@ CFG = {
     "http_host": os.environ.get("DASH_HTTP_HOST", "127.0.0.1"), "http_port": int(os.environ.get("DASH_HTTP_PORT", "9102")),
     "data": os.environ.get("DASH_DATA", "/var/lib/umcnet-dash"), "users": os.environ.get("DASH_USERS", "/var/lib/umcnet-dash/accounts.json"),
     "unit": os.environ.get("DASH_UNIT", "umcnet-mosquitto"), "host": os.environ.get("DASH_HOST", "net.2e0lxy.uk"),
-    "services": os.environ.get("DASH_SERVICES", "umcnet-mosquitto,caddy,umcnet-dash").split(","),
+    "services": os.environ.get("DASH_SERVICES", "umcnet-mosquitto,caddy,umcnet-dash,umcnet-admin").split(","),
     "static": os.environ.get("DASH_STATIC", os.path.join(os.path.dirname(os.path.abspath(__file__)), "dash.html")),
-    "logfile": os.environ.get("DASH_LOGFILE", ""),
+    "logfile": os.environ.get("DASH_LOGFILE", ""), "ctl_pass_file": os.environ.get("DASH_CTL_PASS_FILE", "/opt/umcnet-dash/ctl.pass"),
+    "ctl_user": os.environ.get("DASH_CTL_USER", "controller"), "admin_sock": os.environ.get("DASH_ADMIN_SOCK", "/run/umcnet-admin/admin.sock"),
     "keep_days": int(os.environ.get("DASH_KEEP_DAYS", "14")), "journal": os.environ.get("DASH_JOURNAL", "1") == "1",
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "1.0"
+VERSION = "2.0"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -153,41 +154,65 @@ def _rl(n):
 
 def _s(x): x = x.encode(); return struct.pack(">H", len(x)) + x
 
+class MqttConn:
+    """A minimal MQTT 3.1.1 client (QoS 0): enough to listen to some topics and publish a few messages."""
+    def __init__(self, user, pass_file, subs, on_msg, status):
+        self.user, self.pass_file, self.subs, self.on_msg, self.status = user, pass_file, subs, on_msg, status
+        self.sock = None; self.lock = threading.Lock(); self.up = False; self.error = ""
+        status.update(state="starting", since=0, reconnects=0, error="")
+
+    def publish(self, topic, payload):
+        body = _s(topic) + payload
+        with self.lock: self.sock.sendall(bytes([0x30]) + _rl(len(body)) + body)
+
+    def run(self):
+        backoff = 2
+        while True:
+            try:
+                pw = open(self.pass_file).read().strip()
+                s = socket.create_connection((CFG["mqtt_host"], CFG["mqtt_port"]), timeout=10); s.settimeout(40)
+                vh = _s("MQTT") + bytes([4, 0xC2]) + struct.pack(">H", 60)
+                body = vh + _s("umcnet-%s-%d" % (self.user, os.getpid())) + _s(self.user) + _s(pw)
+                s.sendall(bytes([0x10]) + _rl(len(body)) + body)
+                ack = s.recv(4)
+                if len(ack) < 4 or ack[0] != 0x20 or ack[3] != 0: raise RuntimeError("the broker refused the %s account (code %s)" % (self.user, ack[3] if len(ack) >= 4 else "?"))
+                subs = b"".join(_s(t) + b"\x00" for t in self.subs)
+                s.sendall(bytes([0x82]) + _rl(2 + len(subs)) + b"\x00\x01" + subs)
+                self.sock = s; self.up = True; self.error = ""
+                self.status.update(state="connected", since=time.time(), error=""); backoff = 2
+                buf = b""; last_ping = time.time()
+                while True:
+                    if time.time() - last_ping > 30:
+                        with self.lock: s.sendall(b"\xc0\x00")
+                        last_ping = time.time()
+                    try: chunk = s.recv(65536)
+                    except socket.timeout: continue
+                    if not chunk: raise RuntimeError("the broker closed the connection")
+                    buf += chunk
+                    while len(buf) >= 2:
+                        mult, ln, i = 1, 0, 1
+                        while True:
+                            if i >= len(buf): break
+                            b = buf[i]; ln += (b & 127) * mult; mult *= 128; i += 1
+                            if not b & 128: break
+                        else: break
+                        if i > len(buf) or len(buf) < i + ln: break
+                        first = buf[0]; typ, pkt, buf = first >> 4, buf[i:i + ln], buf[i + ln:]
+                        if typ == 3:
+                            tl = struct.unpack(">H", pkt[:2])[0]; topic = pkt[2:2 + tl].decode("utf-8", "replace"); self.on_msg(topic, pkt[2 + tl:], bool(first & 1))
+            except Exception as e:
+                self.up = False; self.error = str(e); self.status.update(state="disconnected", error=str(e)); self.status["reconnects"] = self.status.get("reconnects", 0) + 1
+                time.sleep(backoff); backoff = min(60, backoff * 2)
+
 def mqtt_loop():
-    backoff = 2
-    while True:
-        try:
-            pw = open(CFG["mqtt_pass_file"]).read().strip()
-            s = socket.create_connection((CFG["mqtt_host"], CFG["mqtt_port"]), timeout=10); s.settimeout(40)
-            vh = _s("MQTT") + bytes([4, 0xC2]) + struct.pack(">H", 60)
-            body = vh + _s("umcnet-dash-%d" % os.getpid()) + _s(CFG["mqtt_user"]) + _s(pw)
-            s.sendall(bytes([0x10]) + _rl(len(body)) + body)
-            ack = s.recv(4)
-            if len(ack) < 4 or ack[0] != 0x20 or ack[3] != 0: raise RuntimeError("broker refused the dashboard account (code %s)" % (ack[3] if len(ack) >= 4 else "?"))
-            subs = b"".join(_s(t) + b"\x00" for t in ("$SYS/#", "meshcore/#"))
-            s.sendall(bytes([0x82]) + _rl(2 + len(subs)) + b"\x00\x01" + subs)
-            MQTT.update(state="connected", since=time.time(), error=""); backoff = 2
-            buf = b""; last_ping = time.time()
-            while True:
-                if time.time() - last_ping > 30: s.sendall(b"\xc0\x00"); last_ping = time.time()
-                try: chunk = s.recv(65536)
-                except socket.timeout: continue
-                if not chunk: raise RuntimeError("broker closed the connection")
-                buf += chunk
-                while len(buf) >= 2:
-                    mult, ln, i = 1, 0, 1
-                    while True:
-                        if i >= len(buf): break
-                        b = buf[i]; ln += (b & 127) * mult; mult *= 128; i += 1
-                        if not b & 128: break
-                    else: break
-                    if i > len(buf) or len(buf) < i + ln: break
-                    first = buf[0]; typ, pkt, buf = first >> 4, buf[i:i + ln], buf[i + ln:]
-                    if typ == 3:
-                        tl = struct.unpack(">H", pkt[:2])[0]; topic = pkt[2:2 + tl].decode("utf-8", "replace"); on_publish(topic, pkt[2 + tl:], bool(first & 1))
-        except Exception as e:
-            MQTT.update(state="disconnected", error=str(e)); MQTT["reconnects"] += 1
-            time.sleep(backoff); backoff = min(60, backoff * 2)
+    MqttConn(CFG["mqtt_user"], CFG["mqtt_pass_file"], ["$SYS/#", "meshcore/#"], on_publish, MQTT).run()
+
+CTL_STATUS = {}
+def control_loop():
+    if not os.path.exists(CFG["ctl_pass_file"]):
+        CTL_STATUS.update(state="not set up", error="no control account yet: run install-dash.sh again"); return
+    CTL["conn"] = MqttConn(CFG["ctl_user"], CFG["ctl_pass_file"], ["umcnet/v1/+/dev/+/resp"], on_control_reply, CTL_STATUS)
+    CTL["conn"].run()
 
 # ----------------------------------------------------------------------------- broker log: who connects, who is refused
 RX_NEW = re.compile(r"New client connected from (\S+?)(?::(\d+))? as (.+?) \(p(\d), c(\d), k(\d+)(?:, u'(.*)')?\)")
@@ -326,7 +351,7 @@ def accounts():
             online = [c for c in CLIENTS.values() if c.get("user") == n and c.get("state") == "connected"]
             last = max([c.get("last", 0) for c in CLIENTS.values() if c.get("user") == n] or [0])
         dev = v.get("device", ""); d = DEV.get(dev)
-        out.append({"name": n, "role": v.get("role", ""), "device": dev, "online": len(online), "last": last, "ip": online[0]["ip"] if online else "", "device_name": d["name"] if d else "", "device_seen": d["last"] if d else 0})
+        out.append({"name": n, "role": v.get("role", ""), "state": v.get("state", "approved"), "device": dev, "online": len(online), "last": last, "ip": online[0]["ip"] if online else "", "device_name": d["name"] if d else "", "device_seen": d["last"] if d else 0})
     return out
 
 # ----------------------------------------------------------------------------- history
@@ -337,6 +362,7 @@ def db_init():
     DB.execute("PRAGMA journal_mode=WAL"); DB.execute("PRAGMA synchronous=NORMAL")
     DB.execute("CREATE TABLE IF NOT EXISTS samples(ts INTEGER, k TEXT, v REAL)"); DB.execute("CREATE INDEX IF NOT EXISTS s_k ON samples(k, ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS events(ts INTEGER, kind TEXT, client TEXT, user TEXT, ip TEXT, text TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS e_ts ON events(ts)")
+    DB.execute("CREATE TABLE IF NOT EXISTS audit(ts INTEGER, who TEXT, action TEXT, target TEXT, detail TEXT, ok INTEGER)"); DB.execute("CREATE INDEX IF NOT EXISTS a_ts ON audit(ts)")
 
 def sysnum(topic, default=0):
     v = SYS.get(topic)
@@ -364,7 +390,7 @@ def sampler_loop():
             now = int(time.time()); vals = snapshot_values()
             DB.executemany("INSERT INTO samples VALUES(?,?,?)", [(now, k, float(v)) for k, v in vals.items()])
             if now % 3600 < 60:
-                cut = now - CFG["keep_days"] * 86400; DB.execute("DELETE FROM samples WHERE ts<?", (cut,)); DB.execute("DELETE FROM events WHERE ts<?", (cut,))
+                cut = now - CONF["keep_days"] * 86400; DB.execute("DELETE FROM samples WHERE ts<?", (cut,)); DB.execute("DELETE FROM events WHERE ts<?", (cut,))
         except Exception as e:
             sys.stderr.write("sampler: %s\n" % e)
 
@@ -378,38 +404,277 @@ def history(keys, seconds):
         out[k] = rows
     return out
 
+# ----------------------------------------------------------------------------- settings of the dashboard itself
+DEFAULTS = {"title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
+            "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14, "confirm_risky": True, "control_enabled": True,
+            "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True},
+            "labels": {}}
+RANGES = {"stale_minutes": (2, 1440), "cert_warn_days": (2, 60), "cert_bad_days": (1, 30), "disk_warn_pct": (50, 99), "mem_warn_pct": (50, 99), "flap_count": (2, 50),
+          "skew_seconds": (5, 3600), "auth_fail_warn": (1, 1000), "auth_fail_bad": (2, 10000), "keep_days": (1, 90)}
+CONF = json.loads(json.dumps(DEFAULTS))
+
+def conf_path(): return os.path.join(CFG["data"], "config.json")
+
+def conf_load():
+    try: raw = json.load(open(conf_path()))
+    except Exception: raw = {}
+    merged = json.loads(json.dumps(DEFAULTS))
+    for k, v in raw.items():
+        if k == "alerts" and isinstance(v, dict): merged["alerts"].update({a: b for a, b in v.items() if a in merged["alerts"]})
+        elif k in merged: merged[k] = v
+    CONF.clear(); CONF.update(merged)
+
+def conf_save():
+    tmp = conf_path() + ".tmp"
+    with open(tmp, "w") as f: json.dump(CONF, f, indent=1, sort_keys=True)
+    os.chmod(tmp, 0o600); os.replace(tmp, conf_path())
+
+def conf_update(patch):
+    """Validate and apply a settings change. Returns an error text or None."""
+    if not isinstance(patch, dict): return "not a settings object"
+    new = json.loads(json.dumps(CONF))
+    for k, v in patch.items():
+        if k in RANGES:
+            try: v = int(v)
+            except (TypeError, ValueError): return "%s must be a whole number" % k
+            lo, hi = RANGES[k]
+            if not lo <= v <= hi: return "%s must be between %d and %d" % (k, lo, hi)
+            new[k] = v
+        elif k in ("confirm_risky", "control_enabled"): new[k] = bool(v)
+        elif k == "title":
+            if not isinstance(v, str) or not 1 <= len(v) <= 40: return "title: 1 to 40 characters"
+            new[k] = v.strip()
+        elif k == "alerts":
+            if not isinstance(v, dict): return "alerts must be an object"
+            for a, b in v.items():
+                if a not in new["alerts"]: continue
+                if a == "url":
+                    if not isinstance(b, str) or (b and not re.match(r"^https?://[^\s]{4,300}$", b)): return "the alert address must start with http:// or https://"
+                    new["alerts"][a] = b.strip()
+                else: new["alerts"][a] = bool(b)
+        elif k == "labels":
+            if not isinstance(v, dict): return "labels must be an object"
+            lab = {}
+            for dev, d in v.items():
+                if re.match(r"^[0-9A-F]{64}$", dev) and isinstance(d, dict): lab[dev] = {"label": str(d.get("label", ""))[:40], "note": str(d.get("note", ""))[:300]}
+            new["labels"] = lab
+    if new["cert_bad_days"] >= new["cert_warn_days"]: return "the red certificate limit must be below the amber one"
+    CONF.clear(); CONF.update(new); conf_save()
+    return None
+
+def audit(who, action, target, detail, ok=True):
+    try:
+        DB.execute("INSERT INTO audit(ts,who,action,target,detail,ok) VALUES(?,?,?,?,?,?)", (int(time.time()), who, action, target, str(detail)[:400], 1 if ok else 0))
+    except Exception: pass
+
+# ----------------------------------------------------------------------------- the privileged helper (accounts, login)
+def admin_call(**req):
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(40); s.connect(CFG["admin_sock"])
+        s.sendall((json.dumps(req) + "\n").encode()); buf = b""
+        while not buf.endswith(b"\n"):
+            c = s.recv(65536)
+            if not c: break
+            buf += c
+        s.close(); return json.loads(buf.decode() or "{}")
+    except Exception as e:
+        return {"ok": False, "error": "the admin helper is not answering (%s)" % e}
+
+# ----------------------------------------------------------------------------- remote control of repeaters
+NEVER = ("password", "set password", "set guest", "get guest", "set prv", "get prv", "set wifi", "get wifi.pwd", "wifi ", "set ap", "get ap.password", "set net", "set pin", "get pin", "setperm",
+         "set http", "set telnet", "set web", "set ble", "get ble.pin", "set mqtt.custom.host", "set mqtt.custom.port", "set mqtt.custom.transport", "set mqtt.custom.username",
+         "set mqtt.custom.password", "get mqtt.custom.password", "set mqtt.control", "get mqtt.control.key", "set bridge.secret", "get bridge.secret", "set app", "start ota", "ota", "erase",
+         "format", "poweroff", "set telemetry", "set mqtt.custom ", "set mqtt.meshmapper", "set mqtt.waev", "set mqtt.eastmesh", "set mqtt.letsmesh")
+EXACT = ("advert", "advert.zerohop", "discover.neighbors", "clock", "reboot", "ver", "neighbors", "routes", "board", "clear stats", "stats-core", "stats-radio", "stats-packets", "stats-rf",
+         "stats-life", "region", "region save", "safety state", "radio watchdog", "memory")
+PREFIX = ("get ", "time ", "route ", "trace ", "region ", "tempradio ", "safety log", "gps ", "radio watchdog ", "set radio", "set tx", "set dutycycle", "set af", "set agc.reset.interval", "set cad",
+          "set int.thresh", "set rxdelay", "set repeat", "set loop.detect", "set path.hash.mode", "set flood.", "set group.hops.max", "set multi.acks", "set txdelay", "set direct.txdelay",
+          "set advert.", "set name", "set lat", "set lon", "set owner.info", "set mqtt.iata", "set mqtt.packets", "set mqtt.raw", "set mqtt.tx", "set mqtt.status", "set mqtt.custom.bridge",
+          "set mqtt.custom.rate", "set mqtt.owner", "set mqtt.email", "set powersaving", "set display.", "set bridge.enabled", "set bridge.source", "set bridge.delay", "set bridge.channel",
+          "set allow.read.only")
+RISKY = ("reboot", "set radio", "set tx", "region", "set name", "tempradio", "set repeat", "set mqtt.", "set bridge.", "set loop.detect", "set flood.", "set dutycycle", "clear stats", "time ")
+
+def command_allowed(cmd):
+    """The same list the repeater enforces (src/helpers/mqtt/ControlCmd.h); here it only saves a round trip."""
+    if not isinstance(cmd, str) or not cmd or len(cmd) > 140 or cmd != cmd.strip(): return False
+    if any(ord(c) < 32 or ord(c) == 127 or c in '"\\' for c in cmd): return False
+    low = cmd.lower()
+    if any(low.startswith(n) for n in NEVER): return False
+    return low in EXACT or any(low.startswith(p) for p in PREFIX)
+
+def command_risky(cmd):
+    low = cmd.lower()
+    return low in RISKY or any(low.startswith(r) for r in RISKY)
+
+def sign(key_hex, dev, ts, n, cmd):
+    return hmac.new(bytes.fromhex(key_hex), ("%s|%d|%d|%s" % (dev, ts, n, cmd)).encode(), hashlib.sha256).hexdigest()
+
+KEYS = {}                                  # device id -> {"key": hex, "created": ts}
+CTL = {"waiting": {}, "last_n": 0, "lock": threading.Lock(), "conn": None, "state": "idle", "last": {}}
+
+def keys_path(): return os.path.join(CFG["data"], "control.json")
+def keys_load():
+    try: KEYS.update(json.load(open(keys_path())))
+    except Exception: pass
+def keys_save():
+    tmp = keys_path() + ".tmp"
+    with open(tmp, "w") as f: json.dump(KEYS, f)
+    os.chmod(tmp, 0o600); os.replace(tmp, keys_path())
+
+def control_key(dev, create=False, new=False):
+    with LOCK:
+        if (new or create and dev not in KEYS):
+            KEYS[dev] = {"key": secrets.token_hex(32), "created": int(time.time())}; keys_save()
+        return KEYS.get(dev, {}).get("key")
+
+def on_control_reply(topic, payload, retained=False):
+    m = re.match(r"^umcnet/v1/[^/]+/dev/([0-9A-Fa-f]{64})/resp$", topic)
+    if not m or retained: return
+    try: j = json.loads(payload.decode("utf-8", "replace"))
+    except Exception: return
+    w = CTL["waiting"].get(j.get("id"))
+    if w and w["dev"] == m.group(1).upper(): w["reply"] = j; w["event"].set()
+
+def send_command(dev, cmd, who="dashboard", confirm=False, timeout=14):
+    dev = (dev or "").upper()
+    if not CONF["control_enabled"]: return {"ok": False, "error": "remote control is switched off in the settings"}
+    if not re.match(r"^[0-9A-F]{64}$", dev): return {"ok": False, "error": "no such repeater"}
+    if not command_allowed(cmd): return {"ok": False, "error": "that command cannot be run remotely"}
+    if command_risky(cmd) and CONF["confirm_risky"] and not confirm: return {"ok": False, "needs_confirm": True, "error": "this changes how the repeater behaves; confirm to send it"}
+    key = KEYS.get(dev, {}).get("key")
+    if not key: return {"ok": False, "error": "no control key for this repeater yet: open Control setup and give it the key"}
+    conn = CTL["conn"]
+    if conn is None or not conn.up: return {"ok": False, "error": "the control link to the broker is down (%s)" % (conn.error if conn else "not started")}
+    d = DEV.get(dev)
+    if d is None or time.time() - d["last"] > CONF["stale_minutes"] * 60 * 4: return {"ok": False, "error": "that repeater is offline: nothing has been heard from it recently"}
+    area = d["area"] or "LBA"
+    with CTL["lock"]:
+        n = max(CTL["last_n"] + 1, int(time.time() * 1000)); CTL["last_n"] = n
+    ts = int(time.time()); cid = secrets.token_hex(6)
+    msg = {"id": cid, "ts": ts, "n": n, "cmd": cmd, "sig": sign(key, dev, ts, n, cmd)}
+    w = CTL["waiting"][cid] = {"dev": dev, "event": threading.Event(), "reply": None}
+    try:
+        conn.publish("umcnet/v1/%s/dev/%s/cmd" % (area, dev), json.dumps(msg, separators=(",", ":")).encode())
+        got = w["event"].wait(timeout)
+    finally:
+        CTL["waiting"].pop(cid, None)
+    if not got:
+        audit(who, "command", dev[:12], "%s -> no answer" % cmd, False)
+        return {"ok": False, "error": "no answer in %d s: control may be off on the repeater, the key may not match, or its clock may be wrong" % timeout}
+    r = w["reply"]; ok = bool(r.get("ok")); text = str(r.get("reply", ""))
+    audit(who, "command", dev[:12], "%s -> %s" % (cmd, text), ok)
+    CTL["last"][dev] = {"cmd": cmd, "reply": text, "ok": ok, "t": time.time()}
+    return {"ok": ok, "reply": text, "error": None if ok else text}
+
+def setup_commands(name, password, dev, area):
+    key = control_key(dev, create=True) if dev else None
+    lines = ["set mqtt.iata %s" % (area or "LBA"), "set mqtt.custom.host %s" % CFG["host"], "set mqtt.custom.port 443", "set mqtt.custom.transport wss", "set mqtt.custom.username %s" % name]
+    if password: lines.append("set mqtt.custom.password %s" % password)
+    lines += ["set mqtt.custom on", "set mqtt.raw on", "set mqtt.tx off"]
+    if key: lines += ["set mqtt.control.key %s" % key, "set mqtt.control on"]
+    return "\n".join(lines)
+
+# ----------------------------------------------------------------------------- alerts
+ALERT_STATE = {}
+def send_alert(title, text, level="warn", kind="x"):
+    a = CONF["alerts"]
+    event("alert", "%s: %s" % (title, text))
+    try: DB.execute("INSERT INTO audit(ts,who,action,target,detail,ok) VALUES(?,?,?,?,?,?)", (int(time.time()), "alerts", "alert", kind, "%s - %s" % (title, text), 1))
+    except Exception: pass
+    if not a["enabled"] or not a["url"]: return "alerts are switched off or no address is set"
+    def go():
+        try:
+            if "ntfy" in a["url"]:
+                req = urllib.request.Request(a["url"], data=text.encode(), headers={"Title": title.encode("ascii", "replace").decode(), "Priority": "high" if level == "bad" else "default", "Tags": "warning" if level != "ok" else "white_check_mark"})
+            else:
+                req = urllib.request.Request(a["url"], data=json.dumps({"title": title, "message": text, "level": level, "host": CFG["host"], "time": int(time.time())}).encode(), headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=8).read()
+        except Exception as e:
+            event("warn", "could not send an alert: %s" % e)
+    threading.Thread(target=go, daemon=True).start()
+    return None
+
+def alert_loop():
+    time.sleep(40)
+    while True:
+        try:
+            now = time.time(); a = CONF["alerts"]; st = ALERT_STATE
+            with LOCK: devs = [dict(d) for d in DEV.values()]
+            for d in devs:
+                name = d["name"] or d["id"][:12]; off = d["last"] and now - d["last"] > CONF["stale_minutes"] * 60; was = st.get("off:" + d["id"], False)
+                if off and not was and a["offline"]: send_alert("Repeater silent: " + name, "nothing heard for %d minutes" % CONF["stale_minutes"], "warn", "offline")
+                if not off and was and a["online"]: send_alert("Repeater back: " + name, "it is sending again", "ok", "online")
+                st["off:" + d["id"]] = bool(off)
+            for p in pending_list():
+                k = "pend:" + p["name"] + p.get("prefix", "")
+                if k not in st and a["pending"]: send_alert("A repeater is waiting for approval", "account %s from %s (device %s...)" % (p["name"], p.get("ip", "?"), p.get("prefix", "?")), "warn", "pending")
+                st[k] = True
+            hour = [e for e in EVENTS if now - e["t"] < 3600 and e["kind"] == "auth_fail"]
+            if len(hour) >= CONF["auth_fail_bad"] and now - st.get("authfail", 0) > 3600 and a["auth_fail"]:
+                st["authfail"] = now; send_alert("Many refused logins", "%d in the last hour" % len(hour), "bad", "auth_fail")
+            c = certificate()
+            if c and c.get("days") is not None and c["days"] < CONF["cert_warn_days"] and now - st.get("cert", 0) > 86400 and a["cert"]:
+                st["cert"] = now; send_alert("Certificate expires soon", "%.0f days left for %s" % (c["days"], c["host"]), "bad" if c["days"] < CONF["cert_bad_days"] else "warn", "cert")
+            sy = system(); used = 100.0 * (1 - sy["disk_free"] / sy["disk_total"]) if sy["disk_total"] else 0
+            if used > CONF["disk_warn_pct"] and now - st.get("disk", 0) > 86400 and a["disk"]:
+                st["disk"] = now; send_alert("Disk nearly full", "%.0f%% used" % used, "warn", "disk")
+        except Exception as e:
+            sys.stderr.write("alerts: %s\n" % e)
+        time.sleep(30)
+
+def pending_list():
+    out = []
+    try: accs = accounts()
+    except Exception: return out
+    with LOCK:
+        for a in accs:
+            if a["role"] != "repeater" or not (a.get("state") == "pending" or not a["device"]) or a.get("state") == "blocked": continue
+            cl = [c for c in CLIENTS.values() if c.get("user") == a["name"] and c.get("state") == "connected"]
+            out.append({"name": a["name"], "prefix": (cl[0]["client"].rsplit("-", 1)[-1] if cl and "-" in cl[0]["client"] else ""), "ip": cl[0]["ip"] if cl else "", "since": cl[0].get("since", 0) if cl else 0, "online": bool(cl)})
+    return out
+
 # ----------------------------------------------------------------------------- the overview the page draws
 def diagnostics(sysinfo, accs, cert):
-    out = []; now = time.time()
+    out = []; now = time.time(); C = CONF
     def add(level, title, detail): out.append({"level": level, "title": title, "detail": detail})
     add("ok" if MQTT["state"] == "connected" else "bad", "Dashboard link to the broker", "connected since %s" % time.strftime("%H:%M:%S", time.localtime(MQTT["since"])) if MQTT["state"] == "connected" else "not connected: %s" % MQTT["error"])
+    add("ok" if CTL_STATUS.get("state") == "connected" else "warn", "Control link to the broker", "ready" if CTL_STATUS.get("state") == "connected" else "not ready (%s)" % CTL_STATUS.get("error", CTL_STATUS.get("state", "")))
     for u, st in sysinfo["services"].items(): add("ok" if st == "active" else "bad", "Service " + u, st)
     up = sysnum("$SYS/broker/uptime", -1)
     if up >= 0: add("warn" if up < 300 else "ok", "Broker uptime", "%d min%s" % (up // 60, " (it restarted recently)" if up < 300 else ""))
-    if cert and "days" in cert: add("bad" if cert["days"] < 5 else "warn" if cert["days"] < 14 else "ok", "TLS certificate for %s" % cert["host"], "%.0f days left (%s)" % (cert["days"], cert.get("issuer", "")))
+    if cert and "days" in cert: add("bad" if cert["days"] < C["cert_bad_days"] else "warn" if cert["days"] < C["cert_warn_days"] else "ok", "TLS certificate for %s" % cert["host"], "%.0f days left (%s)" % (cert["days"], cert.get("issuer", "")))
     elif cert: add("bad", "TLS certificate", cert.get("error", "cannot read it"))
-    free = 100.0 * sysinfo["disk_free"] / sysinfo["disk_total"] if sysinfo["disk_total"] else 100
-    add("bad" if free < 8 else "warn" if free < 15 else "ok", "Disk space", "%.0f%% free" % free)
-    ma = 100.0 * sysinfo["mem_avail"] / sysinfo["mem_total"] if sysinfo["mem_total"] else 100
-    add("bad" if ma < 8 else "warn" if ma < 15 else "ok", "Memory", "%.0f%% available" % ma)
+    used = 100.0 * (1 - sysinfo["disk_free"] / sysinfo["disk_total"]) if sysinfo["disk_total"] else 0
+    add("bad" if used > 95 else "warn" if used > C["disk_warn_pct"] else "ok", "Disk space", "%.0f%% used" % used)
+    mu = 100.0 * (1 - sysinfo["mem_avail"] / sysinfo["mem_total"]) if sysinfo["mem_total"] else 0
+    add("bad" if mu > 95 else "warn" if mu > C["mem_warn_pct"] else "ok", "Memory", "%.0f%% used" % mu)
     if sysinfo["load"]: add("warn" if sysinfo["load"][0] > (sysinfo["cores"] or 1) * 1.5 else "ok", "Load", "%.2f %.2f %.2f on %d core(s)" % (*sysinfo["load"], sysinfo["cores"] or 1))
     hour = [e for e in EVENTS if now - e["t"] < 3600]
-    fails = [e for e in hour if e["kind"] == "auth_fail"]
-    ips = collections.Counter(e["ip"] or "?" for e in fails)
-    add("bad" if len(fails) > 20 else "warn" if fails else "ok", "Refused logins, last hour", "%d%s" % (len(fails), " from " + ", ".join("%s ×%d" % x for x in ips.most_common(4)) if fails else ""))
+    fails = [e for e in hour if e["kind"] == "auth_fail"]; ips = collections.Counter(e["ip"] or "?" for e in fails)
+    add("bad" if len(fails) >= C["auth_fail_bad"] else "warn" if len(fails) >= C["auth_fail_warn"] else "ok", "Refused logins, last hour", "%d%s" % (len(fails), " from " + ", ".join("%s x%d" % x for x in ips.most_common(4)) if fails else ""))
     for c in CLIENTS.values():
         h = [t for t in c.get("history", []) if now - t < 600]
-        if len(h) >= 5: add("warn", "Reconnecting often: " + (c.get("user") or c["client"]), "%d connections in 10 minutes (%s): a weak WiFi link or two devices sharing one account" % (len(h), c.get("ip", "")))
+        if len(h) >= C["flap_count"]: add("warn", "Reconnecting often: " + (c.get("user") or c["client"]), "%d connections in 10 minutes (%s): a weak WiFi link or two devices sharing one account" % (len(h), c.get("ip", "")))
+    for pnd in pending_list():
+        add("warn", "Waiting for approval: " + pnd["name"], "connected from %s as device %s... : approve it on the Accounts tab" % (pnd["ip"] or "?", pnd["prefix"] or "?") if pnd["online"] else "created, nobody has used it yet")
+    by_user = {}
+    for c in CLIENTS.values():
+        if c.get("state") == "connected": by_user.setdefault(c.get("user"), []).append(c)
     for a in accs:
-        if a["role"] == "repeater":
-            if not a["device"]: add("warn", "Repeater account without a device id: " + a["name"], "bind it with: umcnet-user device %s <64 hex>" % a["name"])
-            elif not a["online"]: add("warn", "Repeater offline: " + a["name"], "last connected %s" % (time.strftime("%d %b %H:%M", time.localtime(a["last"])) if a["last"] else "never since this dashboard started"))
+        if a["role"] != "repeater": continue
+        if a["state"] == "blocked": add("ok", "Blocked: " + a["name"], "everything is refused for this account"); continue
+        if a["device"] and a["state"] != "pending":
+            cl = by_user.get(a["name"], [])
+            if not cl: add("warn", "Repeater offline: " + a["name"], "last connected %s" % (time.strftime("%d %b %H:%M", time.localtime(a["last"])) if a["last"] else "never since this dashboard started"))
+            for c in cl:
+                pre = c["client"].rsplit("-", 1)[-1].upper() if "-" in c["client"] else ""
+                if pre and re.match(r"^[0-9A-F]{6}$", pre) and not a["device"].startswith(pre): add("bad", "Different device on %s" % a["name"], "the connected device starts %s but the account is bound to %s... : someone else may be using these credentials" % (pre, a["device"][:6]))
     for d in DEV.values():
-        age = now - d["last"] if d["last"] else None
-        if age is None: add("warn", "No data yet from %s" % (d["name"] or d["id"][:12]), "known only from its saved status message; nothing live since the dashboard started")
-        elif age > 900: add("warn", "No data from %s" % (d["name"] or d["id"][:12]), "last heard %d min ago" % (age // 60))
-        if d["skew"] is not None and abs(d["skew"]) > 120: add("warn", "Clock off on %s" % (d["name"] or d["id"][:12]), "%+.0f s against this server (its NTP may be down)" % d["skew"])
-        if d["status"] == "offline" and (age is None or age > 300): add("warn", "%s reports itself offline" % (d["name"] or d["id"][:12]), "its last status message said offline and nothing has arrived since")
+        age = now - d["last"] if d["last"] else None; nm = d["name"] or d["id"][:12]
+        if age is None: add("warn", "No data yet from %s" % nm, "known only from its saved status message; nothing live since the dashboard started")
+        elif age > C["stale_minutes"] * 60: add("warn", "No data from %s" % nm, "last heard %d min ago" % (age // 60))
+        if d["skew"] is not None and abs(d["skew"]) > C["skew_seconds"]: add("warn", "Clock off on %s" % nm, "%+.0f s against this server (its NTP may be down)" % d["skew"])
+        if d["status"] == "offline" and (age is None or age > 300): add("warn", "%s reports itself offline" % nm, "its last status message said offline and nothing has arrived since")
     dr = sysnum("$SYS/broker/load/publish/dropped/1min")
     if dr > 0: add("warn", "Broker is dropping messages", "%.1f a minute (a slow subscriber or full queues)" % dr)
     return out
@@ -419,7 +684,7 @@ def overview():
     with LOCK:
         devs = []
         for d in DEV.values():
-            x = dict(d); x["types"] = dict(d["types"]); x["topics"] = dict(d["topics"]); x["pm"] = round(rate_per_min("pkt:" + d["id"], 300), 2); x["age"] = round(now - d["last"], 1) if d["last"] else 10 ** 9; devs.append(x)
+            x = dict(d); x["types"] = dict(d["types"]); x["topics"] = dict(d["topics"]); x["pm"] = round(rate_per_min("pkt:" + d["id"], 300), 2); x["has_key"] = d["id"] in KEYS; x["label"] = CONF["labels"].get(d["id"], {}); x["last_cmd"] = CTL["last"].get(d["id"]); x["age"] = round(now - d["last"], 1) if d["last"] else 10 ** 9; devs.append(x)
         devs.sort(key=lambda d: -d["last"])
         clients = []
         for c in CLIENTS.values():
@@ -440,20 +705,91 @@ def overview():
                "rates": {"messages": rate_per_min("messages"), "packets": rate_per_min("packets"), "unique": rate_per_min("unique")},
                "overlap": {"ids": ids, "names": [DEV[i]["name"] or i[:8] for i in ids], "m": overlap}, "heard_by": dict(sorted(multi.items())), "types": dict(types),
                "latency": {"n": len(LATENCY), "avg": round(sum(LATENCY) / len(LATENCY), 2) if LATENCY else None, "max": round(max(LATENCY), 2) if LATENCY else None},
-               "ev_hour": dict(collections.Counter(e["kind"] for e in EVENTS if now - e["t"] < 3600)), "host": CFG["host"]}
+               "ev_hour": dict(collections.Counter(e["kind"] for e in EVENTS if now - e["t"] < 3600)), "host": CFG["host"], "config": CONF, "control": {"state": CTL_STATUS.get("state", "idle"), "error": CTL_STATUS.get("error", ""), "keys": sorted(KEYS)}}
+    res["pending"] = pending_list()
     res["diagnostics"] = diagnostics(sysinfo, accs, cert)
     return res
 
 # ----------------------------------------------------------------------------- HTTP
+def csv_text(header, rows):
+    b = io.StringIO(); w = csv.writer(b); w.writerow(header)
+    for r in rows: w.writerow(r)
+    return b.getvalue()
+
 class H(BaseHTTPRequestHandler):
     server_version = "umcnet-dash"
     def log_message(self, *a): pass
     def send(self, code, body, ctype="application/json"):
         data = body if isinstance(body, bytes) else body.encode()
         self.send_response(code); self.send_header("Content-Type", ctype + "; charset=utf-8"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+    def do_POST(self):
+        u = urlparse(self.path)
+        try:
+            if self.headers.get("X-UMC-Dash") != "1": return self.send(403, '{"error":"missing header"}')
+            n = int(self.headers.get("Content-Length", "0") or 0)
+            if n > 20000: return self.send(413, '{"error":"too big"}')
+            body = json.loads(self.rfile.read(n).decode() or "{}")
+            who = "admin"; p = u.path
+            if p == "/api/control":
+                return self.send(200, json.dumps(send_command(body.get("device"), str(body.get("cmd", "")), who, bool(body.get("confirm")))))
+            if p == "/api/control/batch":
+                cmds = [str(c) for c in (body.get("cmds") or [])][:30]; res = []
+                for c in cmds:
+                    r = send_command(body.get("device"), c, who, bool(body.get("confirm"))); res.append({"cmd": c, **r})
+                    if r.get("error") and "no answer" in str(r["error"]) and len(res) >= 2 and not any(x.get("ok") for x in res): break     # nobody is answering: stop early
+                return self.send(200, json.dumps({"results": res}))
+            if p == "/api/control/setup":
+                dev = str(body.get("device", "")).upper(); name = str(body.get("account", ""))
+                if body.get("newkey"): control_key(dev, new=True); audit(who, "control key renewed", dev[:12], "")
+                d = DEV.get(dev); text = setup_commands(name or "YOUR-ACCOUNT", body.get("password"), dev, d["area"] if d else "LBA")
+                audit(who, "control setup shown", dev[:12], ""); return self.send(200, json.dumps({"ok": True, "text": text}))
+            if p == "/api/config":
+                err = conf_update(body.get("config", body)); audit(who, "settings changed", "dashboard", ",".join(k for k in (body.get("config", body) or {}))[:100], not err)
+                return self.send(200, json.dumps({"ok": not err, "error": err, "config": CONF}))
+            if p.startswith("/api/accounts/"):
+                op = p.rsplit("/", 1)[-1]; name = str(body.get("name", ""))
+                m = {"add": "user_add", "remove": "user_remove", "approve": "user_device", "block": "user_state", "unblock": "user_state", "passwd": "user_passwd", "pending": "user_state"}.get(op)
+                if not m: return self.send(404, '{"error":"unknown"}')
+                req = {"op": m, "name": name}
+                if op == "add": req.update(role=body.get("role", "repeater"), device=body.get("device", ""))
+                if op == "approve":
+                    dev = str(body.get("device", "")).upper()
+                    pend = [x for x in pending_list() if x["name"] == name]
+                    if pend and pend[0]["prefix"] and not dev.startswith(pend[0]["prefix"].upper()): return self.send(200, json.dumps({"ok": False, "error": "that device id does not match the repeater that connected (it starts %s)" % pend[0]["prefix"]}))
+                    req["device"] = dev
+                if op in ("block", "unblock", "pending"): req["state"] = {"block": "blocked", "unblock": "approved", "pending": "pending"}[op]
+                r = admin_call(**req); audit(who, "account " + op, name, r.get("error") or "ok", bool(r.get("ok")))
+                if r.get("ok"): export_accounts_soon()
+                return self.send(200, json.dumps({"ok": bool(r.get("ok")), "error": r.get("error") or (None if r.get("ok") else r.get("output")), "password": r.get("password"), "output": r.get("output")}))
+            if p == "/api/password":
+                r = admin_call(op="dash_password", current=str(body.get("current", "")), new=str(body.get("new", ""))); audit(who, "dashboard password", "admin", r.get("error") or "changed", bool(r.get("ok")))
+                return self.send(200, json.dumps(r))
+            if p == "/api/service":
+                r = admin_call(op="service", name=str(body.get("name", "")), action="restart"); audit(who, "service restart", str(body.get("name")), r.get("error") or "ok", bool(r.get("ok")))
+                return self.send(200, json.dumps(r))
+            if p == "/api/alerts/test":
+                err = send_alert("Test alert", "If you can read this, alerts work.", "ok", "test"); return self.send(200, json.dumps({"ok": not err, "error": err}))
+            return self.send(404, '{"error":"not found"}')
+        except Exception as e:
+            return self.send(500, json.dumps({"error": str(e)}))
+
     def do_GET(self):
         u = urlparse(self.path); q = parse_qs(u.query)
         try:
+            if u.path == "/api/audit":
+                secs = max(60, min(90 * 86400, int(q.get("range", ["604800"])[0])))
+                rows = DB.execute("SELECT ts,who,action,target,detail,ok FROM audit WHERE ts>=? ORDER BY ts DESC LIMIT 500", (int(time.time()) - secs,)).fetchall()
+                return self.send(200, json.dumps([dict(zip(("ts", "who", "action", "target", "detail", "ok"), r)) for r in rows]))
+            if u.path == "/api/export/events.csv":
+                rows = DB.execute("SELECT datetime(ts,'unixepoch'),kind,client,user,ip,text FROM events ORDER BY ts DESC LIMIT 20000").fetchall()
+                return self.send(200, csv_text(("time (UTC)", "kind", "client", "user", "ip", "text"), rows), "text/csv")
+            if u.path == "/api/export/audit.csv":
+                rows = DB.execute("SELECT datetime(ts,'unixepoch'),who,action,target,detail,ok FROM audit ORDER BY ts DESC LIMIT 20000").fetchall()
+                return self.send(200, csv_text(("time (UTC)", "who", "action", "target", "detail", "ok"), rows), "text/csv")
+            if u.path == "/api/export/devices.csv":
+                with LOCK: rows = [(d["id"], d["name"], d["area"], d["model"], d["fw"], d["radio"], d["status"], d["n_rx"], d["n_tx"], round(d["last"]), CONF["labels"].get(d["id"], {}).get("label", "")) for d in DEV.values()]
+                return self.send(200, csv_text(("device id", "name", "area", "model", "firmware", "radio", "status", "received", "sent", "last data (epoch)", "label"), rows), "text/csv")
+            if u.path == "/api/export/config.json": return self.send(200, json.dumps(CONF, indent=1))
             if u.path in ("/", "/index.html"): return self.send(200, open(CFG["static"], "rb").read(), "text/html")
             if u.path == "/api/overview": return self.send(200, json.dumps(overview(), default=str))
             if u.path == "/api/history":
@@ -468,9 +804,12 @@ class H(BaseHTTPRequestHandler):
         except Exception as e:
             return self.send(500, json.dumps({"error": str(e)}))
 
+def export_accounts_soon():
+    pass                                         # the account list is re-read from its copy on every request
+
 def main():
-    db_init(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
-    for fn in (mqtt_loop, journal_loop, sampler_loop): threading.Thread(target=fn, daemon=True).start()
+    db_init(); conf_load(); keys_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
+    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)
     try: srv.serve_forever()

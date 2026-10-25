@@ -1,0 +1,19 @@
+[Unit]
+Description=UMC Net admin helper (the dashboard's only root part)
+After=umcnet-mosquitto.service
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/umcnet-dash/umcnet_admin.py
+RuntimeDirectory=umcnet-admin
+RuntimeDirectoryMode=0755
+Restart=always
+RestartSec=3
+# it answers only the dashboard's user, over a Unix socket
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/etc/caddy/conf.d /etc/umcnet-dash /opt/umcnet /var/lib/umcnet-dash
+PrivateTmp=true
+MemoryMax=80M
+
+[Install]
+WantedBy=multi-user.target

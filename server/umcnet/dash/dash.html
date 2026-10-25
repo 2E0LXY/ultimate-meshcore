@@ -69,6 +69,9 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 .q:hover{background:#2fe27a;border-color:#2fe27a;color:#06140c}
 .helppop{position:absolute;z-index:60;width:min(380px,92vw);padding:12px 14px;border-radius:12px;background:#07130d;border:1px solid #2fe27a;color:#e9f7ef;box-shadow:0 12px 36px #000a;font-size:13px;line-height:1.45}
 .helppop h4{margin:0 0 2px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#2fe27a}.helppop p{margin:0 0 9px}.helppop p:last-child{margin:0}
+.dash2 .tool.danger{border-color:#ff5d6c;color:#ff9aa4}.dash2 .tool.danger:hover{background:#ff5d6c;color:#06140c}
+.dash2 .tabs{margin-top:0}.dash2 select,.dash2 input[type=text],.dash2 input:not([type]),.dash2 input[type=password]{background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 8px}
+.dash2 a{color:#2fe27a}.dash2 .row a{margin-right:14px}
 .dash2 code{background:#0d2219;border:1px solid #1b3a30;border-radius:6px;padding:1px 6px;font-size:12px;color:#8dffb0}
 .dash2 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .dash2 .tr{color:var(--mu)}.dash2 .conn b{white-space:nowrap}
@@ -83,8 +86,8 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 <script>
 const D = {uid: 0};
 const $ = s => document.querySelector(s), esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-const S = {o: null, hist: {}, range: 3600, tab: "overview", ev: [], evKind: "", logq: "", pq: "", t: 0, err: ""};
-const TABS = [["overview", "Overview"], ["repeaters", "Repeaters"], ["clients", "Clients"], ["accounts", "Accounts"], ["traffic", "Traffic"], ["diagnostics", "Diagnostics"], ["broker", "Broker"], ["system", "System"], ["log", "Log"]];
+const S = {o: null, hist: {}, range: 3600, tab: "overview", ev: [], evKind: "", logq: "", pq: "", t: 0, err: "", sel: "", vals: {}, log: [], audit: [], setup: "", created: null, msg: "", busy: false};
+const TABS = [["overview", "Overview"], ["repeaters", "Repeaters"], ["control", "Control"], ["clients", "Clients"], ["accounts", "Accounts"], ["traffic", "Traffic"], ["diagnostics", "Diagnostics"], ["broker", "Broker"], ["system", "System"], ["log", "Log"], ["settings", "Settings"]];
 const bytes = n => n == null ? "—" : n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? (n / 1e3).toFixed(1) + " kB" : Math.round(n) + " B";
 const dur = s => { s = Math.round(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d}d ${h}h ${m}m` : h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; };
 const ago = t => !t ? "never" : dur(Math.max(0, Date.now() / 1000 - t)) + " ago";
@@ -173,6 +176,14 @@ const HELP = {
   log: ["The broker's own log: logins, disconnects and warnings.", "Type to filter. Newest lines are first.", "The place to look for why one particular repeater can't connect."],
   flow: ["A picture of the network: repeaters on the left, the secure web front (Caddy) and the broker in the middle, and who listens on the right.", "A line moves while data flows, faster for busier repeaters. Grey means no data lately.", "Shows at a glance who is talking to whom."],
   events: ["Connections, disconnections, refused logins and warnings, kept for 14 days.", "Filter by kind. Refused logins show the address they came from.", "A pattern of refused logins from one address is someone guessing passwords."],
+  control: ["Remote control of one repeater through the broker: read and change its settings, send an advert, run a command, restart it.", "Pick a repeater. Read settings fills the boxes with what it has now; change one and press Apply. Risky actions ask you to confirm.", "You can look after repeaters on hills and rooftops without going to them. Every action is signed, limited to a safe list of commands, and recorded in the audit log."],
+  setup: ["The commands to paste into a repeater's Console page so that it joins UMC Net and accepts signed commands from this dashboard.", "Press Control setup, copy the text, paste it into the repeater's Console (or send it over USB), then press Read settings to check it answers.", "The control key is what proves a command came from you. Keep it private; renew it here if it leaks."],
+  approve: ["A repeater account that has connected but has not been tied to a device yet. It can listen, but it cannot publish or be controlled until you approve it.", "Check the device id shown matches the repeater you expect (it is on its display, and under Identity as Public key), paste the full 64-character id and approve.", "Without approval a repeater is held at the door, so a leaked password alone cannot add a fake repeater to your network."],
+  accts: ["Create, approve, block, reset or remove broker accounts without touching the server.", "Add repeater creates an account that waits for approval. Block shuts an account out at once. New password shows the new one once.", "One account per repeater means a lost or stolen repeater can be shut out without disturbing the others."],
+  audit: ["A record of everything done from this dashboard: commands, account changes, settings and password changes, with the reply.", "Read it, or download it as CSV.", "If something changed and nobody knows why, this tells you who did it and when."],
+  settings: ["Limits for the checks, how long history is kept, whether control needs confirmation, and where alerts go.", "Change a value and press Save. Nothing is applied until you save.", "Different networks have different needs: tune the checks so they warn you about what matters to you and stay quiet about what doesn't."],
+  alerts: ["A message sent to a web address or an ntfy topic when something needs your attention.", "Paste the address (for example https://ntfy.sh/your-topic), tick what you want to hear about, Save, then press Send a test.", "You find out a repeater went silent from your phone, not by remembering to look."],
+  password: ["The password for this dashboard.", "Enter the current one and a new one of at least 12 characters with a capital and a number. You will be asked to sign in again.", "Change it if anyone else has seen it. It is stored only as a hash."],
   latency: ["The difference between the time a repeater put on a message and the time it reached this server.", "Small is good. Large numbers mean a slow link or a repeater whose clock is wrong.", "A wrong clock on a repeater also makes its packets look old to others."],
 };
 const q = key => HELP[key] ? `<button type="button" class="q" data-hk="${key}" aria-label="What is this?" title="What is this?">?</button>` : "";
@@ -284,12 +295,6 @@ function vClients(o) {
   return `<div class="panels">${panel("Connected and recent clients", "from the broker's log", table(["", "Account", "Client id", "From", "Connected for / ended", "Keepalive", "Protocol", "Logins last hour", "Logins total"], rows, "No connection seen since the dashboard started."), "clients")}</div>`;
 }
 
-function vAccounts(o) {
-  const rows = o.accounts.map(a => `<tr><td>${dot(a.online ? "ok" : "idle")}</td><td><b>${esc(a.name)}</b></td><td><span class="tag">${esc(a.role)}</span></td><td>${a.device ? `<code style="font-size:11px">${a.device.slice(0, 16)}…</code> ${esc(a.device_name || "")}` : a.role === "repeater" ? `<span class="tr" style="color:#f2c14e">not bound</span>` : "—"}</td><td>${a.online ? "online · " + esc(a.ip) : "offline"}</td><td>${a.last ? ago(a.last) : "not since the dashboard started"}</td><td>${a.device_seen ? ago(a.device_seen) : "—"}</td></tr>`);
-  return `<div class="panels">${panel("Accounts", `${o.accounts.length} on the broker`, table(["", "Account", "Role", "Device id", "Now", "Last login", "Last data"], rows), "accounts")}
-    ${panel("Managing accounts", "on the server", `<table><tbody><tr><td><code>umcnet-user list</code></td><td>show accounts</td></tr><tr><td><code>umcnet-user add NAME repeater --device &lt;64 hex&gt;</code></td><td>create or reset a repeater, bound to its device id (it can write only there)</td></tr><tr><td><code>umcnet-user add NAME viewer</code></td><td>read-only listener</td></tr><tr><td><code>umcnet-user device NAME &lt;64 hex&gt;</code></td><td>change a repeater's device id</td></tr><tr><td><code>umcnet-user remove NAME</code></td><td>delete an account</td></tr></tbody></table><p class="tr" style="margin-top:8px">Roles: admin (everything), repeater (publishes under its own id, reads everyone's raw packets and status), client and viewer (listen only), monitor (this dashboard: reads the broker's statistics and everything under meshcore/).</p>`, "", "s12")}</div>`;
-}
-
 function vTraffic(o) {
   const f = S.pq.toLowerCase(), rows = o.packets.filter(p => !f || JSON.stringify(p).toLowerCase().includes(f)).slice(0, 60).map(p => `<tr><td>${clock(p.t).split(", ").pop()}</td><td>${esc(devName(o, p.dev))}</td><td><span class="tag ${p.dir === "tx" ? "tx" : ""}">${p.dir.toUpperCase()}</span></td><td>${esc(p.type)} <span class="tr">${p.flood ? "flood" : "direct"}</span></td><td><b>${esc(who(o, p))}</b></td><td>${esc(p.via ? resolveHash(o, p.via) : p.hops === 0 ? "direct" : "—")}</td><td>${p.hops}</td><td>${p.rssi ?? ""} / ${p.snr ?? ""}</td><td>${p.len ?? ""}</td></tr>`);
   const ty = Object.entries(o.types).sort((a, b) => b[1] - a[1]), colors = {ADVERT: "#2fe27a", CHAN: "#4aa8ff", RESP: "#e977c5", REQ: "#e977c5", MSG: "#a58bff", ACK: "#f2c14e", PATH: "#ff8f5a", TRACE: "#5be3d8"};
@@ -306,6 +311,7 @@ function vDiag(o) {
   const kinds = ["", "connect", "disconnect", "timeout", "auth_fail", "warn"];
   return `<div class="panels">${panel("All checks", dg.filter(d => d.level !== "ok").length + " need attention", `<div class="conn">${dg.map(d => `<div>${dot(d.level)}<b>${esc(d.title)}</b><span>${esc(d.detail)}</span></div>`).join("")}</div>`, "diag", "s7")}
     ${panel("Refused logins by address", "last 24 hours", table(["Address", "Refusals"], ipRows, "None. Nobody has been refused.") + `<p class="tr" style="margin-top:8px">Many refusals from one address is someone guessing passwords. Consider fail2ban or limiting the address in Caddy.</p>`, "events", "s5")}
+    ${panel("Audit log", "everything done from this dashboard, last 7 days", table(["When", "Who", "Action", "On", "Detail"], S.audit.slice(0, 80).map(a => `<tr><td>${clock(a.ts)}</td><td>${esc(a.who)}</td><td>${dot(a.ok ? "ok" : "bad")} ${esc(a.action)}</td><td>${esc(a.target)}</td><td style="white-space:normal">${esc(a.detail)}</td></tr>`), "Nothing has been done from the dashboard yet.") + `<p class="tr" style="margin-top:6px"><a href="/api/export/audit.csv">Download as CSV</a></p>`, "audit")}
     ${panel("Event history", "kept 14 days", `<div class="rng" style="margin-bottom:8px">${kinds.map(k => `<button data-ek="${k}" class="${S.evKind === k ? "on" : ""}">${k || "all"}</button>`).join(" ")}</div>` + table(["When", "Kind", "Who", "From", "What"], S.ev.slice(0, 150).map(e => `<tr><td>${clock(e.ts)}</td><td><span class="tag ${e.kind === "auth_fail" || e.kind === "warn" ? "tx" : ""}">${esc(e.kind)}</span></td><td>${esc(e.user || e.client)}</td><td>${esc(e.ip)}</td><td>${esc(e.text)}</td></tr>`), "No events in this period."), "events")}</div>`;
 }
 
@@ -340,12 +346,162 @@ function vLog(o) {
   return `<div class="panels">${panel("Broker log", "newest first", `<div class="row" style="margin-bottom:8px"><input id="lq" placeholder="Filter…" value="${esc(S.logq)}" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 10px;width:260px"></div>` + table(["Time", "Line"], rows), "log")}</div>`;
 }
 
-const VIEWS = {overview: vOverview, repeaters: vRepeaters, clients: vClients, accounts: vAccounts, traffic: vTraffic, diagnostics: vDiag, broker: vBroker, system: vSystem, log: vLog};
+
+async function post(url, body) {
+  try {
+    const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json", "X-UMC-Dash": "1"}, body: JSON.stringify(body || {})});
+    return await r.json();
+  } catch (e) { return {ok: false, error: e.message}; }
+}
+const hold = () => { const a = document.activeElement; return !!(a && a.closest && a.closest("#body") && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.dataset.keep !== "0"); };
+const rep = v => String(v ?? "").replace(/^>\s*/, "").trim();
+const FIELDS = [
+  ["Radio", [["radio", "Frequency, bandwidth, SF, CR", "text", "869.618,62.5,8,8"], ["tx", "Transmit power (dBm)", "number"], ["dutycycle", "Duty cycle (%)", "number"], ["radio.rxgain", "Boosted receive gain", "onoff"], ["agc.reset.interval", "AGC reset (s)", "number"], ["cad", "Channel activity detect", "onoff"]]],
+  ["Forwarding", [["repeat", "Repeat packets", "onoff"], ["loop.detect", "Loop detection", "select:off,minimal,moderate,strict"], ["flood.max", "Max flood hops", "number"], ["flood.max.unscoped", "Max hops, unscoped", "number"], ["flood.max.advert", "Max hops, adverts", "number"], ["group.hops.max", "Max hops, channel messages", "number"], ["multi.acks", "Extra ACKs", "select:0,1"], ["txdelay", "Flood retransmit delay", "number"], ["direct.txdelay", "Direct retransmit delay", "number"]]],
+  ["Adverts", [["advert.interval", "Zero-hop advert (min)", "number"], ["flood.advert.interval", "Flood advert (hours)", "number"]]],
+  ["Identity", [["name", "Node name", "text"], ["lat", "Latitude", "number"], ["lon", "Longitude", "number"], ["owner.info", "Owner info", "text"]]],
+  ["UMC Net", [["mqtt.iata", "Area code", "text"], ["mqtt.raw", "Publish raw packets", "onoff"], ["mqtt.tx", "Include transmitted", "onoff"], ["mqtt.custom.bridge", "Bridge: pass on others' packets", "onoff"], ["mqtt.custom.rate", "Bridge rate (a minute)", "number"]]],
+  ["Power", [["powersaving", "Power saving", "onoff"]]],
+];
+const QUICK = [["Send advert", "advert", ""], ["Zero-hop advert", "advert.zerohop", ""], ["Discover neighbours", "discover.neighbors", ""], ["Version", "ver", ""], ["Stats", "stats-core", ""], ["Radio stats", "stats-radio", ""], ["Packet stats", "stats-packets", ""], ["Neighbours", "neighbors", ""], ["Clear stats", "clear stats", "risky"], ["Restart", "reboot", "danger"]];
+
+function devSel(o) {
+  if (!S.sel && o.devices.length) S.sel = o.devices[0].id;
+  return o.devices.map(d => `<button data-sel="${d.id}" class="${S.sel === d.id ? "on" : ""}">${dot(d.age < 900 ? "ok" : "warn")} ${esc((d.label && d.label.label) || d.name || d.id.slice(0, 8))}${d.has_key ? "" : " 🔑?"}</button>`).join(" ");
+}
+function vControl(o) {
+  if (!o.devices.length) return `<div class="panels">${panel("Control", "", `<div class="empty">No repeater has reported yet. Approve one on the Accounts tab first.</div>`, "control")}</div>`;
+  devSel(o); const d = o.devices.find(x => x.id === S.sel) || o.devices[0]; S.sel = d.id;
+  const vals = S.vals[d.id] || {}, online = d.age < 900 * 4, lab = d.label || {};
+  const state = !o.config.control_enabled ? "Remote control is switched off in Settings." : o.control.state !== "connected" ? "The control link to the broker is not ready: " + (o.control.error || o.control.state) : !d.has_key ? "No control key yet for this repeater. Press Control setup and paste the commands into its Console." : !online ? "This repeater has not been heard from for a while, so a command would not reach it." : "";
+  const field = ([k, label, type, ph]) => {
+    const v = rep(vals[k]), id = "cf_" + k.replace(/\W/g, "_");
+    const input = type === "onoff" ? `<select id="${id}" data-keep="1">${["", "on", "off"].map(x => `<option ${x === v ? "selected" : ""}>${x}</option>`).join("")}</select>` : type.startsWith("select:") ? `<select id="${id}">${[""].concat(type.slice(7).split(",")).map(x => `<option ${x === v ? "selected" : ""}>${x}</option>`).join("")}</select>` : `<input id="${id}" type="${type === "number" ? "text" : "text"}" value="${esc(v)}" placeholder="${esc(ph || "")}" style="width:100%">`;
+    return `<tr><td style="width:36%"><b>${esc(label)}</b><div class="tr" style="font-size:11px">${esc(k)}</div></td><td>${input}</td><td style="width:90px"><button class="tool" data-apply="${k}" data-fid="${id}">Apply</button></td></tr>`;
+  };
+  const quick = QUICK.map(([l, c, r]) => `<button class="tool ${r === "danger" ? "danger" : ""}" data-cmd="${esc(c)}" data-risky="${r}">${esc(l)}</button>`).join(" ");
+  const log = S.log.filter(l => l.dev === d.id).slice(0, 12).map(l => `<tr><td class="tr" style="white-space:nowrap">${clock(l.t).split(", ").pop()}</td><td>${dot(l.ok ? "ok" : "bad")} <code>${esc(l.cmd)}</code></td><td style="white-space:normal">${esc(l.reply)}</td></tr>`);
+  const hist = S.audit.filter(a => a.target === d.id.slice(0, 12) && a.action === "command").slice(0, 12).map(a => `<tr><td>${clock(a.ts)}</td><td>${dot(a.ok ? "ok" : "bad")}</td><td style="white-space:normal">${esc(a.detail)}</td></tr>`);
+  return `<div class="panels">
+    ${panel("Repeaters", "choose one", `<div class="tabs" style="margin:0">${devSel(o)}</div>`, "control")}
+    ${panel((lab.label || d.name || d.id.slice(0, 12)) + " ", `${online ? "online" : "silent"} · ${d.model || ""} ${d.fw || ""}`, `${state ? `<div class="warnb" style="margin-bottom:10px">${esc(state)}</div>` : ""}
+      <div class="row" style="margin-bottom:8px"><button class="tool" data-act="setup">Control setup</button><button class="tool" data-act="read">Read settings</button><button class="tool" data-act="renew">Renew control key</button><span class="tr" id="ctlMsg">${esc(S.msg)}</span></div>
+      <div class="tr" style="font-size:12px;word-break:break-all">Device id <code>${d.id}</code></div>
+      ${S.setup ? `<div style="margin-top:10px"><div class="tr">Paste this into the repeater's Console page (or send it over USB):</div><textarea id="setupText" readonly rows="${Math.min(14, S.setup.split("\n").length + 1)}" style="width:100%;background:#06130d;color:#8dffb0;border:1px solid #1b3a30;border-radius:8px;padding:8px;font-family:ui-monospace,Consolas,monospace;font-size:12px" data-keep="0">${esc(S.setup)}</textarea><div class="row"><button class="tool" data-act="copy">Copy</button><span class="tr">The control key is secret. Anyone with it can run commands on this repeater.</span></div></div>` : ""}`, "setup", "s12")}
+    ${panel("Quick actions", "", `<div class="qa">${quick}</div>`, "control", "s12")}
+    ${FIELDS.map(([g, rows]) => panel(g, "", `<table><tbody>${rows.map(field).join("")}</tbody></table>`, "", "s6")).join("")}
+    ${panel("Console", "only commands that are safe to run remotely", `<div class="row"><input id="ctlCmd" placeholder="for example: get radio" style="flex:1;min-width:240px;background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:7px 10px" data-keep="1"><button class="tool" data-act="send">Send</button></div><p class="tr" style="margin:6px 0">Secrets, passwords, WiFi and broker settings and firmware installs are never accepted remotely.</p>` + table(["Time", "Command", "Reply"], log, "Nothing sent yet."), "control", "s12")}
+    ${panel("Label and note", "only stored on this server", `<div class="row"><input id="labLabel" value="${esc(lab.label || "")}" placeholder="Label, e.g. Hill top" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:7px 10px"><input id="labNote" value="${esc(lab.note || "")}" placeholder="Note" style="flex:1;min-width:200px;background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:7px 10px"><button class="tool" data-act="label">Save</button></div>`, "", "s6")}
+    ${panel("Recent actions on this repeater", "from the audit log", table(["When", "", "What"], hist, "Nothing yet."), "audit", "s6")}
+  </div>`;
+}
+
+function vAccounts(o) {
+  const pend = o.pending || [], acc = Object.fromEntries(o.accounts.map(a => [a.name, a]));
+  const pendHtml = pend.length ? panel("Waiting for approval", pend.length + " repeater" + (pend.length > 1 ? "s" : ""), table(["Account", "Device (first characters)", "From", "Since", ""], pend.map(p => `<tr><td><b>${esc(p.name)}</b></td><td>${p.prefix ? `<code>${esc(p.prefix)}…</code>` : `<span class="tr">not connected yet</span>`}</td><td>${esc(p.ip || "")}</td><td>${p.since ? ago(p.since) : ""}</td><td><button class="tool" data-acc="approve" data-name="${esc(p.name)}" data-prefix="${esc(p.prefix)}">Approve</button> <button class="tool" data-acc="block" data-name="${esc(p.name)}">Block</button></td></tr>`)), "approve") : "";
+  const rows = o.accounts.map(a => `<tr><td>${dot(a.online ? "ok" : a.state === "blocked" ? "bad" : "idle")}</td><td><b>${esc(a.name)}</b></td><td><span class="tag">${esc(a.role)}</span> ${a.state && a.state !== "approved" ? `<span class="tag tx">${esc(a.state)}</span>` : ""}</td><td>${a.device ? `<code style="font-size:11px">${a.device.slice(0, 16)}…</code> ${esc(a.device_name || "")}` : a.role === "repeater" ? `<span class="tr" style="color:#f2c14e">not bound</span>` : "—"}</td><td>${a.online ? "online · " + esc(a.ip) : "offline"}</td><td>${a.last ? ago(a.last) : "—"}</td>
+    <td style="white-space:nowrap">${a.role === "repeater" ? `<button class="tool" data-acc="approve" data-name="${esc(a.name)}" data-prefix="">${a.device ? "Re-bind" : "Approve"}</button> ` : ""}${["admin", "dash", "controller"].includes(a.name) ? "" : `${a.state === "blocked" ? `<button class="tool" data-acc="unblock" data-name="${esc(a.name)}">Unblock</button>` : `<button class="tool" data-acc="block" data-name="${esc(a.name)}">Block</button>`} <button class="tool" data-acc="passwd" data-name="${esc(a.name)}">New password</button> <button class="tool danger" data-acc="remove" data-name="${esc(a.name)}">Remove</button>`}</td></tr>`);
+  const created = S.created ? `<div class="warnb" style="margin-top:10px;background:#0d2a1a;border-color:#2fe27a;color:#e9f7ef"><b>${esc(S.created.title)}</b><br>Account <code>${esc(S.created.name)}</code>${S.created.password ? ` password <code>${esc(S.created.password)}</code> (shown once; copy it now)` : ""}${S.created.text ? `<textarea readonly rows="${Math.min(12, S.created.text.split("\n").length + 1)}" style="width:100%;margin-top:8px;background:#06130d;color:#8dffb0;border:1px solid #1b3a30;border-radius:8px;padding:8px;font-family:ui-monospace,Consolas,monospace;font-size:12px" data-keep="0">${esc(S.created.text)}</textarea><div class="tr">Paste into the repeater's Console page. It will connect and wait for your approval.</div>` : ""}</div>` : "";
+  return `<div class="panels">${pendHtml}
+    ${panel("Add an account", "creates it on the broker", `<div class="row"><input id="newName" placeholder="name, e.g. hilltop-1" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:7px 10px"><select id="newRole" data-keep="1"><option>repeater</option><option>client</option><option>viewer</option></select><input id="newDev" placeholder="device id (optional: leave empty to approve later)" style="flex:1;min-width:260px;background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:7px 10px"><button class="tool" data-act="addacc">Add</button></div>${created}`, "accts")}
+    ${panel("Accounts", `${o.accounts.length} on the broker`, table(["", "Account", "Role", "Device id", "Now", "Last login", "Actions"], rows), "accts")}
+    ${panel("Roles", "", `<table><tbody><tr><td><b>repeater</b></td><td>publishes what it hears under its own device id, reads everyone's raw packets and status, obeys signed commands. Waits for approval until bound to a device id.</td></tr><tr><td><b>client / viewer</b></td><td>listens only</td></tr><tr><td><b>monitor</b> (dash)</td><td>this dashboard's read-only account</td></tr><tr><td><b>controller</b></td><td>this dashboard's control channel: may send commands and read the answers, nothing else</td></tr><tr><td><b>admin</b></td><td>everything: keep it for yourself</td></tr></tbody></table>`, "", "s12")}</div>`;
+}
+
+function vSettings(o) {
+  const c = o.config, a = c.alerts, num = (k, label, hint) => `<tr><td><b>${label}</b><div class="tr" style="font-size:11px">${hint || ""}</div></td><td><input data-cfg="${k}" value="${esc(c[k])}" style="width:100px;background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 8px"></td></tr>`;
+  const chk = (k, label, obj = c) => `<label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="${k}"${obj === a ? ' data-al="1"' : ""} ${obj[k] ? "checked" : ""}> ${label}</label>`;
+  return `<div class="panels">
+    ${panel("Checks", "when to warn", `<table><tbody>${num("stale_minutes", "A repeater is silent after (minutes)", "2 to 1440")}${num("cert_warn_days", "Certificate amber under (days)", "")}${num("cert_bad_days", "Certificate red under (days)", "")}${num("disk_warn_pct", "Disk amber over (%)", "")}${num("mem_warn_pct", "Memory amber over (%)", "")}${num("flap_count", "Reconnecting often: connections in 10 min", "")}${num("skew_seconds", "Clock off by more than (seconds)", "")}${num("auth_fail_warn", "Refused logins an hour: amber from", "")}${num("auth_fail_bad", "Refused logins an hour: red from", "")}</tbody></table>`, "settings", "s6")}
+    ${panel("General", "", `<table><tbody><tr><td><b>Title</b></td><td><input data-cfg="title" value="${esc(c.title)}" style="width:100%;background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 8px"></td></tr>${num("keep_days", "Keep history for (days)", "1 to 90")}</tbody></table>${chk("control_enabled", "Allow remote control of repeaters")}${chk("confirm_risky", "Ask me to confirm risky commands (restart, radio, region, bridge)")}`, "settings", "s6")}
+    ${panel("Alerts", "tell me when something needs attention", `<div class="row"><input data-cfg="url" data-al="1" value="${esc(a.url)}" placeholder="https://ntfy.sh/your-topic   or any web address that accepts a POST" style="flex:1;min-width:280px;background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:7px 10px"></div>
+      ${chk("enabled", "Send alerts", a)}${chk("offline", "A repeater goes silent", a)}${chk("online", "A silent repeater comes back", a)}${chk("pending", "A repeater is waiting for approval", a)}${chk("auth_fail", "Many refused logins", a)}${chk("cert", "Certificate expires soon", a)}${chk("disk", "Disk nearly full", a)}
+      <div class="row" style="margin-top:8px"><button class="tool" data-act="alerttest">Send a test</button><span class="tr" id="altMsg"></span></div>`, "alerts", "s6")}
+    ${panel("Dashboard password", "the login for this page", `<div class="row"><input id="pwCur" type="password" placeholder="current password" autocomplete="current-password" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:7px 10px"><input id="pwNew" type="password" placeholder="new password (12+ characters)" autocomplete="new-password" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:7px 10px"><input id="pwNew2" type="password" placeholder="repeat it" autocomplete="new-password" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:7px 10px"><button class="tool" data-act="pw">Change</button></div><div class="tr" id="pwMsg" style="margin-top:6px"></div>`, "password", "s6")}
+    <div class="s12 row" style="margin:0"><button class="tool" data-act="savecfg" style="background:#2fe27a;color:#06140c;border-color:#2fe27a;padding:8px 18px">Save settings</button><span class="tr" id="cfgMsg"></span></div>
+    ${panel("Downloads", "", `<div class="row"><a href="/api/export/events.csv">Events (CSV)</a><a href="/api/export/audit.csv">Audit log (CSV)</a><a href="/api/export/devices.csv">Repeaters (CSV)</a><a href="/api/export/config.json">Settings (JSON)</a></div>`, "", "s6")}
+    ${panel("Services", "restart", `<div class="row"><button class="tool" data-svc="umcnet-dash">Restart the dashboard</button><button class="tool danger" data-svc="umcnet-mosquitto">Restart the broker</button><button class="tool" data-svc="caddy">Restart Caddy</button></div><p class="tr" style="margin-top:6px">Restarting the broker disconnects every repeater for about a minute.</p>`, "", "s6")}
+  </div>`;
+}
+
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button, a"); if (!b || b.tagName === "A") return;
+  const flash = (id, t, ok) => { const el = $("#" + id); if (el) { el.textContent = t; el.style.color = ok ? "#2fe27a" : "#ff8f8f"; } };
+  if (b.dataset.sel) { S.sel = b.dataset.sel; S.setup = ""; S.msg = ""; draw(); return; }
+  if (b.dataset.cmd) {
+    const risky = b.dataset.risky; if (risky && !confirm(risky === "danger" ? "Restart this repeater now? It will be offline for about a minute." : "Send this command?")) return;
+    return runCmd(b.dataset.cmd, !!risky);
+  }
+  if (b.dataset.apply) {
+    const v = $("#" + b.dataset.fid).value.trim(); if (!v) return flash("ctlMsg", "Enter a value first", false);
+    const k = b.dataset.apply; if (!confirm(`Set ${k} to ${v} on this repeater?`)) return;
+    const r = await runCmd(`set ${k} ${v}`, true); if (r && r.ok) { const g = await runCmd(`get ${k}`, false, true); if (g && g.ok) { (S.vals[S.sel] = S.vals[S.sel] || {})[k] = g.reply; draw(); } } return;
+  }
+  if (b.dataset.acc) return accountAction(b.dataset.acc, b.dataset.name, b.dataset.prefix);
+  if (b.dataset.svc) { if (!confirm("Restart " + b.dataset.svc + "?")) return; const r = await post("/api/service", {name: b.dataset.svc}); flash("cfgMsg", r.ok ? "Restarting…" : r.error, !!r.ok); return; }
+  const act = b.dataset.act; if (!act) return;
+  if (act === "read") {
+    S.msg = "Reading…"; draw(); const cmds = FIELDS.flatMap(g => g[1].map(f => "get " + f[0]));
+    const r = await post("/api/control/batch", {device: S.sel, cmds}); const v = S.vals[S.sel] = S.vals[S.sel] || {}; let ok = 0;
+    (r.results || []).forEach(x => { if (x.ok) { v[x.cmd.slice(4)] = x.reply; ok++; } }); S.msg = ok ? `Read ${ok} of ${cmds.length} settings` : ((r.results && r.results[0] && r.results[0].error) || "No answer"); draw(); return;
+  }
+  if (act === "send") { const c = $("#ctlCmd").value.trim(); if (c) await runCmd(c, true, false, true); return; }
+  if (act === "setup" || act === "renew") {
+    if (act === "renew" && !confirm("Make a new control key? The repeater will stop obeying until you paste the new key into it.")) return;
+    const d = S.o.devices.find(x => x.id === S.sel); const acct = (S.o.accounts.find(a => a.device === S.sel) || {}).name || "";
+    const r = await post("/api/control/setup", {device: S.sel, account: acct, newkey: act === "renew"}); S.setup = r.text || r.error; await tick(); return;
+  }
+  if (act === "copy") { const t = $("#setupText"); t.select(); try { await navigator.clipboard.writeText(t.value); } catch { document.execCommand("copy"); } flash("ctlMsg", "Copied", true); return; }
+  if (act === "label") { const r = await post("/api/config", {labels: Object.assign({}, S.o.config.labels, {[S.sel]: {label: $("#labLabel").value, note: $("#labNote").value}})}); flash("ctlMsg", r.ok ? "Saved" : r.error, !!r.ok); await tick(); return; }
+  if (act === "addacc") {
+    const name = $("#newName").value.trim(), role = $("#newRole").value, device = $("#newDev").value.trim();
+    const r = await post("/api/accounts/add", {name, role, device}); if (!r.ok) { alert(r.error || r.output || "Could not add it"); return; }
+    S.created = {title: role === "repeater" && !device ? "Created, waiting for approval" : "Created", name, password: r.password, text: role === "repeater" ? `set mqtt.iata ${(S.o.devices[0] || {}).area || "LBA"}\nset mqtt.custom.host ${S.o.host}\nset mqtt.custom.port 443\nset mqtt.custom.transport wss\nset mqtt.custom.username ${name}\nset mqtt.custom.password ${r.password}\nset mqtt.custom on\nset mqtt.raw on\nset mqtt.tx off` : ""}; await tick(); return;
+  }
+  if (act === "savecfg") {
+    const patch = {alerts: {}}; document.querySelectorAll("[data-cfg]").forEach(el => { const k = el.dataset.cfg, v = el.type === "checkbox" ? el.checked : el.value; (el.dataset.al ? patch.alerts : patch)[k] = v; });
+    const r = await post("/api/config", patch); flash("cfgMsg", r.ok ? "Saved" : r.error, !!r.ok); if (r.ok) await tick(); return;
+  }
+  if (act === "alerttest") { const r = await post("/api/alerts/test", {}); flash("altMsg", r.ok ? "Sent. Check your phone." : r.error, !!r.ok); return; }
+  if (act === "pw") {
+    const cur = $("#pwCur").value, n1 = $("#pwNew").value, n2 = $("#pwNew2").value; if (n1 !== n2) return flash("pwMsg", "The two new passwords differ", false);
+    const r = await post("/api/password", {current: cur, new: n1}); flash("pwMsg", r.ok ? "Changed. Your browser will ask for the new password now." : r.error, !!r.ok); if (r.ok) setTimeout(() => location.reload(), 2500); return;
+  }
+});
+async function runCmd(cmd, risky, quiet, fromBox) {
+  const flash = t => { const el = $("#ctlMsg"); if (el) el.textContent = t; };
+  if (!quiet) { S.msg = "Sending " + cmd + "…"; flash(S.msg); }
+  let r = await post("/api/control", {device: S.sel, cmd, confirm: !!risky});
+  if (r.needs_confirm) { if (!confirm(r.error + "\n\n" + cmd)) { S.msg = "Cancelled"; draw(); return r; } r = await post("/api/control", {device: S.sel, cmd, confirm: true}); }
+  S.log.unshift({t: Date.now() / 1000, dev: S.sel, cmd, ok: !!r.ok, reply: r.ok ? r.reply : r.error}); S.log = S.log.slice(0, 60);
+  if (!quiet) S.msg = r.ok ? "Done" : (r.error || "Failed"); if (fromBox) { const i = $("#ctlCmd"); if (i) i.value = ""; }
+  await loadAudit(); draw(); return r;
+}
+async function accountAction(act, name, prefix) {
+  if (act === "approve") {
+    const id = prompt(`Approve ${name}\n\nPaste the repeater's full device id (64 characters: its Public key under Identity, or the Repeater ID on its display).` + (prefix ? `\nIt must start with ${prefix}.` : "")); if (!id) return;
+    const r = await post("/api/accounts/approve", {name, device: id.trim()}); alert(r.ok ? "Approved. It can now publish and be controlled." : (r.error || r.output)); await tick(); return;
+  }
+  if (act === "remove" && !confirm(`Remove the account ${name}? The repeater using it will be locked out.`)) return;
+  if (act === "block" && !confirm(`Block ${name}? It is shut out at once.`)) return;
+  if (act === "passwd" && !confirm(`Give ${name} a new password? The repeater using it must be updated or it will be locked out.`)) return;
+  const r = await post("/api/accounts/" + act, {name});
+  if (act === "passwd" && r.ok) S.created = {title: "New password", name, password: r.password, text: `set mqtt.custom.password ${r.password}`};
+  if (!r.ok) alert(r.error || r.output || "Failed"); await tick();
+}
+async function loadAudit() { try { S.audit = await jget("/api/audit?range=604800"); } catch {} }
+
+function pendBanner(o) {
+  const p = o.pending || []; if (!p.length) return "";
+  return `<div class="warnb" style="margin-bottom:12px">${p.length} repeater${p.length > 1 ? "s are" : " is"} waiting for approval: ${p.map(x => esc(x.name) + (x.ip ? " (" + esc(x.ip) + ")" : "")).join(", ")}. <a href="#accounts" data-t="accounts" style="color:#f2c14e;font-weight:600">Review</a></div>`;
+}
+
+const VIEWS = {overview: (o) => pendBanner(o) + vOverview(o), repeaters: vRepeaters, control: vControl, clients: vClients, accounts: vAccounts, settings: vSettings, traffic: vTraffic, diagnostics: vDiag, broker: vBroker, system: vSystem, log: vLog};
 function draw() {
   const o = S.o; if (!o) return;
   const active = document.activeElement && document.activeElement.id;
   $("#tabs").innerHTML = TABS.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? "on" : ""}">${l}</button>`).join("");
-  $("#sub").textContent = `${o.host} · broker ${o.sys["$SYS/broker/version"] || ""} · dashboard ${o.version}`;
+  document.title = (o.config && o.config.title || "UMC Net") + " dashboard"; $("#sub").textContent = `${o.host} · broker ${o.sys["$SYS/broker/version"] || ""} · dashboard ${o.version}`;
   const bad = o.diagnostics.filter(d => d.level === "bad").length, warn = o.diagnostics.filter(d => d.level === "warn").length;
   $("#live").className = "pl " + (S.err ? "bad" : bad ? "bad" : warn ? "warn" : "ok"); $("#live").innerHTML = `${dot(S.err ? "bad" : bad ? "bad" : warn ? "warn" : "ok")} ${S.err ? "not answering" : bad ? bad + " problem(s)" : warn ? warn + " to look at" : "all fine"} · ${new Date().toLocaleTimeString()}`;
   $("#body").innerHTML = (VIEWS[S.tab] || vOverview)(o);
@@ -359,10 +515,10 @@ async function loadEv() { try { S.ev = await jget("/api/events?range=86400" + (S
 async function tick(first) {
   try { S.o = await jget("/api/overview"); S.err = ""; } catch (e) { S.err = e.message; }
   if (first || Date.now() - S.t > 30000) { S.t = Date.now(); await loadHist(); if (S.tab === "diagnostics" || first) await loadEv(); }
-  draw();
+  if (!hold()) draw();
 }
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-t]"); if (t) { S.tab = t.dataset.t; location.hash = S.tab; if (S.tab === "diagnostics") await loadEv(); draw(); return; }
+  const t = e.target.closest("[data-t]"); if (t) { S.tab = t.dataset.t; location.hash = S.tab; if (S.tab === "diagnostics") await loadEv(); if (S.tab === "diagnostics" || S.tab === "control") await loadAudit(); draw(); return; }
   const r = e.target.closest("#rng button"); if (r) { S.range = +r.dataset.r; document.querySelectorAll("#rng button").forEach(b => b.classList.toggle("on", b === r)); await loadHist(); draw(); return; }
   const k = e.target.closest("[data-ek]"); if (k) { S.evKind = k.dataset.ek; await loadEv(); draw(); return; }
   if (e.target.closest("#refresh")) { S.t = 0; tick(); }

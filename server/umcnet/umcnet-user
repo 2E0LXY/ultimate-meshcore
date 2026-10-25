@@ -2,12 +2,19 @@
 """Manage UMC Net accounts: passwords and topic permissions.
 
   umcnet-user add <name> <role> [--device <64 hex>] [--password P]   create or reset an account
-  umcnet-user device <name> <64 hex>                                  set a repeater's device id
+  umcnet-user add <name> repeater --pending [--password P]           a repeater that waits for approval
+  umcnet-user device <name> <64 hex>                                  set a repeater's device id (and approve it)
+  umcnet-user state <name> approved|pending|blocked                   let it in, hold it, or shut it out
+  umcnet-user passwd <name>                                           give an account a new password
   umcnet-user remove <name>
   umcnet-user list
 
 Roles: admin (everything), repeater (publishes what it hears, takes commands), client (listens),
-viewer (listens only), monitor (the dashboard: reads the broker's statistics and everything under meshcore/). The topics are the standard MeshCore MQTT layout the firmware already
+viewer (listens only), monitor (the dashboard: reads the broker's statistics and everything under meshcore/),
+controller (the dashboard's control channel: sends commands to repeaters and reads their answers).
+
+A repeater account is pending until its device id is set (it may listen to statuses, but publish and obey nothing),
+approved once bound to a device id, or blocked (everything refused). The topics are the standard MeshCore MQTT layout the firmware already
 publishes, so analysers and maps can read them too:
 
   meshcore/<area>/<device id>/raw       a packet the device heard, as JSON with the packet in hex
@@ -24,7 +31,8 @@ HOME = "/opt/umcnet"
 USERS = os.path.join(HOME, "users.json")
 PASSWD = os.path.join(HOME, "passwd")
 ACL = os.path.join(HOME, "acl")
-ROLES = ("admin", "repeater", "client", "viewer", "monitor")
+ROLES = ("admin", "repeater", "client", "viewer", "monitor", "controller")
+STATES = ("approved", "pending", "blocked")
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,23}$")
 DEVICE = re.compile(r"^[0-9A-F]{64}$")
 
@@ -71,15 +79,23 @@ def own(path):
 def acl_for(name, info):
     role, dev = info.get("role"), info.get("device", "")
     out = [f"user {name}"]
+    state = info.get("state", "approved")
+    if state == "blocked":
+        return "\n".join(out)                           # no topics at all: everything is refused
+    if role == "repeater" and (state == "pending" or not dev):
+        out.append("topic read meshcore/+/+/status")   # waiting for approval: it can listen, nothing more
+        return "\n".join(out)
     if role == "admin":
         out.append("topic readwrite #")
     elif role == "repeater":
         if dev:
             out.append(f"topic readwrite meshcore/+/{dev}/#")
         out += ["topic read meshcore/+/+/raw",
-                "topic read meshcore/+/+/status",
-                f"topic read umcnet/v1/+/node/{name}/cmd",
-                f"topic write umcnet/v1/+/node/{name}/resp"]
+                "topic read meshcore/+/+/status"]
+        if dev:                                          # commands for this device only, answers from it only
+            out += [f"topic read umcnet/v1/+/dev/{dev}/cmd", f"topic write umcnet/v1/+/dev/{dev}/resp"]
+    elif role == "controller":
+        out += ["topic write umcnet/v1/+/dev/+/cmd", "topic read umcnet/v1/+/dev/+/resp"]
     elif role == "monitor":
         out += ["topic read $SYS/#", "topic read meshcore/#"]
     else:   # client and viewer listen
@@ -113,7 +129,7 @@ def opt(argv, flag):
 
 
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("add", "remove", "list", "device", "export"):
+    if len(argv) < 2 or argv[1] not in ("add", "remove", "list", "device", "export", "state", "passwd"):
         print(__doc__)
         return 2
     users = load()
@@ -122,7 +138,7 @@ def main(argv):
     if argv[1] == "list":
         for n, i in sorted(users.items()):
             dev = i.get("device", "")
-            print(f"{n:24s} {i['role']:9s} {dev[:16] + '...' if dev else ''}")
+            print(f"{n:24s} {i['role']:10s} {i.get('state', 'approved'):9s} {dev[:16] + '...' if dev else ''}")
         return 0
     name = argv[2] if len(argv) > 2 else ""
     if not NAME.match(name):
@@ -137,22 +153,38 @@ def main(argv):
             print("device: an existing repeater account and a 64-digit hex device id")
             return 2
         users[name]["device"] = dev
-        print(f"{name}: device id set")
+        users[name]["state"] = "approved"
+        print(f"{name}: device id set, approved")
+    elif argv[1] == "state":
+        st = argv[3] if len(argv) > 3 else ""
+        if name not in users or st not in STATES:
+            print("state: an existing account and one of " + ", ".join(STATES))
+            return 2
+        users[name]["state"] = st
+        print(f"{name}: {st}")
+    elif argv[1] == "passwd":
+        if name not in users:
+            print("passwd: an existing account")
+            return 2
+        pw = secrets.token_urlsafe(15)
+        passwd("-b", PASSWD, name, pw)
+        print(f"{name} password: {pw}")
     else:
         role = argv[3] if len(argv) > 3 else ""
         if role not in ROLES:
             print("role: " + ", ".join(ROLES))
             return 2
         dev = (opt(argv, "--device") or "").upper()
-        if role == "repeater" and not DEVICE.match(dev):
-            print("a repeater needs --device <its 64-digit hex id> so it can only write under its own topic")
+        pending = "--pending" in argv
+        if role == "repeater" and not DEVICE.match(dev) and not pending:
+            print("a repeater needs --device <its 64-digit hex id> so it can only write under its own topic (or --pending to wait for approval)")
             return 2
         pw = opt(argv, "--password") or secrets.token_urlsafe(15)
         if not os.path.exists(PASSWD):
             open(PASSWD, "a").close()
             own(PASSWD)
         passwd("-b", PASSWD, name, pw)
-        users[name] = {"role": role, **({"device": dev} if dev else {})}
+        users[name] = {"role": role, **({"device": dev} if dev else {}), **({"state": "pending"} if role == "repeater" and not dev else {})}
         print(f"{name} ({role}) password: {pw}")
     save(users)
     write_acl(users)

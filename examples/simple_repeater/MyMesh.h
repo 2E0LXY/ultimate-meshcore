@@ -199,6 +199,11 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks, public WebPanelComm
     static_cast<MyMesh*>(ctx)->injectFromNet(raw, len);
   }
   void injectFromNet(const uint8_t* raw, size_t len);
+  // a signed command from the operator's dashboard (UMC Net, `mqtt.control`), run from the main loop
+  static void controlThunk(void* ctx, const char* cmd, char* reply, size_t n) {
+    static_cast<MyMesh*>(ctx)->runControl(cmd, reply, n);
+  }
+  void runControl(const char* cmd, char* reply, size_t n);
 #endif
 #if defined(ESP_PLATFORM)
   NetworkService network;

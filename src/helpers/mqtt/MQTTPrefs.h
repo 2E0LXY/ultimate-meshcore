@@ -40,6 +40,8 @@ struct MQTTPrefs {
   uint8_t mqtt_bridge_uplink_migrated;
   uint8_t custom_bridge;   // 1: also listen to the other repeaters on the custom broker and pass their packets to the mesh
   uint8_t custom_rate;     // most packets a minute passed on from the broker (0 = the default, 20)
+  uint8_t custom_control;  // 1: obey signed commands sent to this repeater through the custom broker (see ControlCmd.h)
+  char control_key[65];    // the 64 hex characters those commands are signed with
 };
 
 class MQTTPrefsStore {
