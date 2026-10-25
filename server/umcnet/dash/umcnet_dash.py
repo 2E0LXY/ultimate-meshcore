@@ -87,7 +87,7 @@ def device(did, area=""):
     if area: d["area"] = area
     return d
 
-def on_publish(topic, payload):
+def on_publish(topic, payload, retained=False):
     now = time.time()
     if topic.startswith("$SYS/"):
         with LOCK: SYS[topic] = [payload.decode("utf-8", "replace"), now]
@@ -100,16 +100,18 @@ def on_publish(topic, payload):
     try: j = json.loads(payload.decode("utf-8", "replace"))
     except Exception: COUNT["bad_json"] += 1; return
     with LOCK:
-        d = device(did, area); d["last"] = now; d["topics"][kind] += 1
+        d = device(did, area)
+        if not retained: d["last"] = now; d["topics"][kind] += 1
         if j.get("origin"): d["name"] = j["origin"]
         ts = j.get("timestamp")
-        if isinstance(ts, str):
+        if isinstance(ts, str) and not retained:
             try:
                 import datetime
                 t = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp(); d["skew"] = round(now - t, 1); LATENCY.append(now - t)
             except Exception: pass
         if kind == "status":
-            d["last_status"] = now; d["status"] = j.get("status", "unknown")
+            if not retained: d["last_status"] = now
+            d["status"] = j.get("status", "unknown"); d["status_retained"] = retained
             for k_src, k_dst in (("model", "model"), ("firmware_version", "fw"), ("radio", "radio"), ("client_version", "client"), ("repeat", "repeat")):
                 if j.get(k_src) is not None: d[k_dst] = j[k_src]
             if isinstance(j.get("stats"), dict): d["stats"] = j["stats"]
@@ -180,9 +182,9 @@ def mqtt_loop():
                         if not b & 128: break
                     else: break
                     if i > len(buf) or len(buf) < i + ln: break
-                    typ, pkt, buf = buf[0] >> 4, buf[i:i + ln], buf[i + ln:]
+                    first = buf[0]; typ, pkt, buf = first >> 4, buf[i:i + ln], buf[i + ln:]
                     if typ == 3:
-                        tl = struct.unpack(">H", pkt[:2])[0]; topic = pkt[2:2 + tl].decode("utf-8", "replace"); on_publish(topic, pkt[2 + tl:])
+                        tl = struct.unpack(">H", pkt[:2])[0]; topic = pkt[2:2 + tl].decode("utf-8", "replace"); on_publish(topic, pkt[2 + tl:], bool(first & 1))
         except Exception as e:
             MQTT.update(state="disconnected", error=str(e)); MQTT["reconnects"] += 1
             time.sleep(backoff); backoff = min(60, backoff * 2)
@@ -195,8 +197,8 @@ RX_DENY2 = re.compile(r"Denied (PUBLISH|SUBSCRIBE|UNSUBSCRIBE) from (.+?)[ (]")
 RX_AUTH = re.compile(r"(?:Client (.+?) disconnected, not authorised|Client <unknown> disconnected|bad user name or password|not authorised|CONNACK.*(?:4|5))")
 RX_FROM = re.compile(r"from (\d+\.\d+\.\d+\.\d+|[0-9a-fA-F:]+)(?::\d+)?")
 
-def event(kind, text, client="", user="", ip=""):
-    e = {"t": time.time(), "kind": kind, "text": text, "client": client, "user": user, "ip": ip}
+def event(kind, text, client="", user="", ip="", at=None):
+    e = {"t": at or time.time(), "kind": kind, "text": text, "client": client, "user": user, "ip": ip}
     with LOCK: EVENTS.append(e); COUNT["ev:" + kind] += 1
     if DB:
         try: DB.execute("INSERT INTO events(ts,kind,client,user,ip,text) VALUES(?,?,?,?,?,?)", (int(e["t"]), kind, client, user, ip, text[:300])); DB.commit()
@@ -205,18 +207,19 @@ def event(kind, text, client="", user="", ip=""):
 LAST_IP = [""]
 RX_CONN = re.compile(r"New connection from (\S+?)(?::\d+)? on port")
 
-def handle_log(line):
-    with LOCK: LOG.append({"t": time.time(), "line": line})
+def handle_log(line, at=None):
+    at = at or time.time()
+    with LOCK: LOG.append({"t": at, "line": line})
     m = RX_CONN.search(line)
     if m: LAST_IP[0] = m.group(1); return                    # a login attempt: the refusal, if any, is the next line
     m = RX_NEW.search(line)
     if m:
         ip, port, cid, ver, clean, keep, user = m.groups()
         with LOCK:
-            c = CLIENTS.setdefault(cid, {"client": cid, "connects": 0, "first": time.time()})
-            c.update(user=user or "", ip=ip, port=port or "", since=time.time(), state="connected", proto=int(ver), keepalive=int(keep), clean=bool(int(clean)), last=time.time()); c["connects"] += 1
-            c.setdefault("history", collections.deque(maxlen=60)).append(time.time())
-        event("connect", "connected from %s as %s" % (ip, user or "?"), cid, user or "", ip); return
+            c = CLIENTS.setdefault(cid, {"client": cid, "connects": 0, "first": at})
+            c.update(user=user or "", ip=ip, port=port or "", since=at, state="connected", proto=int(ver), keepalive=int(keep), clean=bool(int(clean)), last=at); c["connects"] += 1
+            c.setdefault("history", collections.deque(maxlen=60)).append(at)
+        event("connect", "connected from %s as %s" % (ip, user or "?"), cid, user or "", ip, at); return
     m = RX_DENY.search(line) or RX_DENY2.search(line)
     if m:
         cid = m.group(2); topic = m.group(3) if m.lastindex and m.lastindex >= 3 else ""
@@ -224,21 +227,34 @@ def handle_log(line):
         event("denied", "%s %s refused by the access list" % (m.group(1).lower(), topic), cid, c.get("user", ""), c.get("ip", "")); return
     if "not authorised" in line or "bad user name" in line:
         ip = LAST_IP[0]; cid = re.search(r"Client (.+?) ", line)
-        event("auth_fail", "login refused" + (" from " + ip if ip else ""), cid.group(1) if cid else "", "", ip); return
+        event("auth_fail", "login refused" + (" from " + ip if ip else ""), cid.group(1) if cid else "", "", ip, at); return
     m = RX_CLOSE.search(line)
     if m:
         cid, why = m.group(1), m.group(2)
         with LOCK:
             c = CLIENTS.get(cid)
-            if c: c["state"] = "disconnected"; c["last"] = time.time(); c["why"] = why
-        event("timeout" if "timeout" in why else "disconnect", why, cid, (c or {}).get("user", ""), (c or {}).get("ip", "")); return
-    if re.search(r"\b(Error|error|Warning|warning)\b", line): event("warn", line[:200])
+            if c: c["state"] = "disconnected"; c["last"] = at; c["why"] = why
+        event("timeout" if "timeout" in why else "disconnect", why, cid, (c or {}).get("user", ""), (c or {}).get("ip", ""), at); return
+    if re.search(r"\b(Error|error|Warning|warning)\b", line): event("warn", line[:200], at=at)
+
+RX_JLINE = re.compile(r"^(\d+\.\d+) \S+ [^:]+: (.*)$")
+
+def replay_journal():
+    """Rebuild who is connected from the broker's log of the last week, so a restart of the dashboard forgets nothing."""
+    try:
+        out = subprocess.run(["journalctl", "-u", CFG["unit"], "--since", "-7 days", "-o", "short-unix", "--no-pager"], capture_output=True, text=True, timeout=60).stdout
+    except Exception as e:
+        event("warn", "cannot replay the broker log: %s" % e); return
+    for line in out.splitlines():
+        m = RX_JLINE.match(line)
+        if m: handle_log(m.group(2), float(m.group(1)))
 
 def journal_loop():
     if not CFG["journal"]: return
+    if not CFG["logfile"]: replay_journal()
     while True:
         try:
-            cmd = ["tail", "-n", "400", "-F", CFG["logfile"]] if CFG["logfile"] else ["journalctl", "-u", CFG["unit"], "-f", "-n", "400", "-o", "cat", "--no-pager"]
+            cmd = ["tail", "-n", "400", "-F", CFG["logfile"]] if CFG["logfile"] else ["journalctl", "-u", CFG["unit"], "-f", "-n", "0", "-o", "cat", "--no-pager"]
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
             for line in p.stdout: handle_log(line.rstrip("\n"))
         except Exception as e:
@@ -392,7 +408,7 @@ def diagnostics(sysinfo, accs, cert):
         age = now - d["last"]
         if age > 900: add("warn", "No data from %s" % (d["name"] or d["id"][:12]), "last heard %d min ago" % (age // 60))
         if d["skew"] is not None and abs(d["skew"]) > 120: add("warn", "Clock off on %s" % (d["name"] or d["id"][:12]), "%+.0f s against this server (its NTP may be down)" % d["skew"])
-        if d["status"] == "offline": add("warn", "%s reports itself offline" % (d["name"] or d["id"][:12]), "its last status message said offline")
+        if d["status"] == "offline" and age > 300: add("warn", "%s reports itself offline" % (d["name"] or d["id"][:12]), "its last status message said offline and nothing has arrived since")
     dr = sysnum("$SYS/broker/load/publish/dropped/1min")
     if dr > 0: add("warn", "Broker is dropping messages", "%.1f a minute (a slow subscriber or full queues)" % dr)
     return out
