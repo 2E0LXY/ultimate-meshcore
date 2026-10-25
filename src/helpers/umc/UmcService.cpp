@@ -108,12 +108,22 @@ void UmcService::formatTrafficJson(char* out, size_t out_size) const {
   size_t pos = snprintf(out, out_size, "{\"rx_total\":%lu,\"tx_total\":%lu,\"packets\":[",
                         static_cast<unsigned long>(umc_traffic.rxTotal()), static_cast<unsigned long>(umc_traffic.txTotal()));
   const uint32_t now = millis();
-  for (int i = 0; i < umc_traffic.count() && pos + 120 < out_size; i++) {
+  for (int i = 0; i < umc_traffic.count() && pos + 260 < out_size; i++) {
     const UmcTraffic::Entry e = *umc_traffic.get(i);  // copy: the loop task may be writing
     pos += snprintf(out + pos, out_size - pos,
-                    "%s{\"age\":%lu,\"tx\":%s,\"type\":\"%s\",\"flood\":%s,\"hops\":%u,\"rssi\":%d,\"snr\":%.2f,\"len\":%u}",
+                    "%s{\"age\":%lu,\"tx\":%s,\"type\":\"%s\",\"flood\":%s,\"hops\":%u,\"rssi\":%d,\"snr\":%.2f,\"len\":%u",
                     i ? "," : "", static_cast<unsigned long>((now - e.ms) / 1000), e.tx ? "true" : "false",
                     UmcTraffic::typeName(e.type), e.flood ? "true" : "false", e.hops, e.rssi, e.snr4 / 4.0f, e.len);
+    // who it is from and to, as the packet says (see UmcTraffic)
+    if (e.flags & UmcTraffic::F_ENDS) pos += snprintf(out + pos, out_size - pos, ",\"src\":\"%02X\",\"dst\":\"%02X\"", e.src, e.dst);
+    if (e.flags & UmcTraffic::F_VIA) pos += snprintf(out + pos, out_size - pos, ",\"via\":\"%02X\"", e.via);
+    if (e.flags & UmcTraffic::F_CHAN) pos += snprintf(out + pos, out_size - pos, ",\"chan\":\"%02X\"", e.chan);
+    if (e.flags & UmcTraffic::F_KEY) pos += snprintf(out + pos, out_size - pos, ",\"key\":\"%02X%02X%02X%02X\"", e.key[0], e.key[1], e.key[2], e.key[3]);
+    if (e.name[0]) {
+      pos += snprintf(out + pos, out_size - pos, ",\"name\":");
+      pos = appendJsonEscaped(out, out_size, pos, e.name);
+    }
+    pos += snprintf(out + pos, out_size - pos, "}");
   }
   snprintf(out + pos, out_size - pos, "]}");
 }

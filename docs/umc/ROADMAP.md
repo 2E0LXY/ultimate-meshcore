@@ -4,6 +4,11 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.14
+
+- ✅ Dashboard: Recent activity now says **who** a packet is from and **via** which repeater. The radio's traffic log keeps what a packet states about itself: an advert's sender name and key, the one-byte source and destination hashes of requests, responses, messages and paths, a channel's hash, and the last repeater in the path; the page matches those against the nodes it knows (shown with "(n nodes)" when a hash fits more than one)
+- ✅ Dashboard: Neighbours lists what the repeater hears directly, then the nearest known nodes by hops, so a repeater that hears no one directly no longer looks empty; the clock button gives way to "Clock set from the internet (NTP)" when the radio is synced, and a refusal because the radio's clock is already ahead is explained instead of shown as an error
+
 ## Done in 0.1.13
 
 - ✅ Dashboard fixes: the network state is read from the full status (the radio's `get net.status` reply is cut off at 156 characters, which made WiFi look offline); WiFi (station) and Hotspot (AP) have separate lights; MQTT shows connected when it is (its status words end in `:up`); lights are green (working), amber (trying), grey (off or not set up) and red only for a fault; every link that is up now animates in the data flow

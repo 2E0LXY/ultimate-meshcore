@@ -140,12 +140,15 @@
     if (url === "/api/logout") return {ok: true};
     if (url.startsWith("/api/scan")) return [{ssid: "HomeNetwork 2.4G", rssi: -48, ch: 6, auth: "wpa2"}, {ssid: "BT-Hub", rssi: -71, ch: 11, auth: "wpa2"}, {ssid: "Guest", rssi: -80, ch: 1, auth: "open"}];
     if (url === "/api/traffic") return {rx_total: 1204, tx_total: 377, packets: [
-      {age: 2, tx: false, type: "CHAN", flood: true, hops: 3, rssi: -97, snr: 6.25, len: 58}, {age: 3, tx: true, type: "CHAN", flood: true, hops: 0, rssi: 0, snr: 0, len: 59},
-      {age: 20, tx: false, type: "ADVERT", flood: true, hops: 1, rssi: -88, snr: 9.5, len: 140}, {age: 31, tx: false, type: "ADVERT", flood: true, hops: 0, rssi: -74, snr: 11, len: 140},
-      {age: 44, tx: false, type: "MSG", flood: false, hops: 2, rssi: -101, snr: 3.5, len: 64}, {age: 52, tx: true, type: "ACK", flood: false, hops: 0, rssi: 0, snr: 0, len: 12},
-      {age: 60, tx: false, type: "CHAN", flood: true, hops: 4, rssi: -108, snr: -1.5, len: 61}, {age: 75, tx: false, type: "ACK", flood: false, hops: 2, rssi: -103, snr: -2.25, len: 12},
-      {age: 90, tx: false, type: "PATH", flood: true, hops: 2, rssi: -95, snr: 5.25, len: 48}, {age: 110, tx: false, type: "ADVERT", flood: true, hops: 2, rssi: -99, snr: 4.5, len: 140},
-      {age: 140, tx: false, type: "CHAN", flood: true, hops: 1, rssi: -90, snr: 8.0, len: 55}, {age: 170, tx: true, type: "ADVERT", flood: true, hops: 0, rssi: 0, snr: 0, len: 140}]};
+      {age: 2, tx: false, type: "ADVERT", flood: true, hops: 2, rssi: -112, snr: 0.3, len: 126, via: "3F", key: "EC2436D4", name: "Hoyland Repeater"},
+      {age: 8, tx: false, type: "RESP", flood: true, hops: 4, rssi: -89, snr: 11.5, len: 64, via: "1F", src: "B0", dst: "A1"},
+      {age: 9, tx: true, type: "ADVERT", flood: true, hops: 0, rssi: 0, snr: 0, len: 126, key: "A1B2C3D4", name: "Demo Repeater"},
+      {age: 20, tx: false, type: "CHAN", flood: true, hops: 3, rssi: -97, snr: 6.25, len: 58, via: "3F", chan: "8A"},
+      {age: 31, tx: false, type: "ADVERT", flood: true, hops: 1, rssi: -86, snr: 12.5, len: 140, via: "4C", key: "4CAA3B8F", name: "Fulwood S10"},
+      {age: 44, tx: false, type: "MSG", flood: false, hops: 2, rssi: -101, snr: 3.5, len: 64, via: "3F", src: "69", dst: "A1"},
+      {age: 60, tx: false, type: "RESP", flood: true, hops: 2, rssi: -111, snr: 0.5, len: 60, via: "93", src: "FD", dst: "A1"},
+      {age: 75, tx: false, type: "ACK", flood: false, hops: 2, rssi: -103, snr: -2.25, len: 12, via: "3F"},
+      {age: 110, tx: false, type: "ADVERT", flood: true, hops: 0, rssi: -74, snr: 11, len: 140, key: "93438DC6"}]};
     if (url === "/api/routes") return {routes: [
       {key: "271e2ee5a1b2", name: "Leeds Hill", type: "repeater", hops: 0, hash: 1, path: "", pin: "", snr: 12.5, ago: 95, adverts: 4},
       {key: "da8f72dfcc34", name: "Wakefield Roof", type: "repeater", hops: 1, hash: 1, path: "27", pin: "", snr: 11.8, ago: 320, adverts: 2},

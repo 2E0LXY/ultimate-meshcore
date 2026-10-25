@@ -336,9 +336,9 @@ esp_err_t UmcWebServer::handleTraffic(httpd_req_t* req) {
   auto* s = self(req);
   setCommonHeaders(req);
   if (!s->isAuthorized(req)) return sendJson(req, "{\"error\":\"Unauthorized\"}", "401 Unauthorized");
-  char* buf = static_cast<char*>(malloc(3072));
+  char* buf = static_cast<char*>(malloc(4608));
   if (buf == nullptr) return httpd_resp_send_500(req);
-  s->_umc.formatTrafficJson(buf, 3072);
+  s->_umc.formatTrafficJson(buf, 4608);
   esp_err_t rc = sendJson(req, buf);
   free(buf);
   return rc;
