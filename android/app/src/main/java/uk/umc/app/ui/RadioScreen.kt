@@ -45,7 +45,7 @@ fun RadioScreen() {
             SectionCard("Radio", "This node: ${device?.model ?: ""} ${device?.version ?: ""}") {
                 Text("Presets", style = MaterialTheme.typography.labelLarge)
                 PRESETS.forEach { (label, f, p) ->
-                    OutlinedButton(onClick = {
+                    ShButton(variant = ShVariant.Outline, onClick = {
                         freq = "%.3f".format(f[0] / 1000.0); bw = "%.1f".format(f[1] / 1000.0)
                         sf = p[0].toString(); cr = p[1].toString()
                     }, modifier = Modifier.fillMaxWidth()) { Text(label) }
@@ -59,7 +59,7 @@ fun RadioScreen() {
                     OutlinedTextField(cr, { cr = it }, Modifier.weight(1f), label = { Text("CR 4/x") }, singleLine = true)
                     OutlinedTextField(tx, { tx = it }, Modifier.weight(1f), label = { Text("dBm") }, singleLine = true)
                 }
-                Button(onClick = {
+                ShButton(onClick = {
                     scope.launch {
                         runCatching {
                             s.setRadio(
@@ -81,7 +81,7 @@ fun RadioScreen() {
                     OutlinedTextField(lat, { lat = it }, Modifier.weight(1f), label = { Text("Latitude") }, singleLine = true)
                     OutlinedTextField(lon, { lon = it }, Modifier.weight(1f), label = { Text("Longitude") }, singleLine = true)
                 }
-                Button(onClick = {
+                ShButton(onClick = {
                     scope.launch {
                         runCatching {
                             if (name.isNotBlank() && name != info.name) s.setName(name.trim())
@@ -101,7 +101,7 @@ fun RadioScreen() {
                 SwitchRow("Extra delivery confirmations", multi) { multi = it }
                 SwitchRow("Share location in adverts", shareLoc) { shareLoc = it }
                 SwitchRow("Add new contacts manually", manual) { manual = it }
-                Button(onClick = {
+                ShButton(onClick = {
                     scope.launch {
                         runCatching {
                             s.setOtherParams(if (manual) 1 else 0, info.telemetryMode, if (shareLoc) 1 else 0, if (multi) 1 else 0)
@@ -131,8 +131,8 @@ fun RadioScreen() {
 
             SectionCard("Bluetooth pairing", "0 gives a new random PIN at every start, shown on the radio's screen.") {
                 OutlinedTextField(pin, { pin = it }, Modifier.fillMaxWidth(), label = { Text("Fixed PIN (6 digits, or 0)") }, singleLine = true)
-                Button(onClick = {
-                    val v = pin.toLongOrNull() ?: return@Button AppState.say("Enter a number")
+                ShButton(onClick = {
+                    val v = pin.toLongOrNull() ?: return@ShButton AppState.say("Enter a number")
                     scope.launch {
                         runCatching { s.setBlePin(v) }.onSuccess { AppState.say("Saved - applies after a restart") }
                             .onFailure { AppState.say(it.message ?: "failed") }
@@ -143,8 +143,8 @@ fun RadioScreen() {
         item {
             SectionCard("Radio actions") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { scope.launch { runCatching { s.telemetry(null) }.onSuccess { AppState.say(it.joinToString { v -> "${v.name} ${v.value}" }) } } }) { Text("My telemetry") }
-                    OutlinedButton(onClick = { scope.launch { runCatching { s.reboot() }.onSuccess { AppState.say("Rebooting") } } }) { Text("Reboot radio") }
+                    ShButton(variant = ShVariant.Outline, onClick = { scope.launch { runCatching { s.telemetry(null) }.onSuccess { AppState.say(it.joinToString { v -> "${v.name} ${v.value}" }) } } }) { Text("My telemetry") }
+                    ShButton(variant = ShVariant.Outline, onClick = { scope.launch { runCatching { s.reboot() }.onSuccess { AppState.say("Rebooting") } } }) { Text("Reboot radio") }
                 }
             }
         }

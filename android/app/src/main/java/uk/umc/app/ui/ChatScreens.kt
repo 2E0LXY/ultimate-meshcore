@@ -85,7 +85,7 @@ fun ChatScreen(conversation: String, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text(title) },
-            navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
+            navigationIcon = { ShButton(variant = ShVariant.Ghost, onClick = onBack) { Text("Back") } },
         )
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
             items(mine) { m -> MessageBubble(m, s, scope) }
@@ -100,10 +100,10 @@ fun ChatScreen(conversation: String, onBack: () -> Unit) {
                 isError = draft.toByteArray().size > limit,
             )
             Spacer(Modifier.width(8.dp))
-            Button(
+            ShButton(
                 onClick = {
                     val text = draft.trim()
-                    if (text.isEmpty()) return@Button
+                    if (text.isEmpty()) return@ShButton
                     draft = ""
                     scope.launch { s.sendText(conversation, text) }
                 },
@@ -167,7 +167,7 @@ private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.corouti
             }
         }
         if (m.status == "failed") {
-            TextButton(onClick = { scope.launch { s.sendText(m.conversation, m.text, m) } }) { Text("Retry") }
+            ShButton(variant = ShVariant.Ghost, onClick = { scope.launch { s.sendText(m.conversation, m.text, m) } }) { Text("Retry") }
         }
     }
 }

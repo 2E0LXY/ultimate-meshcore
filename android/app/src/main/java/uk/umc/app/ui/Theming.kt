@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -106,14 +107,15 @@ fun onGlass(): Boolean = AppState.background.collectAsState().value != Backgroun
 @Composable
 fun GlassCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val glass = onGlass()
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(12.dp)
+    val c = MaterialTheme.colorScheme
+    // shadcn's card: a flat surface with a 1 dp border; over a photo or gradient it is frosted glass instead
     Box(
         modifier
             .clip(shape)
-            .background(
-                if (glass) Color.White.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-            )
-            .padding(14.dp),
+            .background(if (glass) Color.White.copy(alpha = 0.08f) else c.surface)
+            .border(1.dp, if (glass) Color.White.copy(alpha = 0.14f) else c.outlineVariant, shape)
+            .padding(16.dp),
         contentAlignment = Alignment.TopStart,
     ) { content() }
 }

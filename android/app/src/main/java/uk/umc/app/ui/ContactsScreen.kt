@@ -51,10 +51,10 @@ fun ContactsScreen(onMessage: (String) -> Unit, onMap: (Contact) -> Unit) {
                 OutlinedTextField(filter, { filter = it }, Modifier.weight(1f), label = { Text("Search") }, singleLine = true)
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { scope.launch { runCatching { s.advert(false) }.onSuccess { AppState.say("Advert sent") }.onFailure { AppState.say(it.message ?: "failed") } } }) { Text("Advert") }
-                OutlinedButton(onClick = { scope.launch { runCatching { s.advert(true) }.onSuccess { AppState.say("Flood advert sent") }.onFailure { AppState.say(it.message ?: "failed") } } }) { Text("Flood") }
-                OutlinedButton(onClick = { scope.launch { runCatching { shareText = s.exportContact(null) }.onFailure { AppState.say(it.message ?: "failed") } } }) { Text("Share me") }
-                OutlinedButton(onClick = { importing = true }) { Text("Add") }
+                ShButton(onClick = { scope.launch { runCatching { s.advert(false) }.onSuccess { AppState.say("Advert sent") }.onFailure { AppState.say(it.message ?: "failed") } } }) { Text("Advert") }
+                ShButton(variant = ShVariant.Outline, onClick = { scope.launch { runCatching { s.advert(true) }.onSuccess { AppState.say("Flood advert sent") }.onFailure { AppState.say(it.message ?: "failed") } } }) { Text("Flood") }
+                ShButton(variant = ShVariant.Outline, onClick = { scope.launch { runCatching { shareText = s.exportContact(null) }.onFailure { AppState.say(it.message ?: "failed") } } }) { Text("Share me") }
+                ShButton(variant = ShVariant.Outline, onClick = { importing = true }) { Text("Add") }
             }
         }
         if (pending.isNotEmpty()) {
@@ -65,7 +65,7 @@ fun ContactsScreen(onMessage: (String) -> Unit, onMap: (Contact) -> Unit) {
                             headlineContent = { Text(c.name) },
                             supportingContent = { Text(c.typeName) },
                             trailingContent = {
-                                TextButton(onClick = { scope.launch { runCatching { s.addContact(c) }.onFailure { AppState.say(it.message ?: "failed") } } }) { Text("Add") }
+                                ShButton(variant = ShVariant.Ghost, onClick = { scope.launch { runCatching { s.addContact(c) }.onFailure { AppState.say(it.message ?: "failed") } } }) { Text("Add") }
                             },
                         )
                     }
@@ -96,14 +96,14 @@ fun ContactsScreen(onMessage: (String) -> Unit, onMap: (Contact) -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                ShButton(variant = ShVariant.Ghost, onClick = {
                     val t = importText
                     importing = false
                     importText = ""
                     scope.launch { runCatching { s.importContact(t) }.onSuccess { AppState.say("Contact added") }.onFailure { AppState.say(it.message ?: "failed") } }
                 }) { Text("Add") }
             },
-            dismissButton = { TextButton(onClick = { importing = false }) { Text("Cancel") } },
+            dismissButton = { ShButton(variant = ShVariant.Ghost, onClick = { importing = false }) { Text("Cancel") } },
         )
     }
 
@@ -112,7 +112,7 @@ fun ContactsScreen(onMessage: (String) -> Unit, onMap: (Contact) -> Unit) {
             onDismissRequest = { shareText = null },
             title = { Text("Share this contact") },
             text = { SelectionText(text) },
-            confirmButton = { TextButton(onClick = { shareText = null }) { Text("Done") } },
+            confirmButton = { ShButton(variant = ShVariant.Ghost, onClick = { shareText = null }) { Text("Done") } },
         )
     }
 }
@@ -305,14 +305,14 @@ private fun ContactSheet(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                ShButton(variant = ShVariant.Ghost, onClick = {
                     val pw = password
                     askPassword = false
                     password = ""
                     run("Logging in…") { if (s.login(c, pw)) "Logged in as admin." else "Logged in." }
                 }) { Text("Log in") }
             },
-            dismissButton = { TextButton(onClick = { askPassword = false }) { Text("Cancel") } },
+            dismissButton = { ShButton(variant = ShVariant.Ghost, onClick = { askPassword = false }) { Text("Cancel") } },
         )
     }
 
@@ -329,13 +329,13 @@ private fun ContactSheet(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                ShButton(variant = ShVariant.Ghost, onClick = {
                     routing = false
                     val hops = routeText.split(',', ' ', '>').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
                     run("Saving route…") { s.setRoute(c, hops); if (hops.isEmpty()) "Route cleared." else "Route set: ${hops.joinToString(" → ")}" }
                 }) { Text("Save") }
             },
-            dismissButton = { TextButton(onClick = { routing = false }) { Text("Cancel") } },
+            dismissButton = { ShButton(variant = ShVariant.Ghost, onClick = { routing = false }) { Text("Cancel") } },
         )
     }
 }
@@ -379,7 +379,7 @@ private fun FlowButtons(actions: List<Pair<String, () -> Unit>>) {
         actions.chunked(3).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 row.forEach { (label, action) ->
-                    OutlinedButton(onClick = action, modifier = Modifier.weight(1f)) {
+                    ShButton(variant = ShVariant.Outline, onClick = action, modifier = Modifier.weight(1f)) {
                         Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
                     }
                 }
@@ -412,12 +412,12 @@ private fun AdminConsole(c: Contact, s: MeshSession, onClose: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            ShButton(variant = ShVariant.Ghost, onClick = {
                 val cmd = command.trim()
                 command = ""
                 if (cmd.isNotEmpty()) scope.launch { runCatching { s.sendCli(c, cmd) }.onFailure { AppState.say(it.message ?: "failed") } }
             }) { Text("Send") }
         },
-        dismissButton = { TextButton(onClick = onClose) { Text("Close") } },
+        dismissButton = { ShButton(variant = ShVariant.Ghost, onClick = onClose) { Text("Close") } },
     )
 }

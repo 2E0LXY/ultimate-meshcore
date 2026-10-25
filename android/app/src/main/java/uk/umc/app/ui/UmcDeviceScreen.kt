@@ -47,7 +47,7 @@ fun UmcDeviceScreen() {
                 OutlinedTextField(host, { host = it }, Modifier.fillMaxWidth(), label = { Text("Address or IP") }, singleLine = true)
                 OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Admin password") }, singleLine = true)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = {
+                    ShButton(onClick = {
                         busy = true
                         scope.launch {
                             val w = UmcWeb(host.trim())
@@ -76,26 +76,26 @@ fun UmcDeviceScreen() {
             item {
                 SectionCard("Quick actions") {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { run("get radio", "get tx", "stats-core", "stats-radio") }, Modifier.weight(1f)) { Text("Status") }
-                        OutlinedButton(onClick = { run("get net.status") }, Modifier.weight(1f)) { Text("Network") }
-                        OutlinedButton(onClick = { run("neighbors") }, Modifier.weight(1f)) { Text("Neighbours") }
+                        ShButton(variant = ShVariant.Outline, onClick = { run("get radio", "get tx", "stats-core", "stats-radio") }, modifier = Modifier.weight(1f)) { Text("Status") }
+                        ShButton(variant = ShVariant.Outline, onClick = { run("get net.status") }, modifier = Modifier.weight(1f)) { Text("Network") }
+                        ShButton(variant = ShVariant.Outline, onClick = { run("neighbors") }, modifier = Modifier.weight(1f)) { Text("Neighbours") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { run("update check") }, Modifier.weight(1f)) { Text("Check update") }
-                        OutlinedButton(onClick = { run("get update.status") }, Modifier.weight(1f)) { Text("Update status") }
-                        OutlinedButton(onClick = { run("update install") }, Modifier.weight(1f)) { Text("Install") }
+                        ShButton(variant = ShVariant.Outline, onClick = { run("update check") }, modifier = Modifier.weight(1f)) { Text("Check update") }
+                        ShButton(variant = ShVariant.Outline, onClick = { run("get update.status") }, modifier = Modifier.weight(1f)) { Text("Update status") }
+                        ShButton(variant = ShVariant.Outline, onClick = { run("update install") }, modifier = Modifier.weight(1f)) { Text("Install") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { run("advert") }, Modifier.weight(1f)) { Text("Advert") }
-                        OutlinedButton(onClick = { run("clock", "time ${System.currentTimeMillis() / 1000}") }, Modifier.weight(1f)) { Text("Set clock") }
-                        OutlinedButton(onClick = { run("reboot") }, Modifier.weight(1f)) { Text("Reboot") }
+                        ShButton(variant = ShVariant.Outline, onClick = { run("advert") }, modifier = Modifier.weight(1f)) { Text("Advert") }
+                        ShButton(variant = ShVariant.Outline, onClick = { run("clock", "time ${System.currentTimeMillis() / 1000}") }, modifier = Modifier.weight(1f)) { Text("Set clock") }
+                        ShButton(variant = ShVariant.Outline, onClick = { run("reboot") }, modifier = Modifier.weight(1f)) { Text("Reboot") }
                     }
                 }
             }
             item {
                 SectionCard("Console", "Any command the device understands.") {
                     OutlinedTextField(command, { command = it }, Modifier.fillMaxWidth(), label = { Text("Command") }, singleLine = true)
-                    Button(onClick = {
+                    ShButton(onClick = {
                         val c = command.trim()
                         command = ""
                         if (c.isNotEmpty()) run(c)

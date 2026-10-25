@@ -84,8 +84,8 @@ fun ConnectScreen() {
                 else -> "Not connected"
             }) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { AppState.reconnect() }, enabled = AppState.target.value != null) { Text("Reconnect") }
-                    OutlinedButton(onClick = { AppState.disconnect() }) { Text("Disconnect") }
+                    ShButton(onClick = { AppState.reconnect() }, enabled = AppState.target.value != null) { Text("Reconnect") }
+                    ShButton(variant = ShVariant.Outline, onClick = { AppState.disconnect() }) { Text("Disconnect") }
                 }
             }
         }
@@ -98,8 +98,8 @@ fun ConnectScreen() {
                             supportingContent = { Text(t.describe()) },
                             trailingContent = {
                                 Row {
-                                    TextButton(onClick = { AppState.connect(t) }) { Text("Connect") }
-                                    TextButton(onClick = { AppState.forgetDevice(t) }) { Text("Forget") }
+                                    ShButton(variant = ShVariant.Ghost, onClick = { AppState.connect(t) }) { Text("Connect") }
+                                    ShButton(variant = ShVariant.Ghost, onClick = { AppState.forgetDevice(t) }) { Text("Forget") }
                                 }
                             },
                         )
@@ -109,7 +109,7 @@ fun ConnectScreen() {
         }
         item {
             SectionCard("Bluetooth", "Pair with the PIN shown on the radio's screen.") {
-                Button(onClick = {
+                ShButton(onClick = {
                     val missing = permissions.any { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }
                     if (missing) ask.launch(permissions) else scanning = true
                 }, enabled = !scanning) { Text(if (scanning) "Scanning…" else "Scan for radios") }
@@ -120,7 +120,7 @@ fun ConnectScreen() {
                 headlineContent = { Text(name) },
                 supportingContent = { Text(address) },
                 trailingContent = {
-                    TextButton(onClick = {
+                    ShButton(variant = ShVariant.Ghost, onClick = {
                         AppState.connect(LinkTarget(LinkKind.BLUETOOTH, address, name))
                     }) { Text("Connect") }
                 },
@@ -131,7 +131,7 @@ fun ConnectScreen() {
                 OutlinedTextField(host, { host = it }, label = { Text("Address, e.g. 192.168.1.50 or umc-node.local") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(port, { port = it }, label = { Text("Port") }, singleLine = true,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number))
-                Button(onClick = {
+                ShButton(onClick = {
                     if (host.isNotBlank()) AppState.connect(LinkTarget(LinkKind.WIFI, "${host.trim()}:${port.trim()}", host.trim()))
                 }) { Text("Connect over WiFi") }
             }

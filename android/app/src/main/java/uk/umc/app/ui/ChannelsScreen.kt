@@ -44,9 +44,9 @@ fun ChannelsScreen() {
                 },
                 trailingContent = {
                     Row {
-                        TextButton(onClick = { scoping = ch.name; scopeText = scopes[ch.name] ?: "" }) { Text("Scope") }
-                        TextButton(onClick = { showSecret = if (showSecret == ch.idx) null else ch.idx }) { Text(if (showSecret == ch.idx) "Hide" else "Key") }
-                        TextButton(onClick = {
+                        ShButton(variant = ShVariant.Ghost, onClick = { scoping = ch.name; scopeText = scopes[ch.name] ?: "" }) { Text("Scope") }
+                        ShButton(variant = ShVariant.Ghost, onClick = { showSecret = if (showSecret == ch.idx) null else ch.idx }) { Text(if (showSecret == ch.idx) "Hide" else "Key") }
+                        ShButton(variant = ShVariant.Ghost, onClick = {
                             scope.launch {
                                 runCatching { s.setChannel(ch.idx, "", ByteArray(16)) }
                                     .onSuccess { AppState.say("Channel removed") }
@@ -60,7 +60,7 @@ fun ChannelsScreen() {
         }
         item {
             SectionCard("Regional setup", "From the MeshCore Yorkshire guide: the #Yorkshire channel with the yorkshire region scope.") {
-                Button(onClick = {
+                ShButton(onClick = {
                     scope.launch {
                         runCatching {
                             if (channels.none { it.name == "#Yorkshire" }) {
@@ -90,9 +90,9 @@ fun ChannelsScreen() {
                 }
                 OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name") }, singleLine = true)
                 if (kind == "join") OutlinedTextField(secret, { secret = it }, Modifier.fillMaxWidth(), label = { Text("Key (hex)") }, singleLine = true)
-                Button(onClick = {
+                ShButton(onClick = {
                     val idx = freeSlot()
-                    if (idx < 0) return@Button AppState.say("All 40 channel slots are in use")
+                    if (idx < 0) return@ShButton AppState.say("All 40 channel slots are in use")
                     var n = name.trim()
                     val key: ByteArray? = when (kind) {
                         "hashtag" -> {
@@ -105,7 +105,7 @@ fun ChannelsScreen() {
                         "join" -> secret.trim().hexToBytes().takeIf { it.size == 16 }
                         else -> android.util.Base64.decode("izOH6cXN6mrJ5e26oRXNcg==", android.util.Base64.DEFAULT)
                     }
-                    if (key == null || n.isEmpty()) return@Button AppState.say("Enter a name (and a 32-character key to join)")
+                    if (key == null || n.isEmpty()) return@ShButton AppState.say("Enter a name (and a 32-character key to join)")
                     val finalName = n
                     scope.launch {
                         runCatching { s.setChannel(idx, finalName, key) }
@@ -135,7 +135,7 @@ fun ChannelsScreen() {
                         ) {
                             RadioButton(selected = scopeText == r, onClick = { scopeText = r })
                             Text(r, Modifier.weight(1f))
-                            TextButton(onClick = { AppState.removeRegion(r) }) { Text("Forget") }
+                            ShButton(variant = ShVariant.Ghost, onClick = { AppState.removeRegion(r) }) { Text("Forget") }
                         }
                     }
                     Spacer(Modifier.height(4.dp))
@@ -145,7 +145,7 @@ fun ChannelsScreen() {
                         supportingText = { Text("lowercase letters, digits and hyphens, up to 29") },
                         isError = scopeText.isNotBlank() && !AppState.isValidRegion(scopeText.trim()),
                     )
-                    TextButton(
+                    ShButton(variant = ShVariant.Ghost, 
                         enabled = scopeText.isNotBlank() && AppState.isValidRegion(scopeText.trim()) &&
                                   scopeText.trim() !in regions,
                         onClick = { if (!AppState.addRegion(scopeText)) AppState.say("Could not add that region") },
@@ -153,12 +153,12 @@ fun ChannelsScreen() {
                 }
             },
             confirmButton = {
-                TextButton(
+                ShButton(variant = ShVariant.Ghost, 
                     enabled = scopeText.isBlank() || AppState.isValidRegion(scopeText.trim()),
                     onClick = { AppState.setChannelScope(name, scopeText); scoping = null },
                 ) { Text("Save") }
             },
-            dismissButton = { TextButton(onClick = { scoping = null }) { Text("Cancel") } },
+            dismissButton = { ShButton(variant = ShVariant.Ghost, onClick = { scoping = null }) { Text("Cancel") } },
         )
     }
 }

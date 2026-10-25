@@ -6,8 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import com.composables.icons.lucide.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -183,20 +182,20 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
                 val (txNote, txCol) = trendText(tTx)
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KpiCard(Icons.Filled.South, "Received this hour", tRx.cur?.toLong()?.toString() ?: "${stats?.let { it.recvFlood + it.recvDirect } ?: "—"}",
+                        KpiCard(Lucide.ArrowDown, "Received this hour", tRx.cur?.toLong()?.toString() ?: "${stats?.let { it.recvFlood + it.recvDirect } ?: "—"}",
                             if (tRx.cur == null) "since connecting" else rxNote, rxCol, rxS.takeLast(30).map { it.second }, Dc.g, Modifier.weight(1f).fillMaxHeight())
-                        KpiCard(Icons.Filled.North, "Sent this hour", tTx.cur?.toLong()?.toString() ?: "${stats?.let { it.sentFlood + it.sentDirect } ?: "—"}",
+                        KpiCard(Lucide.ArrowUp, "Sent this hour", tTx.cur?.toLong()?.toString() ?: "${stats?.let { it.sentFlood + it.sentDirect } ?: "—"}",
                             if (tTx.cur == null) "since connecting" else txNote, txCol, txS.takeLast(30).map { it.second }, Dc.am, Modifier.weight(1f).fillMaxHeight())
                     }
                     Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KpiCard(Icons.Filled.DonutLarge, "Airtime this hour", airPct?.let { DashMath.fmt(it) + "%" } ?: "—",
+                        KpiCard(Lucide.ChartPie, "Airtime this hour", airPct?.let { DashMath.fmt(it) + "%" } ?: "—",
                             if (airTxH != null && airRxH != null) "receiving ${DashMath.fmt(airRxH / 36.0)}% · sending ${DashMath.fmt(airTxH / 36.0)}%" else "collecting history…", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight())
-                        KpiCard(Icons.Filled.Group, "Nodes known", contacts.size.toString(),
+                        KpiCard(Lucide.Users, "Nodes known", contacts.size.toString(),
                             "${contacts.count { it.hops == 0 }} direct · ${contacts.count { it.type == 2 }} repeaters", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight())
                     }
                     Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KpiCard(Icons.Filled.Timer, "Uptime", upSecs?.let { upText(it) } ?: "—", "radio running time", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight())
-                        KpiCard(Icons.Filled.BatteryFull, "Battery", batt?.let { "%.2f V".format(it / 1000.0) } ?: "—",
+                        KpiCard(Lucide.Timer, "Uptime", upSecs?.let { upText(it) } ?: "—", "radio running time", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight())
+                        KpiCard(Lucide.BatteryFull, "Battery", batt?.let { "%.2f V".format(it / 1000.0) } ?: "—",
                             battPct?.let { "about $it% full" } ?: "no reading", if ((battPct ?: 100) < 25) Dc.rd else Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight())
                     }
                 }
@@ -354,23 +353,23 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
             item { Text("Shortcuts", color = Dc.mu, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
             item {
                 Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    KpiCard(Icons.Filled.Podcasts, "Radio", me?.let { "%.3f".format(it.freqKhz / 1000.0) } ?: "—",
+                    KpiCard(Lucide.Radio, "Radio", me?.let { "%.3f".format(it.freqKhz / 1000.0) } ?: "—",
                         me?.let { "SF${it.sf} · ${it.bwKhz / 1000} kHz · CR ${it.cr}" } ?: "", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight()) { onOpen("radio") }
                     val fix = me?.let { it.lat != 0.0 || it.lon != 0.0 } ?: false
-                    KpiCard(Icons.Filled.LocationOn, "Position", if (fix) "Set" else "None",
+                    KpiCard(Lucide.MapPin, "Position", if (fix) "Set" else "None",
                         me?.let { if (fix) "%.3f, %.3f".format(it.lat, it.lon) else "not shared" } ?: "", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight()) { onOpen("map") }
                 }
             }
             item {
                 Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    KpiCard(Icons.Filled.Group, "Nodes", contacts.size.toString(), "${contacts.count { it.hops == 0 }} direct", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight()) { onOpen("contacts") }
+                    KpiCard(Lucide.Users, "Nodes", contacts.size.toString(), "${contacts.count { it.hops == 0 }} direct", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight()) { onOpen("contacts") }
                     val incoming = messages.count { !it.outgoing }
-                    KpiCard(Icons.Filled.Chat, "Messages", incoming.toString(), "${messages.size} kept", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight()) { onOpen("chats") }
+                    KpiCard(Lucide.MessageSquare, "Messages", incoming.toString(), "${messages.size} kept", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight()) { onOpen("chats") }
                 }
             }
-            item { DashAction(Icons.Filled.Campaign, "Send advert", "Let other nodes find this radio") { onAdvert(false) } }
-            item { DashAction(Icons.Filled.Sensors, "Flood advert", "Repeaters pass it on across the mesh") { onAdvert(true) } }
-            item { DashAction(Icons.Filled.Tune, "Appearance", "Background, cards and delivery marks") { onOpen("look") } }
+            item { DashAction(Lucide.Megaphone, "Send advert", "Let other nodes find this radio") { onAdvert(false) } }
+            item { DashAction(Lucide.RadioTower, "Flood advert", "Repeaters pass it on across the mesh") { onAdvert(true) } }
+            item { DashAction(Lucide.SlidersHorizontal, "Appearance", "Background, cards and delivery marks") { onOpen("look") } }
         }
     }
 }
@@ -389,6 +388,6 @@ private fun DashAction(icon: ImageVector, title: String, blurb: String, onClick:
             Text(title, color = Dc.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Text(blurb, color = Dc.mu, fontSize = 12.sp)
         }
-        Icon(Icons.Filled.ChevronRight, null, tint = Dc.mu)
+        Icon(Lucide.ChevronRight, null, tint = Dc.mu)
     }
 }

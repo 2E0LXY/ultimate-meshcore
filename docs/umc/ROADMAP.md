@@ -8,6 +8,10 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 - ✅ Fixed pages inheriting the Dashboard's styling after it had been opened (the page container kept the dashboard's class, so the Map and others got its padding and green background); the Map now fills its box and the whole window, and fits the window height so its heading stays in view
 
+## Android app 0.1.12
+
+- ✅ New look across the whole app, after shadcn/ui and Tailwind (written for Compose, since those are web libraries): Tailwind's green and zinc colours in a light and a dark theme that follow the phone, 8 to 12 dp rounding, 1 dp borders, a 14 sp text scale, flat top bar and bottom bar with a hairline, and a small component set (button in five variants, card, badge, alert, separator, label and value row); every button and card in the app now uses it; Lucide icons (the set shadcn uses) for the tabs and the dashboard; the charts, dials and flow diagram are the Recharts-style part, drawn natively
+
 ## Android app 0.1.11
 
 - ✅ Fixes for "the radio is busy" on a flood advert and "can't send to the radio" on Set up Yorkshire: Bluetooth writes are taken one at a time, a late result of an earlier write is no longer mistaken for the next one, and a refused write is retried; an advert, a channel, a name or a location that the radio refuses as busy or out of packet space is asked again (1, 2 and 4 seconds) before the app gives up; setting a channel no longer reports failure if only reading the list back fails; every error now names the radio's own error number and, for a Bluetooth failure, the packet size and the last write status; an advert refused for lack of packet space says how many packets the radio is holding, and the Dashboard shows the radio's transmit queue (red from 8 waiting)

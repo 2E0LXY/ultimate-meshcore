@@ -60,7 +60,7 @@ fun GpsScreen() {
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
                     )
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = {
+                    ShButton(variant = ShVariant.Outline, onClick = {
                         lat = me?.lat?.takeIf { set }?.toString() ?: ""
                         lon = me?.lon?.takeIf { set }?.toString() ?: ""
                         editing = true
@@ -148,7 +148,7 @@ fun GpsScreen() {
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                ShButton(variant = ShVariant.Ghost, onClick = {
                     val la = lat.trim().toDoubleOrNull()
                     val lo = lon.trim().toDoubleOrNull()
                     if (la == null || lo == null || la < -90 || la > 90 || lo < -180 || lo > 180) {
@@ -163,7 +163,7 @@ fun GpsScreen() {
                     }
                 }) { Text("Save") }
             },
-            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } },
+            dismissButton = { ShButton(variant = ShVariant.Ghost, onClick = { editing = false }) { Text("Cancel") } },
         )
     }
 }
