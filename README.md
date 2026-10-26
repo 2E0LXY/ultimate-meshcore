@@ -7,12 +7,12 @@ By **Daren Loxley 2E0LXY**
 
 [**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest firmware**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) · [**📱 Android app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) · [**🖥 Windows / Linux app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest)
 
-> **Status: 0.1.21 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
+> **Status: 0.1.22 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
 
 | Part | Current version | Download |
 |---|---|---|
-| Firmware (repeater, client, T-Deck) | **0.1.21** | [web flasher](https://2e0lxy.github.io/ultimate-meshcore/) · [releases](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) |
-| Desktop app (Windows / Linux) | **0.1.21** | [desktop-latest](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest) |
+| Firmware (repeater, client, T-Deck) | **0.1.22** | [web flasher](https://2e0lxy.github.io/ultimate-meshcore/) · [releases](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) |
+| Desktop app (Windows / Linux) | **0.1.22** | [desktop-latest](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest) |
 | Android app | **0.1.12** | [app-latest](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) |
 | UMC Net server dashboard | **2.1** | [`server/umcnet`](server/umcnet/README.md) |
 

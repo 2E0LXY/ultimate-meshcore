@@ -1251,6 +1251,21 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
       snprintf(reply, reply_size, "Err - %s: %s", cmd, r);
       return true;
     }
+    // The Yorkshire mesh's standing advice: two neighbouring regions, drop unscoped (spam) floods, and save so it all
+    // survives a reboot. Applied whenever Yorkshire is set up.
+    if (strcmp(chosen->id, "gb-yor") == 0 || strcmp(chosen->id, "yorkshire") == 0) {
+      static const char* const extra[] = {"region put derbyshire", "region put lincolnshire", "region denyf *", "region save", nullptr};
+      for (const char* const* e = extra; *e != nullptr; e++) {
+        r[0] = 0;
+        _host->umcCommand(*e, r, sizeof(r));
+        if (strncmp(r, "Err", 3) == 0) {
+          snprintf(reply, reply_size, "Err - %s: %s", *e, r);
+          return true;
+        }
+      }
+      snprintf(reply, reply_size, "OK - added %d region(s) plus derbyshire and lincolnshire, flood allowed, home %s, unscoped floods denied, saved", added, chosen->home);
+      return true;
+    }
     snprintf(reply, reply_size, "OK - added %d region(s), flood allowed, home %s; run 'region save' to keep",
              added, chosen->home);
     return true;

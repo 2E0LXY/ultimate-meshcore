@@ -16,6 +16,10 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 
 - ✅ Fixes for "the radio is busy" on a flood advert and "can't send to the radio" on Set up Yorkshire: Bluetooth writes are taken one at a time, a late result of an earlier write is no longer mistaken for the next one, and a refused write is retried; an advert, a channel, a name or a location that the radio refuses as busy or out of packet space is asked again (1, 2 and 4 seconds) before the app gives up; setting a channel no longer reports failure if only reading the list back fails; every error now names the radio's own error number and, for a Bluetooth failure, the packet size and the last write status; an advert refused for lack of packet space says how many packets the radio is holding, and the Dashboard shows the radio's transmit queue (red from 8 waiting)
 
+## Done in 0.1.22
+
+- ✅ Yorkshire setup (the *Yorkshire mesh recommended settings* action and `region preset gb-yor` / `yorkshire`) now also adds the regions `derbyshire` and `lincolnshire`, denies unscoped floods (`region denyf *`, to drop the spam) and saves (`region save`) so it all survives a reboot, as the Yorkshire mesh advises
+
 ## Done in 0.1.21
 
 - ✅ **Join UMC Net with one line.** `set mqtt.join UMC1.…` (also a *Join code* box on the MQTT page) applies the broker, the repeater's account, the area, raw packets on, transmitted off, the bridge and the remote-control key in one go, and connects; a damaged or truncated code is refused (it carries a checksum). `set mqtt.umcnet on|off` and `get mqtt.umcnet` are the switch and the status. The dashboard makes the code (Accounts: Add, or *Join code* on a row; defaults for the area and the bridge are in Settings). The broker address is built into the firmware (`UMCNET_DEFAULT_HOST`) or carried in the code. The code format has tests in both C++ and Python against the same vectors

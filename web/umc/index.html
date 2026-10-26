@@ -663,7 +663,7 @@ async function runAction(act, reload) {
     // From the MeshCore Yorkshire guide: https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/
     const cmds = ["set flood.max 20", "set flood.max.advert 0", "set flood.max.unscoped 32", "set path.hash.mode 2",
       "set loop.detect minimal", "set flood.advert.interval 0", "set advert.interval 60", "set dutycycle 10"];
-    const regions = ["region put gb", "region put gb-yor gb", "region allowf gb", "region allowf gb-yor", "region home gb-yor", "region default gb-yor", "region save"];
+    const regions = ["region put gb", "region put gb-yor gb", "region allowf gb", "region allowf gb-yor", "region home gb-yor", "region default gb-yor", "region put derbyshire", "region put lincolnshire", "region denyf *", "region save"];
     const withRegions = confirm(`Apply the Yorkshire mesh recommendations?\n\n${cmds.join("\n")}\n\nOK also adds the regions:\n${regions.join("\n")}\n\nCancel to stop, or Cancel then use the Regions page for regions only.`);
     if (!withRegions) return;
     const all = cmds.concat(regions);
