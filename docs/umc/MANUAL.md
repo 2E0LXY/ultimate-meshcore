@@ -1026,3 +1026,21 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 - **UMC** — Ultimate MeshCore.
 - **UTC** — Coordinated Universal Time. The mesh clock always uses UTC.
 - **Zero-hop** — reaches direct neighbours only; not repeated.
+
+---
+
+## UMC Net: network dashboard, remote control and approvals
+
+UMC Net links repeaters over the internet through a broker you run (Mosquitto behind Caddy). Three parts:
+
+1. **On the repeater** (MQTT page): the custom broker settings, *UMC Net bridge* (hands packets other repeaters heard to the local mesh, off by default, rate limited) and *Remote control* (obeys signed commands from your dashboard, off by default, needs a control key).
+2. **The server dashboard** at `https://net.<your domain>/`: the broker's statistics, every repeater, who is connected, a **Network** map with links coloured by hops (green direct, blue one hop, purple two, amber three, orange four or more), live packets with senders, diagnostics, accounts and a **Control** tab.
+3. **Accounts and approval**: each repeater has its own broker account. A new account is *pending* until you approve it by pasting the repeater's full device id; it can listen but cannot publish or be controlled until then.
+
+**Put a repeater under control.** On the dashboard open Control, pick the repeater, press *Control setup* and paste the commands it shows into the repeater's Console page (broker address, its account, and the control key). Press *Read settings* to check it answers.
+
+**What remote control can and cannot do.** It can read and change radio, forwarding, advert, identity and UMC Net settings, send adverts, show statistics and restart the repeater. It can never read or change passwords, private keys, WiFi, the access point, the broker address and login, the control key itself, or install firmware, whatever the dashboard sends. Commands are signed, recent, in order, limited to 60 a minute, and a wrong signature gets no reply.
+
+**The map on a repeater's own page** draws a line from the device to every node it knows, coloured the same way, with a legend.
+
+The full installation and operating guide is in [`server/umcnet/README.md`](../../server/umcnet/README.md).

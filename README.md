@@ -9,6 +9,13 @@ By **Daren Loxley 2E0LXY**
 
 > **Status: 0.1.20 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
 
+| Part | Current version | Download |
+|---|---|---|
+| Firmware (repeater, client, T-Deck) | **0.1.20** | [web flasher](https://2e0lxy.github.io/ultimate-meshcore/) · [releases](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) |
+| Desktop app (Windows / Linux) | **0.1.20** | [desktop-latest](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest) |
+| Android app | **0.1.12** | [app-latest](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) |
+| UMC Net server dashboard | **2.1** | [`server/umcnet`](server/umcnet/README.md) |
+
 ![Repeater dashboard](docs/images/repeater-dashboard.png)
 
 ---
@@ -26,6 +33,7 @@ By **Daren Loxley 2E0LXY**
 - [T-Deck / T-Deck Plus touch client](#t-deck--t-deck-plus-touch-client)
 - [Ultimate MeshCore App (Android)](#ultimate-meshcore-app-android)
 - [Ultimate MeshCore Desktop (Windows / Linux)](#ultimate-meshcore-desktop-windows--linux)
+- [UMC Net: network dashboard, remote control and approvals](#umc-net-network-dashboard-remote-control-and-approvals)
 - [Command line](#command-line)
 - [Building](#building)
 - [Documentation](#documentation)
@@ -83,8 +91,18 @@ By **Daren Loxley 2E0LXY**
 
 Every setting is available from the browser. The pages work on phones and support light and dark themes.
 
+**Help everywhere:** a **?** beside every setting, card, dial and panel explains what it is, how to use it and why it matters, and every page has a short description under its title.
+
 ### Dashboard
-Shows uptime, battery, clock, packets, neighbours, queue, memory, WiFi, hotspot and MQTT. It also shows the radio preset, noise floor, RSSI/SNR and airtime, plus quick actions and an update banner (screenshot at the top of this page).
+A live control-room view (screenshot above), refreshed every 15 seconds:
+
+- **Cards** for packets received and sent, airtime, neighbours, uptime and battery, each with its trend against the previous hour.
+- **Charts** of traffic and airtime per minute (1 h / 6 h / 24 h), and of noise floor and signal. The history is kept in your browser, one reading a minute.
+- **Dials** for battery, last signal (SNR), channel busy, noise floor, WiFi signal and free memory.
+- **Data flow**: the radio, this node and its WiFi, apps, MQTT and bridge links; a line moves only while its link is up.
+- **Connections** with a light each: green working, amber trying, grey off or not set up, red a fault. WiFi (station) and the hotspot are separate.
+- **Neighbours**: repeaters heard directly, repeaters in radio range (the last hop of what was received), and the nearest known nodes.
+- **Recent activity** says who each packet is from (an advert's name, or a code matched to a known node) and which repeater passed it on.
 
 ### Radio
 - **Regional presets** and frequency/BW/SF/CR, **applied without a reboot**.
@@ -127,6 +145,7 @@ Shows uptime, battery, clock, packets, neighbours, queue, memory, WiFi, hotspot 
 
 ### MQTT, bridge, power
 - **MQTT observer**: location code, identity and what to publish. Choose a preset broker or a custom TCP/WSS broker (JWT supported), with two broker slots and a status view.
+- **UMC Net**: join your repeaters over the internet through your own broker. The bridge hands packets other repeaters heard to the local mesh (rate limited, off by default), and **remote control** lets the [UMC Net dashboard](#umc-net-network-dashboard-remote-control-and-approvals) run a safe list of signed commands on the repeater (off by default).
 - **ESP-NOW bridge** between nearby LoRa segments (channel, secret, delay, source), and RS-232 settings.
 - **Power & hardware**: power saving, battery calibration, GPS, display cycle settings and board info.
 
@@ -139,12 +158,12 @@ Shows uptime, battery, clock, packets, neighbours, queue, memory, WiFi, hotspot 
 ![Routes and trace](docs/images/repeater-routes.png)
 
 ### Live traffic
-Packet list with type, route, hops, RSSI and SNR, plus filters and per-minute counts.
+Packet list with type, route, **who it is from and which repeater passed it on**, hops, RSSI and SNR, plus filters and per-minute counts.
 
 ![Live traffic](docs/images/repeater-traffic.png)
 
 ### Map
-Every node that shares a location, on an OpenStreetMap map.
+Every node that shares a location, on an OpenStreetMap map, with a **line from this device to each node coloured by hops**: green direct, blue one hop, purple two, amber three, orange more.
 
 ![Map](docs/images/repeater-map.png)
 
@@ -260,6 +279,7 @@ The messenger also works on a phone browser:
 - **Radio tab**: live radio settings, airtime per packet, NOW / FLOOR / PEAK / MARGIN meters and a two-minute RSSI spectrum.
 - **Offline maps from the SD card**, with your position and contacts plotted. `scripts/umc_make_map_tiles.py` builds the tiles.
 - Without tiles, contacts are plotted by range and bearing, with distance rings.
+- **Heard line**: the signal screen names who the last packet came from and which repeater passed it on.
 - **GPS auto-detection** for both receivers used on the T-Deck Plus (u-blox at 38400 baud, L76K at 9600). The Info tab names the one that answered.
 - **Setup tab**: sets the radio up on the device itself, in sections — **Device** (name, restart, factory reset), **Radio** (nine bands and TX power 2–22 dBm), **WiFi** (scan for networks, pick one, type the password, connect), **Bluetooth** (on/off, pairing PIN), **Region** scope, **GPS**, and **Firmware** (version, update check). No computer or phone needed.
 - **Info tab** also shows how long it has been running and why it last restarted.
@@ -281,6 +301,7 @@ The messenger also works on a phone browser:
 - **Channels**, including a validated per-channel region scope, plus LocalMesh GB and island-of-Ireland scope shortcuts.
 - A **map** of everyone who shares a location.
 - **Radio settings**: presets, frequency, power, name, location, confirmations and Bluetooth PIN.
+- **Dashboard**: cards with trends, traffic and airtime charts, six dials, an animated data-flow diagram, connections, traffic mix, repeaters heard and recent activity naming each sender (history kept on the phone).
 - **Device tab**: opens the full web interface of any UMC repeater or client on your network, including firmware updates.
 - Source is in [`android/`](android/). CI builds it into an installable APK ([download](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest)).
 
@@ -304,12 +325,43 @@ The complete interface on your computer, for any radio you can reach, including 
   - any Ultimate MeshCore repeater or client, with its own web interface;
   - **Search this network** finds them.
 - **Other MeshCore companion radios**: messages, contacts, channels, map and the common settings.
+- **Chat page**: an IRC-style live feed of the channels (hops, SNR and path per message), an optional clearly labelled test-reply bot, a 24-hour dashboard and a repeater monitor.
 - **Everyday use**: recent connections, automatic reconnect after a restart, and its own window.
 - **Downloads**: a single `.exe` for Windows, and a `.tar.gz` with an installer for Linux ([download](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest)). Source is in [`desktop/`](desktop/).
 
 | Connection page | Messages |
 |---|---|
 | <img src="docs/images/desktop-connect.png" width="420"> | <img src="docs/images/desktop-messages.png" width="420"> |
+
+---
+
+## UMC Net: network dashboard, remote control and approvals
+
+UMC Net joins repeaters over the internet through a broker you run yourself ([setup in `server/umcnet`](server/umcnet/README.md)). The **dashboard** at `https://net.<your domain>/` (behind a login) shows and controls everything on that network.
+
+![UMC Net dashboard](docs/images/umcnet-overview.png)
+
+| Tab | What it gives you |
+|---|---|
+| Overview | Repeaters and clients online, packets and messages a minute, dials for CPU, memory, disk, load, certificate and logins, a live data-flow diagram, the checks, per-repeater and bandwidth charts, latest events |
+| **Network** | A map of every node the repeaters hear, with a link for each pair coloured by hops (green direct, blue 1 hop, purple 2, amber 3, orange 4+), filters, a table of links and the journey of each packet |
+| Repeaters | One card per repeater (device id, model, firmware, battery, noise floor, airtime, clock offset, packet types) and which repeaters hear the same packets |
+| **Control** | Read and change a repeater's settings, send adverts, run safe commands, restart it, label it, all signed and recorded |
+| Clients, Accounts | Everything connected; accounts with approve, block, new password and remove |
+| Traffic, Diagnostics, Broker, System, Log | Live packets with senders, the checks and refused logins, every broker statistic, the server, the broker's log |
+| **Settings** | Limits for every check, history length, confirmation of risky commands, alerts to a web address or ntfy, the dashboard password, downloads, service restarts |
+
+![Network map](docs/images/umcnet-network.png)
+
+**Remote control, safely.** A repeater obeys nothing until you set a control key and turn `mqtt.control` on. Each command is signed (HMAC-SHA-256 over the device id, the time, a counter and the command), must be recent, newer than the repeater's last restart and in order, and is rate limited to 60 a minute. Only a safe list of commands is accepted: never passwords, private keys, WiFi, broker login, the control key or firmware installs. A wrong signature gets no answer at all. Risky commands (restart, radio, region, bridge) ask you to confirm first, and every action goes in an audit log.
+
+**Approving new repeaters.** A new repeater account waits as *pending*: it can connect and listen, but cannot publish or be controlled. The dashboard shows who connected, from where and the start of its device id; you paste its full id (it must match the one that connected) and approve. Block shuts an account out at once, and the dashboard warns if a different device uses an approved account.
+
+| Control | Accounts and approval |
+|---|---|
+| <img src="docs/images/umcnet-control.png" width="420"> | <img src="docs/images/umcnet-accounts.png" width="420"> |
+
+Install on your server with one command (see [`server/umcnet/README.md`](server/umcnet/README.md) for the details): `curl -fsSL https://raw.githubusercontent.com/2E0LXY/ultimate-meshcore/main/server/umcnet/dash/install-dash.sh | sudo bash`. The dashboard runs unprivileged (Python standard library only, about 20 MB); a small root helper on a Unix socket does account changes and the login password.
 
 ---
 
@@ -367,6 +419,7 @@ pio run -e umc_lilygo_tdeck_client           # T-Deck / T-Deck Plus client
 | [MANUAL.md](docs/umc/MANUAL.md) | Complete user guide: installation, every setting, troubleshooting, command reference and glossary |
 | [ROADMAP.md](docs/umc/ROADMAP.md) | What's coming next |
 | [SPEC.md](docs/umc/SPEC.md) | Design specification |
+| [server/umcnet/README.md](server/umcnet/README.md) | UMC Net: broker, dashboard, remote control and approvals |
 | [android/README.md](android/README.md) | The Ultimate MeshCore App for Android |
 | [desktop/README.md](desktop/README.md) | Ultimate MeshCore Desktop for Windows and Linux |
 

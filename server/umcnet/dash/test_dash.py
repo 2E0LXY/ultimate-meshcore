@@ -170,6 +170,17 @@ class Network(unittest.TestCase):
         self.assertEqual(1, v["links"][0]["hops"]); self.assertEqual("44", v["journeys"][0]["path"][0]["h"])
 
 
+class History(unittest.TestCase):
+    def test_many_series_can_be_asked_for_at_once(self):
+        # the page asks for 13 fixed series plus one per repeater; an old limit of 12 silently dropped the rest
+        dash.db_init(); now = int(time.time())
+        dash.DB.executemany("INSERT INTO samples VALUES(?,?,?)", [(now - 60, "k%d" % i, float(i)) for i in range(30)])
+        got = dash.history(["k%d" % i for i in range(30)], 3600)
+        self.assertEqual(30, len(got))
+        src = open(os.path.join(HERE, "umcnet_dash.py")).read()
+        self.assertIn('split(",") if k][:60]', src)
+
+
 class AdminHelper(unittest.TestCase):
     def test_password_hash_round_trip(self):
         h = adm.pbkdf2("Correct-horse-9"); self.assertTrue(adm.check_password("Correct-horse-9", h)); self.assertFalse(adm.check_password("Correct-horse-8", h)); self.assertFalse(adm.check_password("x", "garbage"))

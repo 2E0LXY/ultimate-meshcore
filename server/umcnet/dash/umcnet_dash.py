@@ -889,7 +889,7 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/", "/index.html"): return self.send(200, open(CFG["static"], "rb").read(), "text/html")
             if u.path == "/api/overview": return self.send(200, json.dumps(overview(), default=str))
             if u.path == "/api/history":
-                keys = [k for k in (q.get("k", [""])[0]).split(",") if k][:12]; secs = max(60, min(14 * 86400, int(q.get("range", ["3600"])[0])))
+                keys = [k for k in (q.get("k", [""])[0]).split(",") if k][:60]; secs = max(60, min(14 * 86400, int(q.get("range", ["3600"])[0])))
                 return self.send(200, json.dumps(history(keys, secs)))
             if u.path == "/api/events":
                 secs = max(60, min(14 * 86400, int(q.get("range", ["86400"])[0]))); kind = q.get("kind", [""])[0]
