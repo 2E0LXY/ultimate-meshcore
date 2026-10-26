@@ -96,6 +96,13 @@ public:
   bool getControl() const { return _prefs.custom_control != 0; }
   bool hasControlKey() const { return _prefs.control_key[0] != 0; }
   void formatControlReply(char* reply, size_t reply_size) const;
+
+  // Join UMC Net with one line: `set mqtt.join <code>` applies the account, the area, the broker (the
+  // defaults baked into this firmware unless the code names another), raw packets on, transmitted off,
+  // the bridge as the code says, and the control key if it has one. `set mqtt.umcnet on|off` is the switch.
+  bool applyJoin(const char* code, char* reply, size_t reply_size);
+  bool setUmcNet(const char* value);         // on | off (on needs a join first)
+  void formatUmcNetReply(char* reply, size_t reply_size) const;
   bool hasCustomPassword() const { return _prefs.custom_password[0] != 0; }
   bool sendStatusNow();
   bool isAnyBrokerConnected() const;

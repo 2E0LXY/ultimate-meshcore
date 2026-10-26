@@ -46,6 +46,8 @@
     if (c === "get ap.status") return "> down mode:auto";
     if (c === "get net.status") return "> " + JSON.stringify(info().net);
     if (c === "get mqtt.status") return "> wifi:up ntp:up iata:LBA p:custom:wss:up s:- status:on tx:off leaked:0";     // as a real repeater reports it
+    if (c === "get mqtt.umcnet") return "> on, joined as demo-repeater, area LBA, broker custom:wss:up, bridge on, control on";
+    if (c.startsWith("set mqtt.join ")) return c.includes("UMC1.") ? "OK - joined net.2e0lxy.uk as demo-repeater, remote control on. It connects within a minute: get mqtt.umcnet" : "Err - that is not a valid join code (copy the whole line)";
     if (c === "get mqtt.custom.bridge") return "> on, heard 3, passed on 2, dropped 0, up to 20 a minute";
     if (c === "get mqtt.statuscfg") return "> on";
     if (c === "get mqtt.client_version") return "> umc-0.1.0";

@@ -169,7 +169,7 @@ inline bool commandAllowed(const char* cmd) {
       "set net", "set pin", "get pin", "setperm", "set http", "set telnet", "set web", "set ble", "get ble.pin", "set mqtt.custom.host",
       "set mqtt.custom.port", "set mqtt.custom.transport", "set mqtt.custom.username", "set mqtt.custom.password", "get mqtt.custom.password",
       "set mqtt.control", "get mqtt.control.key", "set bridge.secret", "get bridge.secret", "set app", "start ota", "ota", "erase", "format",
-      "poweroff", "set telemetry", "set mqtt.custom ", "set mqtt.meshmapper", "set mqtt.waev", "set mqtt.eastmesh", "set mqtt.letsmesh"};
+      "poweroff", "set telemetry", "set mqtt.join", "set mqtt.umcnet", "set mqtt.custom ", "set mqtt.meshmapper", "set mqtt.waev", "set mqtt.eastmesh", "set mqtt.letsmesh"};
   for (const char* d : kNever)
     if (startsWithNoCase(cmd, d)) return false;
   static const char* const kExact[] = {"advert", "advert.zerohop", "discover.neighbors", "clock", "reboot", "ver", "neighbors", "routes", "board",

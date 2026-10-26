@@ -27,7 +27,7 @@ class CommandList(unittest.TestCase):
     DENIED = ["password hunter22", "set guest.password x", "get guest.password", "set prv.key aa", "get prv.key", "set wifi.ssid x", "set wifi.pwd y", "wifi clear 1", "get wifi.pwd", "set ap.mode on",
               "set ap.password z", "set net.ip dhcp", "set pin 12345678", "setperm abc 3", "set http off", "set telnet on", "set mqtt.custom.password p", "get mqtt.custom.password",
               "set mqtt.custom.host evil.example", "set mqtt.custom.port 1", "set mqtt.custom.transport tcp", "set mqtt.custom.username u", "set mqtt.control off", "set mqtt.control.key aa",
-              "get mqtt.control.key", "set bridge.secret s", "get bridge.secret", "start ota", "ota install", "erase", "format", "poweroff", "set ble.pin 1", "set mqtt.meshmapper on",
+              "get mqtt.control.key", "set bridge.secret s", "get bridge.secret", "start ota", "ota install", "erase", "format", "poweroff", "set ble.pin 1", "set mqtt.meshmapper on", "set mqtt.join UMC1.abc", "set mqtt.umcnet off",
               "SET PASSWORD x", "Set Prv.Key aa", "GET PRV.KEY", "", " get radio", "get radio ", "get radio\nset tx 1", 'get "radio"', "get radio\\", "frobnicate", "set unknown.thing 1", "a" * 141]
 
     def test_allowed(self):
@@ -179,6 +179,30 @@ class History(unittest.TestCase):
         self.assertEqual(30, len(got))
         src = open(os.path.join(HERE, "umcnet_dash.py")).read()
         self.assertIn('split(",") if k][:60]', src)
+
+
+class JoinCode(unittest.TestCase):
+    KEY = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+
+    def test_codes_match_the_firmware_vectors(self):
+        # the same three codes are decoded by test/test_join_code in C++
+        self.assertEqual("UMC1.AQNMQkEPYmxha2Utc2hlZmZpZWxkFEhtY21yenFsclZNVUFjdGpZendOAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8LJuo", dash.make_join_code("blake-sheffield", "HmcmrzqlrVMUActjYzwN", "LBA", self.KEY, True))
+        self.assertEqual("UMC1.AQBMQkELdjMtcmVwZWF0ZXIQYWJjZGVmZ2gxMjM0NTY3OPUrdA", dash.make_join_code("v3-repeater", "abcdefgh12345678", "LBA", None, False))
+        self.assertEqual("UMC1.AQdHQlIIaGlsbC10b3AUWnE5Xy1BYThCYjdDYzZEZDVFZTQQbWVzaC5leGFtcGxlLm9yZyKzAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8XT_s", dash.make_join_code("hill-top", "Zq9_-Aa8Bb7Cc6Dd5Ee4", "GBR", self.KEY, True, "mesh.example.org", 8883))
+
+    def test_a_code_fits_the_repeaters_console(self):
+        c = dash.make_join_code("a-very-long-name-here-24", "x" * 24, "LBA", self.KEY, True)       # the longest realistic one
+        self.assertLessEqual(len("set mqtt.join " + c), 159)
+        with self.assertRaises(ValueError): dash.make_join_code("a-very-long-name-here-24", "x" * 40, "LBA", self.KEY, True, "mesh.example.org", 8883)   # too long: refused, not cut
+
+    def test_bad_inputs_are_refused(self):
+        for args in (("Bad Name", "abcdefgh12"), ("ok-name", "short"), ("ok-name", "has space in it"), ("ok-name", "x" * 41), ("ok-name", "abcdefgh12", "lba"), ("ok-name", "abcdefgh12", "LBA", "zz")):
+            with self.assertRaises(ValueError): dash.make_join_code(*args)
+
+    def test_the_settings_accept_a_good_area_and_refuse_a_bad_one(self):
+        dash.conf_load(); self.assertIsNone(dash.conf_update({"join_iata": "lba", "join_bridge": False})); self.assertEqual("LBA", dash.CONF["join_iata"])
+        self.assertIsNotNone(dash.conf_update({"join_iata": "TOOLONG"})); dash.conf_update({"join_bridge": True})
+
 
 
 class AdminHelper(unittest.TestCase):

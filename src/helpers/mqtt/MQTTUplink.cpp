@@ -1,6 +1,11 @@
 #include "MQTTUplink.h"
 #include "NetPacket.h"
 #include "ControlCmd.h"
+#include "JoinCode.h"
+
+#ifndef UMCNET_DEFAULT_HOST
+#define UMCNET_DEFAULT_HOST "net.2e0lxy.uk"      // the broker a join code points at unless it names another
+#endif
 #include "MQTTCaCerts.h"
 
 #ifdef WITH_MQTT_UPLINK
@@ -1661,6 +1666,56 @@ void MQTTUplink::publishControlReply(const char* id, bool ok, const char* text) 
   }
 }
 
+bool MQTTUplink::applyJoin(const char* code, char* reply, size_t reply_size) {
+  umcjoin::Join j;
+  if (!umcjoin::parse(code, &j)) {
+    snprintf(reply, reply_size, "Err - that is not a valid join code (copy the whole line)");
+    return false;
+  }
+  const char* host = j.has_host ? j.host : UMCNET_DEFAULT_HOST;
+  char port[8];
+  snprintf(port, sizeof(port), "%u", j.has_host ? (unsigned)j.port : 443u);
+  bool ok = setIata(j.iata) && setCustomHost(host) && setCustomPort(port) && setCustomTransport("wss") && setCustomUsername(j.user) &&
+            setCustomPassword(j.pass) && setRawEnabled(true) && setTxEnabled(false) && setCustomRate("20") && setCustomBridge(j.bridge ? "on" : "off");
+  if (ok && j.has_key) {
+    char hex[65];
+    umcctl::toHex(j.key, 32, hex);
+    ok = setControlKey(hex) && setControl("on");
+  }
+  if (ok) ok = setEndpointEnabled(kCustomBit, true);
+  if (!ok) {
+    snprintf(reply, reply_size, "Err - could not apply it (at most two brokers can be on at once)");
+    return false;
+  }
+  snprintf(reply, reply_size, "OK - joined %s as %s%s. It connects within a minute: get mqtt.umcnet", host, j.user, j.has_key ? ", remote control on" : "");
+  return true;
+}
+
+bool MQTTUplink::setUmcNet(const char* value) {
+  if (value == nullptr) return false;
+  if (strcasecmp(value, "off") == 0) return setEndpointEnabled(kCustomBit, false);
+  if (strcasecmp(value, "on") != 0 || _prefs.custom_username[0] == 0 || _prefs.custom_host[0] == 0) return false;   // nothing to join yet
+  return setEndpointEnabled(kCustomBit, true);
+}
+
+void MQTTUplink::formatUmcNetReply(char* reply, size_t reply_size) const {
+  if (_prefs.custom_username[0] == 0) {
+    snprintf(reply, reply_size, "> off, not joined yet: set mqtt.join <code> (make one on the dashboard)");
+    return;
+  }
+  const bool on = (_prefs.enabled_mask & kCustomBit) != 0;
+  char status[160], state[40] = "off";
+  formatStatusReply(status, sizeof(status));                         // "... p:custom:wss:up s:- ..."
+  const char* c = strstr(status, "custom:");
+  if (on && c != nullptr) {
+    size_t i = 0;
+    while (c[i] != 0 && c[i] != ' ' && i + 1 < sizeof(state)) { state[i] = c[i]; i++; }
+    state[i] = 0;
+  }
+  snprintf(reply, reply_size, "> %s, joined as %s, area %s, broker %s, bridge %s, control %s", on ? "on" : "off", _prefs.custom_username, _prefs.iata, state,
+           _prefs.custom_bridge ? "on" : "off", _prefs.custom_control ? "on" : "off");
+}
+
 bool MQTTUplink::setControl(const char* value) {
   if (value == nullptr) return false;
   uint8_t parsed;
@@ -1789,6 +1844,9 @@ bool MQTTUplink::setCustomUsername(const char*) { return false; }
 bool MQTTUplink::setCustomBridge(const char*) { return false; }
 bool MQTTUplink::setCustomRate(const char*) { return false; }
 bool MQTTUplink::setControl(const char*) { return false; }
+bool MQTTUplink::applyJoin(const char*, char* reply, size_t n) { snprintf(reply, n, "Err - unsupported"); return false; }
+bool MQTTUplink::setUmcNet(const char*) { return false; }
+void MQTTUplink::formatUmcNetReply(char* reply, size_t n) const { snprintf(reply, n, "> unsupported"); }
 bool MQTTUplink::setControlKey(const char*) { return false; }
 void MQTTUplink::formatControlReply(char* reply, size_t reply_size) const { snprintf(reply, reply_size, "> unsupported"); }
 void MQTTUplink::formatBridgeReply(char* reply, size_t reply_size) const { snprintf(reply, reply_size, "> unsupported"); }

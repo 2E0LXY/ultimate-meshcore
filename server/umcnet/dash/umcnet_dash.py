@@ -5,7 +5,7 @@ Reads the broker as a read-only 'monitor' account (its $SYS statistics and the m
 broker's log for who connects and who is refused, samples the machine, and serves a JSON API and the page on
 127.0.0.1 for Caddy to put behind a login. Python standard library only: no packages to install.
 """
-import collections, csv, hashlib, hmac, io, json, os, re, secrets, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.request
+import base64, collections, csv, hashlib, hmac, io, json, os, re, secrets, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -23,7 +23,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.1"
+VERSION = "2.2"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -500,7 +500,7 @@ def history(keys, seconds):
     return out
 
 # ----------------------------------------------------------------------------- settings of the dashboard itself
-DEFAULTS = {"title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
+DEFAULTS = {"join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
             "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14, "confirm_risky": True, "control_enabled": True,
             "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True},
             "labels": {}}
@@ -535,7 +535,10 @@ def conf_update(patch):
             lo, hi = RANGES[k]
             if not lo <= v <= hi: return "%s must be between %d and %d" % (k, lo, hi)
             new[k] = v
-        elif k in ("confirm_risky", "control_enabled"): new[k] = bool(v)
+        elif k in ("confirm_risky", "control_enabled", "join_bridge"): new[k] = bool(v)
+        elif k == "join_iata":
+            if not isinstance(v, str) or not re.match(r"^[A-Za-z0-9]{3}$", v): return "join_iata: the three-character area code"
+            new[k] = v.upper()
         elif k == "title":
             if not isinstance(v, str) or not 1 <= len(v) <= 40: return "title: 1 to 40 characters"
             new[k] = v.strip()
@@ -556,6 +559,22 @@ def conf_update(patch):
     if new["cert_bad_days"] >= new["cert_warn_days"]: return "the red certificate limit must be below the amber one"
     CONF.clear(); CONF.update(new); conf_save()
     return None
+
+def make_join_code(user, password, iata="LBA", key_hex=None, bridge=True, host=None, port=443):
+    """One line a repeater applies with `set mqtt.join <code>` (format: src/helpers/mqtt/JoinCode.h)."""
+    if not re.match(r"^[a-z0-9][a-z0-9-]{1,23}$", user or ""): raise ValueError("the account name is 2 to 24 lowercase letters, digits and dashes")
+    if not (8 <= len(password or "") <= 40) or not all(0x21 <= ord(c) <= 0x7e for c in password): raise ValueError("the password must be 8 to 40 printable characters with no spaces")
+    if not re.match(r"^[A-Z0-9]{3}$", iata or ""): raise ValueError("the area code is three capital letters or digits")
+    if key_hex is not None and not re.match(r"^[0-9a-fA-F]{64}$", key_hex): raise ValueError("the control key is 64 hex characters")
+    if host is not None and not (3 <= len(host) <= 63 and all(0x21 <= ord(c) <= 0x7e for c in host) and 0 < port < 65536): raise ValueError("the host or port is not valid")
+    flags = (1 if key_hex else 0) | (2 if bridge else 0) | (4 if host else 0)
+    b = bytes([1, flags]) + iata.encode() + bytes([len(user)]) + user.encode() + bytes([len(password)]) + password.encode()
+    if host: b += bytes([len(host)]) + host.encode() + struct.pack(">H", port)
+    if key_hex: b += bytes.fromhex(key_hex)
+    b += hashlib.sha256(b).digest()[:3]
+    code = "UMC1." + base64.urlsafe_b64encode(b).decode().rstrip("=")
+    if len(code) > 140: raise ValueError("that code is too long for the repeater's console")
+    return code
 
 def audit(who, action, target, detail, ok=True):
     try:
@@ -579,7 +598,7 @@ def admin_call(**req):
 NEVER = ("password", "set password", "set guest", "get guest", "set prv", "get prv", "set wifi", "get wifi.pwd", "wifi ", "set ap", "get ap.password", "set net", "set pin", "get pin", "setperm",
          "set http", "set telnet", "set web", "set ble", "get ble.pin", "set mqtt.custom.host", "set mqtt.custom.port", "set mqtt.custom.transport", "set mqtt.custom.username",
          "set mqtt.custom.password", "get mqtt.custom.password", "set mqtt.control", "get mqtt.control.key", "set bridge.secret", "get bridge.secret", "set app", "start ota", "ota", "erase",
-         "format", "poweroff", "set telemetry", "set mqtt.custom ", "set mqtt.meshmapper", "set mqtt.waev", "set mqtt.eastmesh", "set mqtt.letsmesh")
+         "format", "poweroff", "set telemetry", "set mqtt.join", "set mqtt.umcnet", "set mqtt.custom ", "set mqtt.meshmapper", "set mqtt.waev", "set mqtt.eastmesh", "set mqtt.letsmesh")
 EXACT = ("advert", "advert.zerohop", "discover.neighbors", "clock", "reboot", "ver", "neighbors", "routes", "board", "clear stats", "stats-core", "stats-radio", "stats-packets", "stats-rf",
          "stats-life", "region", "region save", "safety state", "radio watchdog", "memory")
 PREFIX = ("get ", "time ", "route ", "trace ", "region ", "tempradio ", "safety log", "gps ", "radio watchdog ", "set radio", "set tx", "set dutycycle", "set af", "set agc.reset.interval", "set cad",
@@ -855,7 +874,21 @@ class H(BaseHTTPRequestHandler):
                 if op in ("block", "unblock", "pending"): req["state"] = {"block": "blocked", "unblock": "approved", "pending": "pending"}[op]
                 r = admin_call(**req); audit(who, "account " + op, name, r.get("error") or "ok", bool(r.get("ok")))
                 if r.get("ok"): export_accounts_soon()
-                return self.send(200, json.dumps({"ok": bool(r.get("ok")), "error": r.get("error") or (None if r.get("ok") else r.get("output")), "password": r.get("password"), "output": r.get("output")}))
+                out = {"ok": bool(r.get("ok")), "error": r.get("error") or (None if r.get("ok") else r.get("output")), "password": r.get("password"), "output": r.get("output")}
+                if op == "add" and r.get("ok") and r.get("password") and body.get("role", "repeater") == "repeater":
+                    dev = str(body.get("device", "")).upper()
+                    try: out["join"] = make_join_code(name, r["password"], CONF["join_iata"], control_key(dev, create=True) if re.match(r"^[0-9A-F]{64}$", dev) else None, CONF["join_bridge"])
+                    except ValueError as e: out["join_error"] = str(e)
+                return self.send(200, json.dumps(out))
+            if p == "/api/join":
+                name = str(body.get("name", "")); acc = next((a for a in accounts() if a["name"] == name), None)
+                if not acc or acc["role"] != "repeater" or acc.get("state") == "blocked": return self.send(200, json.dumps({"ok": False, "error": "that is not an active repeater account"}))
+                r = admin_call(op="user_passwd", name=name)
+                if not r.get("ok") or not r.get("password"): audit(who, "join code", name, r.get("error") or "failed", False); return self.send(200, json.dumps({"ok": False, "error": r.get("error") or r.get("output") or "could not make a new password"}))
+                try: code = make_join_code(name, r["password"], CONF["join_iata"], control_key(acc["device"], create=True) if acc["device"] else None, bool(body.get("bridge", CONF["join_bridge"])))
+                except ValueError as e: return self.send(200, json.dumps({"ok": False, "error": str(e)}))
+                audit(who, "join code", name, "new password; remote control key %s" % ("included" if acc["device"] else "not yet (not approved)"))
+                return self.send(200, json.dumps({"ok": True, "join": code, "has_key": bool(acc["device"])}))
             if p == "/api/password":
                 r = admin_call(op="dash_password", current=str(body.get("current", "")), new=str(body.get("new", ""))); audit(who, "dashboard password", "admin", r.get("error") or "changed", bool(r.get("ok")))
                 return self.send(200, json.dumps(r))

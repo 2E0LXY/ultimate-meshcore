@@ -126,3 +126,22 @@ disk), the dashboard password, downloads (events, audit log, repeaters as CSV; s
 **Privilege.** The dashboard runs unprivileged. Account changes, the dashboard password and service restarts go through
 `umcnet_admin.py`, a small root helper on a Unix socket that only the dashboard's user can open; it accepts a fixed list
 of operations and checks every argument.
+
+
+### Joining with one line (dashboard 2.2, firmware 0.1.21)
+
+Add a repeater on the **Accounts** tab (or press **Join code** on its row) and the dashboard shows one line:
+
+```
+set mqtt.join UMC1.AQBHQlILdWktdGVzdC1vbmUT...
+```
+
+Paste it into the repeater's Console (or the *Join code* box on its MQTT page). The repeater applies the broker (built into the
+firmware, or carried in the code), the account and password, the area code, raw packets on, transmitted off, the bridge as set in
+the dashboard's Settings, and the remote-control key when the repeater has been approved, then connects. `set mqtt.umcnet off|on`
+switches the link, and `get mqtt.umcnet` reports `on, joined as <account>, area LBA, broker custom:wss:up, bridge on, control on`.
+
+The code is `UMC1.` plus base64url of: version, flags (control key, bridge, own host), the three-character area, the account and
+password, optionally a host and port, optionally the 32-byte control key, and a 3-byte SHA-256 check, so a mistyped or cut-off code
+is refused rather than half applied. It contains the repeater's password: treat it like one. A new code gives the account a new
+password. The format is in `src/helpers/mqtt/JoinCode.h` and `make_join_code` in `umcnet_dash.py`, tested against each other.

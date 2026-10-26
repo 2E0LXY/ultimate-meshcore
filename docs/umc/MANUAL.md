@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.20** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.21** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -1037,7 +1037,9 @@ UMC Net links repeaters over the internet through a broker you run (Mosquitto be
 2. **The server dashboard** at `https://net.<your domain>/`: the broker's statistics, every repeater, who is connected, a **Network** map with links coloured by hops (green direct, blue one hop, purple two, amber three, orange four or more), live packets with senders, diagnostics, accounts and a **Control** tab.
 3. **Accounts and approval**: each repeater has its own broker account. A new account is *pending* until you approve it by pasting the repeater's full device id; it can listen but cannot publish or be controlled until then.
 
-**Put a repeater under control.** On the dashboard open Control, pick the repeater, press *Control setup* and paste the commands it shows into the repeater's Console page (broker address, its account, and the control key). Press *Read settings* to check it answers.
+**Join with one line.** On the dashboard's Accounts tab add the repeater (or press *Join code* on its row) and copy the line it shows. Paste it into the repeater's Console, or into *Join code* on its MQTT page. It sets the broker, account, area, raw packets, bridge and remote-control key in one go. `get mqtt.umcnet` shows the state; `set mqtt.umcnet off` / `on` switches the link. A code carries the repeater's password: keep it private, and a new code (which gives the account a new password) replaces an old one.
+
+**Put a repeater under control (the long way).** On the dashboard open Control, pick the repeater, press *Control setup* and paste the commands it shows into the repeater's Console page (broker address, its account, and the control key). Press *Read settings* to check it answers.
 
 **What remote control can and cannot do.** It can read and change radio, forwarding, advert, identity and UMC Net settings, send adverts, show statistics and restart the repeater. It can never read or change passwords, private keys, WiFi, the access point, the broker address and login, the control key itself, or install firmware, whatever the dashboard sends. Commands are signed, recent, in order, limited to 60 a minute, and a wrong signature gets no reply.
 
