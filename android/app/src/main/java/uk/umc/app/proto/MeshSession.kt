@@ -62,10 +62,18 @@ data class ChatMessage(
     val hops: Int? = null,
     val snr: Double? = null,
     val cli: Boolean = false,
-    val status: String = "",         // sending / sent / delivered / failed
+    val status: String = "",         // queued / sending / pending / sent / delivered / replied / failed
     val ackCode: String? = null,
     val roundTripMs: Long? = null,
     val error: String? = null,
+    val failure: String? = null,
+    val attempt: Int = 0,
+    val routeKind: String? = null,    // flood / direct / route
+    val routeHops: List<String> = emptyList(),
+    val replyAt: Long? = null,
+    val replyHops: Int? = null,       // return path of the reply, not the outbound path
+    val replySnr: Double? = null,
+    val recovery: String? = null,
 )
 
 /**
@@ -92,6 +100,8 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
 
     private val lock = Mutex()
     private val awaitingAck = HashMap<String, Long>()   // delivery code -> message id
+    private data class GoodRoute(val path: List<String>, val deliveredAt: Long, val roundTripMs: Long?)
+    private val goodRoutes = HashMap<String, MutableList<GoodRoute>>()
     private var nextId = 1L
 
     /** Someone waiting for a particular frame to arrive. */
@@ -161,6 +171,14 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
                     runCatching { handshake() }.onFailure {
                         android.util.Log.w("UMC", "handshake failed", it)
                         events.emit("Connect failed: ${it.message}")
+                    }
+                } else if (st is LinkState.Idle || st is LinkState.Failed) {
+                    val interrupted = awaitingAck.values.toSet()
+                    awaitingAck.clear()
+                    interrupted.forEach { id ->
+                        if (current(id)?.status == "pending") update(id) {
+                            it.copy(status = "failed", error = "connection ended before confirmation", failure = "link-ended")
+                        }
                     }
                 }
             }
@@ -301,6 +319,7 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
                 val ack = f.copyOfRange(1, 5).toHex()
                 val trip = FrameReader(f, 5).u32()
                 awaitingAck.remove(ack)?.let { id ->
+                    current(id)?.let { rememberGoodRoute(it, trip) }
                     update(id) { it.copy(status = "delivered", roundTripMs = trip) }
                 }
             }
@@ -395,11 +414,24 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
                 val sender = r.bytes(4).toHex()
                 from = contacts.value.firstOrNull { it.publicKey.startsWith(sender) }?.name ?: sender
             }
-            add(ChatMessage(
+            val incoming = ChatMessage(
                 id = nextId++, conversation = "c:$prefix", outgoing = false, text = r.restText(), from = from,
                 timestamp = ts, hops = if (pathLen == 0xFF) null else pathLen and 63, snr = snr,
                 cli = txtType == TXT_TYPE_CLI_DATA,
-            ))
+            )
+            add(incoming)
+            if (!incoming.cli) {
+                messages.value.dropLast(1).lastOrNull {
+                    it.conversation == incoming.conversation && it.outgoing && incoming.received - it.received < 7 * 86400000L
+                }?.let { prior ->
+                    update(prior.id) {
+                        it.copy(
+                            status = if (it.status in listOf("queued", "sending", "pending", "failed")) "replied" else it.status,
+                            replyAt = incoming.received, replyHops = incoming.hops, replySnr = incoming.snr,
+                        )
+                    }
+                }
+            }
         } else if (code == Resp.MSG_CHANNEL || code == Resp.MSG_CHANNEL_OLD) {
             val idx = r.u8()
             val pathLen = r.u8()
@@ -428,16 +460,55 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
 
     private fun current(id: Long): ChatMessage? = messages.value.firstOrNull { it.id == id }
 
+    private fun rememberGoodRoute(message: ChatMessage, roundTripMs: Long) {
+        if (message.routeKind == "flood" || message.routeKind == null) return
+        val prefix = message.conversation.removePrefix("c:")
+        val routes = goodRoutes.getOrPut(prefix) { mutableListOf() }
+        routes.removeAll { it.path == message.routeHops }
+        routes.add(0, GoodRoute(message.routeHops, System.currentTimeMillis(), roundTripMs))
+        while (routes.size > 10) routes.removeLast()
+    }
+
+    private fun routeIsRecent(path: List<String>): Boolean {
+        val cutoff = System.currentTimeMillis() / 1000 - 6 * 3600
+        return path.all { hop -> contacts.value.any { it.type == ADV_TYPE_REPEATER && it.publicKey.startsWith(hop) && it.lastAdvert >= cutoff } }
+    }
+
+    fun diagnoseMessage(message: ChatMessage): String {
+        if (message.conversation.startsWith("ch:")) return "Channel broadcasts have no recipient ACK; sent means the radio accepted the broadcast."
+        val prefix = message.conversation.removePrefix("c:")
+        val contact = contacts.value.firstOrNull { it.publicKey.startsWith(prefix) }
+        val cause = when (message.failure) {
+            "radio-rejected" -> "The local radio rejected the send before it entered the mesh."
+            "link-ended" -> "The phone or radio link ended before the ACK could be matched."
+            "reroute-failed" -> "The recovery attempt could not install or discover a usable route."
+            else -> "The radio transmitted the message but no end-to-end ACK arrived before the deadline."
+        }
+        val route = when (message.routeKind) {
+            "route" -> " It used a ${message.routeHops.size}-hop stored route (${message.routeHops.joinToString(" → ")})."
+            null -> ""
+            else -> " It used ${message.routeKind}."
+        }
+        val age = contact?.lastAdvert?.takeIf { it > 0 }?.let {
+            val hours = ((System.currentTimeMillis() / 1000 - it).coerceAtLeast(0) / 3600.0)
+            " The contact advert is %.1f hours old%s.".format(hours, if (hours > 6) ", so its route may be stale" else "")
+        }.orEmpty()
+        return cause + route + age + " Auto reroute tries another recently ACKed route, then live discovery, then flood fallback."
+    }
+
     // ---------------------------------------------------------------- actions
 
     suspend fun sendText(conversation: String, text: String, retry: ChatMessage? = null) {
         val ts = retry?.timestamp ?: (System.currentTimeMillis() / 1000)
         val id = retry?.id ?: nextId++
+        val attempt = if (retry == null) 0 else retry.attempt + 1
+        retry?.ackCode?.let { awaitingAck.remove(it) }
         if (retry == null) {
-            add(ChatMessage(id, conversation, true, text, if (conversation.startsWith("ch:")) self.value?.name ?: "" else "", ts, status = "sending"))
+            add(ChatMessage(id, conversation, true, text, if (conversation.startsWith("ch:")) self.value?.name ?: "" else "", ts, status = "queued"))
         } else {
-            update(id) { it.copy(status = "sending", error = null) }
+            update(id) { it.copy(status = "queued", ackCode = null, roundTripMs = null, error = null, failure = null, recovery = null, attempt = attempt) }
         }
+        update(id) { it.copy(status = "sending") }
         if (conversation.startsWith("ch:")) {
             val idx = conversation.removePrefix("ch:").toInt()
             val scope = channels.value.firstOrNull { it.idx == idx }?.let { scopeFor(it.name) }.orEmpty()
@@ -448,7 +519,7 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
                 request(FrameBuilder(Cmd.SEND_CHANNEL_TXT_MSG).u8(TXT_TYPE_PLAIN).u8(idx).u32(ts).text(text).build(), Resp.OK)
                 update(id) { it.copy(status = "sent") }
             } catch (e: Exception) {
-                update(id) { it.copy(status = "failed", error = e.message) }
+                update(id) { it.copy(status = "failed", error = e.message, failure = "radio-rejected") }
             }
             if (scope.isNotEmpty()) {
                 runCatching { request(FrameBuilder(Cmd.SET_FLOOD_SCOPE_KEY).u8(0).build(), Resp.OK) }   // back to the device default
@@ -456,26 +527,56 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
             return
         }
         val prefix = conversation.removePrefix("c:")
+        val contact = contacts.value.firstOrNull { it.publicKey.startsWith(prefix) }
+        val initialPath = contact?.let { routeHops(it) }.orEmpty()
+        update(id) { it.copy(routeKind = if (contact == null || contact.hops < 0) "flood" else if (contact.hops == 0) "direct" else "route", routeHops = initialPath) }
         try {
             val f = request(
-                FrameBuilder(Cmd.SEND_TXT_MSG).u8(TXT_TYPE_PLAIN).u8(0).u32(ts).bytes(prefix.hexToBytes()).text(text).build(),
+                FrameBuilder(Cmd.SEND_TXT_MSG).u8(TXT_TYPE_PLAIN).u8(attempt).u32(ts).bytes(prefix.hexToBytes()).text(text).build(),
                 Resp.SENT,
             )
             val r = FrameReader(f, 1)
-            r.u8()
+            val flood = r.u8() != 0
             val ack = r.bytes(4).toHex()
             val est = r.u32()
-            update(id) { it.copy(status = "sent", ackCode = ack) }
+            update(id) { it.copy(status = "pending", ackCode = ack, routeKind = if (flood) "flood" else if (contact?.hops == 0) "direct" else "route") }
             awaitingAck[ack] = id
             scope.launch {
                 kotlinx.coroutines.delay(maxOf(est * 2, 8000L))
-                if (awaitingAck.remove(ack) != null && current(id)?.status == "sent") {
-                    update(id) { it.copy(status = "failed", error = "no delivery confirmation") }
+                if (awaitingAck.remove(ack) != null && current(id)?.status == "pending") {
+                    update(id) { it.copy(status = "failed", error = "no delivery confirmation", failure = "ack-timeout") }
                 }
             }
         } catch (e: Exception) {
-            update(id) { it.copy(status = "failed", error = e.message) }
+            update(id) { it.copy(status = "failed", error = e.message, failure = "radio-rejected") }
         }
+    }
+
+    suspend fun autoReroute(message: ChatMessage, forceFlood: Boolean = false) {
+        val prefix = message.conversation.removePrefix("c:")
+        var contact = contacts.value.firstOrNull { it.publicKey.startsWith(prefix) }
+            ?: throw MeshError("contact is no longer on this radio")
+        if (!forceFlood) {
+            update(message.id) { it.copy(recovery = "Looking for a known-good route…") }
+            val currentPath = routeHops(contact)
+            val good = goodRoutes[prefix]?.firstOrNull { it.path != currentPath && routeIsRecent(it.path) }
+            if (good != null) {
+                update(message.id) { it.copy(recovery = "Retrying via previously delivered route ${good.path.joinToString(" → ")}…") }
+                setRoute(contact, good.path)
+                sendText(message.conversation, message.text, current(message.id) ?: message)
+                return
+            }
+            update(message.id) { it.copy(recovery = "Discovering a fresh path before retrying…") }
+            val discovered = runCatching { discoverPath(contact) }.isSuccess
+            contact = contacts.value.firstOrNull { it.publicKey.startsWith(prefix) } ?: contact
+            if (discovered && contact.hops >= 0) {
+                sendText(message.conversation, message.text, current(message.id) ?: message)
+                return
+            }
+        }
+        update(message.id) { it.copy(recovery = "Clearing the stale route and retrying by flood…") }
+        resetPath(contact)
+        sendText(message.conversation, message.text, current(message.id) ?: message)
     }
 
     suspend fun sendCli(contact: Contact, command: String) {

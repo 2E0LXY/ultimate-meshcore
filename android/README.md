@@ -9,7 +9,7 @@ The phone app for Ultimate MeshCore radios — and for any standard MeshCore com
 | | |
 |---|---|
 | **Connect** | Bluetooth (pair with the PIN on the radio's screen) or WiFi (TCP port 5000 on an Ultimate MeshCore client or repeater). Radios you use are remembered and reconnected. |
-| **Messages** | Channels and direct messages, with delivery ticks, round-trip time, hops and signal, and retry when a message isn't confirmed. |
+| **Messages** | Queued, pending, delivered, replied and failed states; ACK round-trip time kept separate from reply return-path hops; failure diagnosis; retry on the same route or automatic recovery through a recently ACKed route, live discovery and flood fallback. |
 | **Contacts** | Everyone the radio knows: log in, **status**, **telemetry**, **trace path**, **discover path**, reset path, share, export/import `meshcore://` contacts, favourites, remove — and a **remote admin console** for repeaters and room servers. |
 | **Channels** | Public, hashtag (`#name`), private (random key) and shared-key channels. |
 | **Map** | Everyone who shares a location, on OpenStreetMap. Tiles you have already viewed keep working offline. |

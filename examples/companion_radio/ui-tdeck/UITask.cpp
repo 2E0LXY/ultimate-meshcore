@@ -1157,7 +1157,28 @@ void UITask::drawMessages() {
     text(8, top + 40, "No messages yet.", TH.dim);
     text(8, top + 54, "Type below and press Enter to send.", TH.dim);
   } else if (_msg_sel < 0) {
-    text(6, list_bottom - 11, "Tap a message to reply to it", TH.dim);
+    text(6, list_bottom - 11, "Tap a message to see delivery details", TH.dim);
+  } else {
+    const UmcChatLog::Entry* e = umc_chatlog.get(_msg_sel);
+    if (e != NULL) {
+      char state[88];
+      if (e->outgoing) {
+        const bool waiting = e->expect_ack != 0 && !e->delivered;
+        const bool failed = waiting && (millis() - e->sent_ms) > kAckWaitMs;
+        const char* route = e->hops == 0xFF ? "flood" : e->hops == 0 ? "direct" : "stored route";
+        if (e->delivered && e->hops > 0 && e->hops != 0xFF) snprintf(state, sizeof(state), "Delivered via %u-hop stored route", (unsigned)e->hops);
+        else if (e->delivered) snprintf(state, sizeof(state), "Delivered via %s", route);
+        else if (failed) snprintf(state, sizeof(state), "Failed: no ACK via %s · tap again: flood retry", route);
+        else if (waiting) snprintf(state, sizeof(state), "Sent via %s · delivery pending", route);
+        else snprintf(state, sizeof(state), "Sent via %s · no recipient ACK", route);
+      } else if (e->hops == 0xFF) {
+        snprintf(state, sizeof(state), "Received by flood%s", e->snr4 ? " · SNR available" : "");
+      } else {
+        snprintf(state, sizeof(state), "Reply returned via %u hop%s · SNR %.1f", (unsigned)e->hops, e->hops == 1 ? "" : "s", e->snr4 / 4.0f);
+      }
+      const bool failed = e->outgoing && e->expect_ack && !e->delivered && (millis() - e->sent_ms) > kAckWaitMs;
+      textFClip(6, list_bottom - 11, SCR_W - 12, state, failed ? C_BAD : TH.dim, F_TINY);
+    }
   }
   // who we are writing to - drawn last, so a bubble scrolling off the top goes behind it
   fill(0, top, SCR_W, 16, TH.card);
@@ -2997,13 +3018,17 @@ void UITask::handleTouch(const TouchEvent& ev) {
       _dirty = true;
       return;
     }
-    if (ev.released) {               // tap a message to reply to it
+    if (ev.released) {               // tap for status; tap a timed-out direct send again to recover
       for (int i = 0; i < _msg_rows; i++) {
         if (ev.y >= _msg_row_y[i] && ev.y < _msg_row_bottom[i]) {
           const UmcChatLog::Entry* e = umc_chatlog.get(_msg_row_idx[i]);
           if (e != NULL) {
+            const bool retry = _msg_sel == _msg_row_idx[i] && e->outgoing && e->channel == 0xFF &&
+                               e->expect_ack != 0 && !e->delivered && (millis() - e->sent_ms) > kAckWaitMs;
+            if (retry) { retryFailedMessage(_msg_row_idx[i]); return; }
             _msg_sel = _msg_row_idx[i];
-            StrHelper::strncpy(_reply_to, e->text, sizeof(_reply_to));
+            if (!e->outgoing) StrHelper::strncpy(_reply_to, e->text, sizeof(_reply_to));
+            else _reply_to[0] = 0;
             _dirty = true;
           }
           return;
@@ -3328,13 +3353,44 @@ void UITask::sendCompose() {
       // remember what the recipient will send back, so the message can show as delivered
       the_mesh.expectAck(ack, c);
       UmcChatLog::Entry* sent = umc_chatlog.newestOutgoing();
-      if (sent != NULL) sent->expect_ack = ack;
+      if (sent != NULL) {
+        sent->expect_ack = ack;
+        sent->hops = res == MSG_SEND_SENT_FLOOD ? 0xFF : (c->out_path_len & 63);
+      }
       showAlert(res == MSG_SEND_SENT_FLOOD ? "Sent (flood)" : "Sent", 900);
     }
   }
   _compose[0] = 0;
   _compose_len = 0;
   _msg_scroll = 0;
+  _dirty = true;
+}
+
+// Drop a route which has just failed and flood the retry. If the recipient ACKs it,
+// MeshCore learns a fresh return path for later direct messages.
+void UITask::retryFailedMessage(int idx) {
+  const UmcChatLog::Entry* old = umc_chatlog.get(idx);
+  if (old == NULL || !old->outgoing || old->channel != 0xFF) return;
+  uint8_t key[6];
+  char body[UMC_CHATLOG_TEXT];
+  memcpy(key, old->key, sizeof(key));
+  StrHelper::strncpy(body, old->text, sizeof(body));
+  ContactInfo* c = the_mesh.lookupContactByPubKey(key, sizeof(key));
+  if (c == NULL) { showAlert("Retry failed: contact missing", 1800); return; }
+
+  the_mesh.resetPathTo(*c);
+  uint32_t ack, timeout;
+  const uint32_t ts = rtc_clock.getCurrentTimeUnique();
+  const int res = the_mesh.sendMessage(*c, ts, 0, body, ack, timeout);
+  if (res == MSG_SEND_FAILED) { showAlert("Flood retry failed locally", 1800); return; }
+  umc_chatlog.addDirect(key, "", body, ts, true, 0, 0xFF);
+  the_mesh.expectAck(ack, c);
+  UmcChatLog::Entry* sent = umc_chatlog.newestOutgoing();
+  if (sent != NULL) sent->expect_ack = ack;
+  _msg_sel = -1;
+  _reply_to[0] = 0;
+  _msg_scroll = 0;
+  showAlert("Retrying by flood", 1400);
   _dirty = true;
 }
 

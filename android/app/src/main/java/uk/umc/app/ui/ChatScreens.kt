@@ -115,26 +115,31 @@ fun ChatScreen(conversation: String, onBack: () -> Unit) {
 
 @Composable
 private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.coroutines.CoroutineScope) {
-    // The same three states the radio's own screen shows, in the same colours: green once
-    // it is acknowledged, amber while that is outstanding, red when it never came.
+    // ACK delivery and a reply's return path are separate protocol facts. Never present
+    // the return-hop count as though it described the original outbound packet.
     val show by AppState.ackDisplay.collectAsState()
+    var showWhy by remember(m.id) { mutableStateOf(false) }
     val status = when (m.status) {
-        "sending" -> "sending…"
-        "sent" -> if (m.ackCode != null) "sent, waiting" else "sent"
+        "queued" -> "queued"
+        "sending" -> "submitting to radio…"
+        "pending" -> "sent · pending delivery ACK"
+        "sent" -> "sent · broadcast has no recipient ACK"
         "delivered" -> "delivered" + (m.roundTripMs?.let { " in ${"%.1f".format(it / 1000.0)} s" } ?: "")
-        "failed" -> "not delivered: ${m.error ?: "no answer"}"
+        "replied" -> "reply received (delivery evidenced)"
+        "failed" -> "failed: ${m.error ?: "no answer"}"
         else -> ""
     }
     val mark = when (m.status) {
         "delivered" -> "✓"
+        "replied" -> "↩"
         "failed" -> "✕"
-        "sending", "sent" -> "•"
+        "queued", "sending", "pending", "sent" -> "•"
         else -> ""
     }
     val markColour = when (m.status) {
-        "delivered" -> Color(0xFF2E7D32)
+        "delivered", "replied" -> Color(0xFF2E7D32)
         "failed" -> Color(0xFFC62828)
-        "sending", "sent" -> Color(0xFFEF6C00)
+        "queued", "sending", "pending", "sent" -> Color(0xFFEF6C00)
         else -> MaterialTheme.colorScheme.outline
     }
     Column(
@@ -154,9 +159,20 @@ private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.corouti
             val meta = buildList {
                 add(clock(m.timestamp))
                 if (!m.outgoing) {
-                    add(m.hops?.let { "$it hop" + if (it == 1) "" else "s" } ?: "direct")
+                    add(m.hops?.let { "returned via $it hop" + if (it == 1) "" else "s" } ?: "returned by flood")
                     m.snr?.let { add("SNR $it") }
-                } else if (status.isNotEmpty() && show == "count") add(status)
+                } else {
+                    if (status.isNotEmpty() && show == "count") add(status)
+                    when (m.routeKind) {
+                        "route" -> add("via ${m.routeHops.size}-hop route ${m.routeHops.joinToString(" → ")}")
+                        null -> Unit
+                        else -> add("via ${m.routeKind}")
+                    }
+                    if (m.replyAt != null) {
+                        add(m.replyHops?.let { "reply returned via $it hop" + if (it == 1) "" else "s" } ?: "reply returned by flood")
+                        m.replySnr?.let { add("reply SNR $it") }
+                    }
+                }
             }.joinToString(" · ")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
@@ -165,9 +181,30 @@ private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.corouti
                          fontWeight = FontWeight.Bold)
                 }
             }
+            m.recovery?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary) }
+            if (showWhy) Text(s.diagnoseMessage(m), style = MaterialTheme.typography.labelSmall)
         }
         if (m.status == "failed") {
-            ShButton(variant = ShVariant.Ghost, onClick = { scope.launch { s.sendText(m.conversation, m.text, m) } }) { Text("Retry") }
+            Row {
+                ShButton(variant = ShVariant.Ghost, onClick = { scope.launch { s.sendText(m.conversation, m.text, m) } }) { Text("Retry same") }
+                if (m.conversation.startsWith("c:")) {
+                    ShButton(variant = ShVariant.Ghost, onClick = {
+                        scope.launch {
+                            runCatching { s.autoReroute(m) }.onFailure { AppState.say("Reroute failed: ${it.message}") }
+                        }
+                    }) { Text("Auto reroute") }
+                }
+            }
+            Row {
+                if (m.conversation.startsWith("c:")) {
+                    ShButton(variant = ShVariant.Ghost, onClick = {
+                        scope.launch {
+                            runCatching { s.autoReroute(m, forceFlood = true) }.onFailure { AppState.say("Flood retry failed: ${it.message}") }
+                        }
+                    }) { Text("Flood + resend") }
+                }
+                ShButton(variant = ShVariant.Ghost, onClick = { showWhy = !showWhy }) { Text(if (showWhy) "Hide reason" else "Why?") }
+            }
         }
     }
 }

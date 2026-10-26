@@ -1,8 +1,18 @@
 # Ultimate MeshCore — Roadmap and gap analysis
 
-Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, MeshCore-EastMesh, LocalMesh region configuration, agessaman/MeshCore (observer-firmware, abstract-networking, map uploader, alerts, SNMP), OffbandMesh, meshcomod, MeshCore-Low-Power (docs), MeshCore-BitChat, jmead MQTT gateway, redengin (Rust), openHop modem/flasher, mesh-loader, meshcore_py, meshcore-open, ZephCore, pyMC_Repeater, CubeCellMeshCore, awesome-meshcore, LitBomb FAQ, meshcore.co.uk guide, meshcore-regions catalogue.
+Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, MeshCore-EastMesh, LocalMesh region configuration, agessaman/MeshCore (observer-firmware, abstract-networking, map uploader, alerts, SNMP), OffbandMesh, meshcomod, MeshCore-Low-Power (docs), MeshCore-BitChat, jmead MQTT gateway, redengin (Rust), openHop modem/flasher, mesh-loader, meshcore_py, meshcore-open, ZephCore, pyMC_Repeater, CubeCellMeshCore, awesome-meshcore, LitBomb FAQ, meshcore.co.uk guide, meshcore-regions catalogue.
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
+
+## Done in 0.1.23
+
+- ✅ Browser/desktop message lifecycle: queued, submitting, pending ACK, delivered, reply-evidenced and failed; ACK RTT kept separate from a reply's return-path hop count
+- ✅ Per-attempt route snapshots and actionable failure diagnosis, with automatic resend through a different recently ACKed route, live path discovery, then flood fallback
+- ✅ T-Deck message detail states, send-route hop count and a second-tap flood retry that clears a stale route and lets a successful ACK teach a fresh path
+
+## Android app 0.1.13
+
+- ✅ The same explicit message lifecycle, route snapshots, reply return-hop evidence, failure diagnosis and known-good/discovery/flood recovery as the web and desktop clients
 
 ## Done in 0.1.16
 
@@ -64,7 +74,6 @@ Last reviewed: 2026-10-22. Sources checked: upstream MeshCore `main` and `dev`, 
 - ✅ UMC Net: a self-hosted MQTT broker (`server/umcnet`) and the repeater bridge. With `set mqtt.custom.bridge on` a repeater also listens for other repeaters' raw packets on the broker and passes them to the mesh (rate-limited, loop-safe), over the existing WSS connection. Off by default.
 - ✅ Dashboard redesigned for the web interface and the Desktop app: KPI cards with trends, traffic and airtime charts, six dials, a live data-flow diagram, connections, donuts, neighbours and recent activity, in a dark-green style. History is kept in the browser (one sample a minute, 24 h).
 - ✅ Android app 0.1.9: a native dashboard with the same cards, charts, dials, data flow and connections, with history kept on the phone.
-
 
 ## Done in 0.1.11
 

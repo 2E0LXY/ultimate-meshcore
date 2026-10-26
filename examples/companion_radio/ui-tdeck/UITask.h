@@ -94,6 +94,7 @@ private:
   void handleKey(char c);
   bool touchInTabs(const TouchEvent& ev);
   void sendCompose();
+  void retryFailedMessage(int idx);
   void selectContact(int idx);
   void centreOnSelf();
   bool selfLocation(double& lat, double& lon) const;

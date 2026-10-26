@@ -1679,7 +1679,21 @@ const MC = {
     if (this.storeKey === key && this.store) return;
     let s = null; try { s = JSON.parse(localStorage.getItem(key) || "null"); } catch {}
     this.store = s && s.conv ? s : {conv: {}, unread: {}, last: {}};
+    this.store.routes = this.store.routes || {};
+    this.store.scopes = this.store.scopes || {};
+    // A browser restart destroys the in-memory ACK matcher. Never leave those attempts
+    // looking as though they can still be confirmed.
+    let recovered = false;
+    for (const list of Object.values(this.store.conv)) for (const m of list) {
+      if (m.dir === "out" && (["queued", "sending", "pending"].includes(m.status) || (m.status === "sent" && m.ack))) {
+        m.status = "failed";
+        m.error = "confirmation was interrupted when the client disconnected";
+        m.failure = "client-disconnected";
+        recovered = true;
+      }
+    }
     this.storeKey = key;
+    if (recovered) this.saveStore();
   },
   saveStore() { try { localStorage.setItem(this.storeKey, JSON.stringify(this.store)); } catch (e) { console.warn("history not saved", e); } },
   addMsg(conv, m, silent) {
@@ -1722,7 +1736,18 @@ const MC = {
       const m = {t: Date.now(), ts, dir: "in", text, snr, hops: pathLen === 0xFF ? null : pathLen & 63, kind: txtType === 1 ? "cli" : "msg"};
       if (sender) { const s = this.contactByPrefix(sender); m.from = s ? s.name : sender; }
       if (m.kind === "cli") { this.emitCli(prefix, m); this.addMsg(conv, m, true); this.saveStore(); return; }
-      if (this.addMsg(conv, m) && document.visibilityState !== "visible") notifyBrowser((c ? c.name : prefix) + ": " + text);
+      const added = this.addMsg(conv, m);
+      if (added) {
+        // A human reply is independent evidence that a recent outbound message arrived.
+        // Its hop count describes this reply's return path, not the original outbound path.
+        const prior = [...(this.store.conv[conv] || [])].reverse().find(x => x.dir === "out" && Date.now() - x.t < 7 * 86400000);
+        if (prior) {
+          prior.replyAt = m.t; prior.replyHops = m.hops; prior.replySnr = m.snr;
+          if (["queued", "sending", "pending", "failed"].includes(prior.status)) prior.status = "replied";
+          this.saveStore(); this.emitChange();
+        }
+        if (document.visibilityState !== "visible") notifyBrowser((c ? c.name : prefix) + ": " + text);
+      }
     } else if (code === CODE.CH || code === CODE.CH_OLD) {
       const r = new Rd(f, 1);
       let snr = null;
@@ -1735,7 +1760,11 @@ const MC = {
     } else if (code === CODE.ACK) {
       const ack = hex(f.subarray(1, 5)), rtt = new DataView(f.buffer, f.byteOffset).getUint32(5, true);
       const ref = this.sent.get(ack);
-      if (ref) { ref.status = "delivered"; ref.rtt = rtt; this.sent.delete(ack); this.saveStore(); this.emitChange(); }
+      if (ref) {
+        ref.status = "delivered"; ref.rtt = rtt; ref.deliveredAt = Date.now();
+        this.rememberGoodRoute(ref);
+        this.sent.delete(ack); this.saveStore(); this.emitChange();
+      }
     } else if (code === CODE.NEW_ADVERT) {
       const c = this.parseContact(f);
       if (!this.contacts.has(c.key)) { this.pending.set(c.key, c); this.emitChange(); }
@@ -1750,31 +1779,92 @@ const MC = {
   emitCli(prefix, m) { for (const fn of [...this.cliFns]) fn(prefix, m); },
 
   // ---- actions ----
+  routeSnapshot(c, flood) {
+    if (!c) return {kind: flood ? "flood" : "unknown", path: [], hops: null, at: Date.now()};
+    const path = this.pathHops(c);
+    return {kind: flood || c.hops < 0 ? "flood" : c.hops === 0 ? "direct" : "route", path, hops: c.hops < 0 ? null : c.hops, at: Date.now()};
+  },
+  rememberGoodRoute(m) {
+    if (!m.contact || !m.route || m.route.kind === "flood") return;
+    const routes = this.store.routes[m.contact] || (this.store.routes[m.contact] = []);
+    const sig = m.route.path.join(">");
+    const old = routes.findIndex(x => x.path.join(">") === sig);
+    if (old >= 0) routes.splice(old, 1);
+    routes.unshift({path: m.route.path, deliveredAt: Date.now(), rtt: m.rtt || null});
+    if (routes.length > 10) routes.length = 10;
+  },
+  routeIsRecent(path) {
+    const cutoff = nowSecs() - 6 * 3600;
+    return path.every(id => [...this.contacts.values()].some(c => c.type === 2 && c.key.startsWith(id) && c.lastAdvert >= cutoff));
+  },
+  diagnoseMessage(conv, m) {
+    if (!conv.startsWith("c:")) return "Channel broadcasts have no recipient ACK. Sent means the radio accepted the broadcast; relay observations are not delivery receipts.";
+    const c = this.contactByPrefix(conv.slice(2)), bits = [];
+    if (m.failure === "device-rejected") bits.push("The local radio rejected the send before it entered the mesh.");
+    else if (m.failure === "client-disconnected") bits.push("The browser or radio connection ended before the ACK could be matched.");
+    else bits.push("The radio transmitted the message but no end-to-end ACK arrived before the deadline.");
+    if (m.route) bits.push(`Attempted via ${m.route.kind === "route" ? m.route.path.length + "-hop stored route (" + m.route.path.join(" → ") + ")" : m.route.kind}.`);
+    if (c && c.lastAdvert) bits.push(`The contact's last advert was ${ago(nowSecs() - c.lastAdvert)} ago${nowSecs() - c.lastAdvert > 21600 ? ", so its route may be stale" : ""}.`);
+    bits.push("Auto reroute tries a different recently ACKed route whose repeaters are still heard, then live path discovery, then flood delivery as the safe fallback.");
+    return bits.join(" ");
+  },
+  async autoReroute(conv, m, forceFlood) {
+    if (!conv.startsWith("c:")) return this.sendText(conv, m.text, m);
+    const prefix = conv.slice(2), c = this.contactByPrefix(prefix);
+    if (!c) throw new Error("Contact is no longer on this radio");
+    m.recovery = forceFlood ? "Resetting the route and retrying by flood…" : "Looking for a known-good route…";
+    this.saveStore(); this.emitChange();
+    if (!forceFlood) {
+      const current = this.pathHops(c).join(">");
+      const good = (this.store.routes[prefix] || []).find(x => x.path.join(">") !== current && this.routeIsRecent(x.path));
+      if (good) {
+        await this.setRoute(c, good.path);
+        m.recovery = `Retrying via previously delivered route ${good.path.join(" → ")}…`;
+        return this.sendText(conv, m.text, m);
+      }
+      try {
+        m.recovery = "Discovering a fresh path before retrying…"; this.saveStore(); this.emitChange();
+        await this.discoverPath(c);
+        await this.listContacts();
+        const fresh = this.contactByPrefix(prefix);
+        if (fresh && fresh.hops >= 0) {
+          m.recovery = `Retrying via discovered ${fresh.hops === 0 ? "direct" : fresh.hops + "-hop"} path…`;
+          return this.sendText(conv, m.text, m);
+        }
+      } catch (e) { m.recovery = `Path discovery failed (${e.message}); falling back to flood…`; this.saveStore(); this.emitChange(); }
+    }
+    await this.setRoute(c, []);
+    m.recovery = "Retrying by flood; the returned ACK can teach the radio a new path…";
+    return this.sendText(conv, m.text, m);
+  },
   async sendText(conv, text, retryOf) {
     const ts = retryOf ? retryOf.ts : nowSecs();
     if (conv.startsWith("ch:")) {
       const idx = +conv.slice(3);
-      const m = retryOf || this.addMsg(conv, {t: Date.now(), ts, dir: "out", text, from: this.self && this.self.name, status: "sending"});
+      const m = retryOf || this.addMsg(conv, {t: Date.now(), ts, dir: "out", text, from: this.self && this.self.name, status: "queued"});
+      m.status = "sending"; m.error = null; m.failure = null; m.recovery = null; this.emitChange();
       const scope = this.channelScope(idx);
       try {
         if (scope) await this.request(u8(54, 0, hashtagKey(scope)), [CODE.OK]);   // region scope for this send
         await this.request(u8(3, 0, idx, le32(ts), text), [CODE.OK]);
         m.status = "sent";
       }
-      catch (e) { m.status = "failed"; m.error = e.message; }
+      catch (e) { m.status = "failed"; m.error = e.message; m.failure = "device-rejected"; }
       if (scope) await this.request(u8(54, 0), [CODE.OK]).catch(() => {});      // back to the device default
       this.saveStore(); this.emitChange(); return;
     }
     const prefix = conv.slice(2), c = this.contactByPrefix(prefix);
-    const m = retryOf || this.addMsg(conv, {t: Date.now(), ts, dir: "out", text, status: "sending", attempt: 0});
-    if (retryOf) { m.attempt = (m.attempt || 0) + 1; m.status = "sending"; this.emitChange(); }
+    const m = retryOf || this.addMsg(conv, {t: Date.now(), ts, dir: "out", text, status: "queued", attempt: 0});
+    if (retryOf) m.attempt = (m.attempt || 0) + 1;
+    m.status = "sending"; m.error = null; m.failure = null; m.recovery = null; m.contact = prefix;
+    m.route = this.routeSnapshot(c, c ? c.hops < 0 : true); this.saveStore(); this.emitChange();
     try {
       const f = await this.request(u8(2, 0, m.attempt || 0, le32(ts), unhex(prefix), text), [CODE.SENT]);
       const r = new Rd(f, 1); const flood = r.u8(), ack = hex(r.bytes(4)), est = r.u32();
-      m.status = "sent"; m.flood = !!flood; m.ack = ack;
+      m.status = "pending"; m.flood = !!flood; m.ack = ack; m.route = this.routeSnapshot(c, !!flood);
       this.sent.set(ack, m);
-      setTimeout(() => { if (m.status === "sent") { m.status = "failed"; m.error = "no delivery confirmation"; this.sent.delete(ack); this.saveStore(); this.emitChange(); } }, Math.max(est * 1.5, 6000) + 4000);
-    } catch (e) { m.status = "failed"; m.error = e.message; }
+      setTimeout(() => { if (m.status === "pending") { m.status = "failed"; m.error = "no delivery confirmation"; m.failure = "ack-timeout"; this.sent.delete(ack); this.saveStore(); this.emitChange(); } }, Math.max(est * 1.5, 6000) + 4000);
+    } catch (e) { m.status = "failed"; m.error = e.message; m.failure = "device-rejected"; }
     if (c) { c.lastMsg = Date.now(); }
     this.saveStore(); this.emitChange();
   },
@@ -1939,6 +2029,8 @@ async function renderChat(view) {
     .bub.out{align-self:flex-end;background:var(--acc);color:var(--acc-ink)}
     .bub .meta{display:block;font-size:11px;opacity:.72;margin-top:2px}.bub .who{display:block;font-size:12px;font-weight:600;opacity:.85}
     .bub.failed{outline:2px solid var(--bad)}
+    .bub .delivery-actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}.bub .delivery-actions .btn{font-size:11px;padding:3px 7px;color:var(--ink)}
+    .bub .diagnosis{display:block;margin-top:6px;padding:6px 8px;border-radius:7px;background:color-mix(in srgb,var(--card) 92%,transparent);color:var(--ink);font-size:11px;line-height:1.35}
     .chat .compose{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);align-items:flex-end}
     .chat .compose textarea{min-height:40px;max-height:140px;max-width:none;flex:1}
     @media (max-width:820px){.chat{grid-template-columns:1fr;height:auto}.chat.inconv .side{display:none}.chat:not(.inconv) .conv{display:none}.chat .msgs{min-height:50vh}}
@@ -1964,7 +2056,22 @@ async function renderChat(view) {
         <span class="pv">${last ? esc((last.dir === "out" ? "You: " : last.from ? last.from + ": " : "") + last.text) : esc(r.sub)}</span></div>`;
     }).join("") : `<p class="val" style="padding:12px">${MC.self ? "No channels or contacts yet. Send an advert so others can find you." : "Loading…"}</p>`;
   };
-  const statusIcon = m => m.status === "sending" ? "⏳" : m.status === "sent" ? (m.ack ? "✓ waiting" : "✓ sent") : m.status === "delivered" ? `✓✓ ${m.rtt ? (m.rtt / 1000).toFixed(1) + " s" : ""}` : m.status === "failed" ? "✗ " + esc(m.error || "failed") : "";
+  const routeUsed = m => !m.route ? "" : m.route.kind === "route" ? `${m.route.path.length}-hop route ${m.route.path.join(" → ")}` : m.route.kind;
+  const statusText = m => {
+    if (m.status === "queued") return "◷ queued";
+    if (m.status === "sending") return "↑ submitting to radio";
+    if (m.status === "pending") return "✓ sent · pending delivery ACK";
+    if (m.status === "sent") return "✓ sent · broadcast has no recipient ACK";
+    if (m.status === "delivered") return `✓✓ delivered${m.rtt ? ` in ${(m.rtt / 1000).toFixed(1)} s` : ""}`;
+    if (m.status === "replied") return "↩ reply received (delivery evidenced)";
+    if (m.status === "failed") return `✗ failed · ${m.error || "unknown error"}`;
+    return "";
+  };
+  const outMeta = m => {
+    const parts = [statusText(m), routeUsed(m) && `via ${routeUsed(m)}`];
+    if (m.replyAt) parts.push(m.replyHops == null ? "reply returned by flood" : `reply returned via ${m.replyHops} hop${m.replyHops === 1 ? "" : "s"}`, m.replySnr != null ? `reply SNR ${m.replySnr}` : "");
+    return parts.filter(Boolean).join(" · ");
+  };
   const drawConv = keepScroll => {
     if (!active) return;
     const box = $("#cConv"), c = active.startsWith("c:") ? MC.contactByPrefix(active.slice(2)) : null, ch = active.startsWith("ch:") ? MC.channels.find(x => x.idx === +active.slice(3)) : null;
@@ -1990,7 +2097,9 @@ async function renderChat(view) {
     $("#cPath").textContent = c ? `${TYPES[c.type]} · ${hopsLabel(c)}` : ch ? "channel" : "";
     const el = $("#cMsgs"), atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
     el.innerHTML = msgs.length ? msgs.map(m => `<div class="bub ${m.dir === "out" ? "out" : ""} ${m.status === "failed" ? "failed" : ""}">${m.dir === "in" && m.from ? `<span class="who">${esc(m.from)}</span>` : ""}${m.kind === "cli" ? "⌨ " : ""}${esc(m.text)}
-        <span class="meta">${new Date(m.t).toLocaleString([], {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"})}${m.dir === "in" ? (m.hops != null ? ` · ${m.hops} hop${m.hops === 1 ? "" : "s"}` : " · direct") + (m.snr != null ? ` · SNR ${m.snr}` : "") : " · " + statusIcon(m)}${m.status === "failed" ? ` <a href="#" data-retry="${m.id}">retry</a>` : ""}</span></div>`).join("")
+        <span class="meta">${new Date(m.t).toLocaleString([], {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"})}${m.dir === "in" ? (m.hops != null ? ` · returned via ${m.hops} hop${m.hops === 1 ? "" : "s"}` : " · returned by flood") + (m.snr != null ? ` · SNR ${m.snr}` : "") : " · " + esc(outMeta(m))}</span>
+        ${m.recovery ? `<span class="diagnosis">${esc(m.recovery)}</span>` : ""}
+        ${m.status === "failed" ? `<span class="delivery-actions"><button class="btn" data-retry="${m.id}">Retry same route</button>${active.startsWith("c:") ? `<button class="btn" data-auto="${m.id}">Auto reroute + resend</button><button class="btn" data-flood="${m.id}">Flood + resend</button>` : ""}<button class="btn" data-diag="${m.id}">Why?</button></span>${m.showDiagnosis ? `<span class="diagnosis">${esc(MC.diagnoseMessage(active, m))}</span>` : ""}` : ""}</div>`).join("")
       : `<p class="val">No messages yet.${ch ? " Channel messages from everyone who shares this channel appear here." : ""}</p>`;
     if (!keepScroll || atBottom) el.scrollTop = el.scrollHeight;
   };
@@ -2005,6 +2114,14 @@ async function renderChat(view) {
     const it = e.target.closest("[data-conv]"); if (it) return open(it.dataset.conv);
     const rt = e.target.closest("[data-retry]");
     if (rt) { e.preventDefault(); const m = (MC.store.conv[active] || []).find(x => x.id === rt.dataset.retry); if (m) MC.sendText(active, m.text, m); return; }
+    const diag = e.target.closest("[data-diag]");
+    if (diag) { const m = (MC.store.conv[active] || []).find(x => x.id === diag.dataset.diag); if (m) { m.showDiagnosis = !m.showDiagnosis; MC.saveStore(); drawConv(true); } return; }
+    const auto = e.target.closest("[data-auto],[data-flood]");
+    if (auto) {
+      const id = auto.dataset.auto || auto.dataset.flood, m = (MC.store.conv[active] || []).find(x => x.id === id);
+      if (m) { try { await MC.autoReroute(active, m, !!auto.dataset.flood); } catch (err) { m.status = "failed"; m.error = err.message; m.failure = "reroute-failed"; m.recovery = null; MC.saveStore(); MC.emitChange(); toast(`Reroute failed: ${err.message}`, "bad"); } }
+      return;
+    }
     const b = e.target.closest("button"); if (!b) return;
     try {
       if (b.id === "cBack") { $("#chat").classList.remove("inconv"); active = null; MC.activeConv = null; drawList(); }

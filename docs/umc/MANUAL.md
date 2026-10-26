@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.22** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.23** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -649,7 +649,7 @@ The **Ultimate MeshCore Client** is the companion (personal radio) version of UM
 | Feature | Details |
 |---|---|
 | **All app links at once** | **Bluetooth** (PIN pairing), **USB** serial, **WiFi TCP port 5000** (up to 3 apps) and the **browser**, all at the same time. |
-| **Messenger in the browser** | Channels and direct messages with delivery ticks, round-trip time, hops and SNR, retry, search, unread counts and history saved in the browser. |
+| **Messenger in the browser** | Channels and direct messages with queued/pending/delivered/failed states, ACK round-trip time, reply return-path hops and SNR, failure diagnosis and automatic rerouting, search, unread counts and history saved in the browser. |
 | **Contacts** | List with type, path, advert age and map link. Favourite, remove, reset path, share (zero-hop), export/import `meshcore://` contacts, adverts waiting to be added. |
 | **Repeater and room tools** | Log in, **status**, **telemetry**, **remote admin console** (CLI over the mesh), **trace path** with per-hop SNR, **discover path**. |
 | **Channels** | Public, hashtag (`#name`), private (random secret) and shared-secret channels. Share, remove, export and import the list. |
@@ -678,9 +678,11 @@ Every link sees the same contacts, channels and messages. The browser keeps its 
 
 - The left column lists channels and contacts, newest conversation first, with unread counts. The search box filters by name.
 - Type a message and press **Enter** (Shift+Enter adds a new line). The counter shows bytes used. Direct messages allow 160 bytes; channel messages lose a few bytes to your name.
-- Direct message ticks: **⏳** sending · **✓ waiting** sent, awaiting confirmation · **✓✓ 2.3 s** delivered, with round-trip time · **✗** no confirmation. Press **retry** to send again.
+- Direct messages show **queued**, **submitting to radio**, **sent · pending delivery ACK**, **delivered** (with ACK round-trip time), **reply received**, or **failed**. A reply's hop figure is its **return path**; MeshCore's ACK does not report the exact outbound hop count.
+- Every attempt records whether it used flood, direct delivery or a stored multi-hop route. **Why?** explains whether the local radio rejected it, the client disconnected before confirmation, or an end-to-end ACK timed out, and includes contact/route freshness.
+- A failed direct message offers **Retry same route**, **Auto reroute + resend**, and **Flood + resend**. Automatic recovery first tries a different route previously proven by an ACK whose repeaters have been heard within six hours, then asks the mesh to discover a fresh path, then clears the stale route and floods as a safe fallback. It never invents a path from unrelated nearby repeaters.
 - Channel messages show **✓ sent** (channels have no delivery confirmation).
-- Received messages show the sender (for channels and room servers), hops and SNR.
+- Received messages show the sender (for channels and room servers), return-path hops and SNR. A received reply is also attached to the newest recent outgoing message as independent delivery evidence.
 - **Log in** in a room server conversation to receive its posts. **Contact…** opens the contact's tools.
 - **Notifications** asks the browser to alert you while the page is open. Most browsers only allow this on HTTPS pages, so it may be refused on a plain local address.
 - History is stored **in this browser** (last 400 messages per conversation). **Clear history** removes it from this browser only.
@@ -752,7 +754,7 @@ The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x2
 | Tab | What you get |
 |---|---|
 | **Home** | Clock and date, sunrise and sunset (needs a position fix and a set clock), channel-busy percentage and noise floor, and six cards: battery, GPS, nodes, messages, last signal and links. Tap a card to jump to the matching tab. |
-| **Msgs** | The conversation log. **To:** at the top picks the channel or contact (tap **change** to cycle). Type on the keyboard and press **Enter** (or tap **Send**). Drag the list to scroll back. |
+| **Msgs** | The conversation log. **To:** at the top picks the channel or contact (tap **change** to cycle). Type on the keyboard and press **Enter** (or tap **Send**). Drag the list to scroll back. Tap a message for explicit pending/delivered/failed state and route/return-hop details. Tap a timed-out direct message again to clear its stale path and resend by flood so a successful ACK can teach the radio a fresh route. |
 | **People** | Contacts with type, path and how long ago they were heard. Tap one, then **Message**, **Show map**, **Share** (zero-hop) or **Reset path**. |
 | **Repeater page** | Tap a **repeater** in People to open it (other contacts still open as before; **Details** has the rest). **Status**: **Log in** with the admin password (a new repeater uses `password`), then its battery, uptime, noise floor, last RSSI/SNR, queue, errors, packets heard and sent (flood and direct), duplicates and airtime. **Path**: the route messages take (hop ids, with names where the repeater is in your contacts), **Trace** (out along the route and back; every hop's SNR; needs a known route of 1 or 2 byte ids), **Set route** (type ids like `a1,b2,c3`) and **Reset** (flood next time). **Admin**: run any repeater command. Eight quick buttons, **Command** to type one (or just start typing), and **List** with the usual ones: get/set name, radio, tx, repeat, lat/lon, advert intervals, flood.max, path.hash.mode, loop.detect, dutycycle, stats, passwords, clock sync, reboot and start ota. Reboot and start ota ask twice. Replies come back as text in the box above the buttons. |
 | **Map** | Offline map with your position and every contact that shares a location. Drag to pan, **+**/**−** to zoom, **me** to recentre. Without map tiles it plots contacts by range and bearing with distance rings, and the Info tab's **Maps** line says what it found on the card. |
