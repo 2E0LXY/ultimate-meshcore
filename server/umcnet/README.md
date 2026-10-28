@@ -76,6 +76,7 @@ SQLite under `/var/lib/umcnet-dash`. About 20 MB of memory.
 | Overview | Repeaters and clients online, packets and messages a minute, dials for CPU, memory, disk, load, certificate and logins, a live data-flow diagram, the checks, charts per repeater and bandwidth, the latest events |
 | Network | A map of every node the repeaters hear, with a line for each link coloured by hops (green direct, blue 1 hop, purple 2, amber 3, orange 4+), filters, a table of links and the journey of each packet |
 | Repeaters | One card per repeater: device id, model, firmware, radio, battery, uptime, noise floor, airtime, counters, clock, packet types; which repeaters hear the same packets and how many hear each |
+| Control | Preloaded settings for every online repeater, complete signed CLI, quick actions, firmware check/install/rollback, labels and the redacted audit trail |
 | Clients | Everything connected to the broker: account, address, since when, keepalive, protocol, logins in the last hour |
 | Accounts | Every account with its role, bound device id, whether it is online, last login and last data |
 | Traffic | Live packets with the sender (an advert's name, or a hash matched to a known repeater) and the repeater that passed it on; packet types; delivery delay |
@@ -93,11 +94,12 @@ Limits: a publish that the access list silently drops is not logged by Mosquitto
 history starts when the dashboard is installed.
 
 
-## Controlling repeaters, approvals and settings (dashboard 2.0)
+## Controlling repeaters, approvals and settings (dashboard 2.3)
 
-**Control tab.** Pick a repeater, press *Read settings* to fill the boxes with what it has now, change a value and press
-*Apply*, or use a quick action (advert, discover neighbours, stats, restart) or the console. Every command is checked,
-signed and recorded in the audit log; restart, radio, region, bridge and similar commands ask you to confirm first.
+**Control tab.** Pick a repeater: its settings and firmware state are preloaded automatically. Press *Refresh settings*
+only when you need a new copy, change a value and press *Apply*, or use a quick action, the firmware panel or the
+complete device console. Every command is checked, signed and recorded in the audit log; commands that change the
+device ask you to confirm first, and commands or replies containing secrets are redacted from the audit trail.
 
 How it is kept safe:
 
@@ -106,12 +108,23 @@ How it is kept safe:
 | Off by default | The repeater obeys nothing until you set a control key and `set mqtt.control on`. |
 | Signature | Each command carries an HMAC-SHA-256 over device id, time, a counter and the command, made with a key only the dashboard and that repeater hold. A wrong signature gets no answer, so it cannot be used to test guesses. |
 | Freshness | The time must be within 5 minutes, later than the repeater's last restart, and the counter must be higher than the last one used: a recorded command cannot be replayed. |
-| Allow-list | Only reads, adverts, stats, clock, restart, and settings for the radio, forwarding, adverts, identity and UMC Net. Passwords, private keys, WiFi, access point, broker address and login, the control key itself, and firmware installs are refused by the repeater whatever the dashboard sends. |
+| Full administrator CLI | A valid signed administrator may use every well-formed device command, including WiFi, broker and firmware maintenance. Structural checks still reject oversized, multiline, quoted or malformed transport input. |
 | Rate limit | 60 commands a minute (enough to read every setting in one go). |
 | Broker accounts | The `controller` account may only publish to `umcnet/v1/<area>/dev/<id>/cmd` and read `.../resp`. A repeater may read only its own command topic and write only its own answers. |
+| Confirmation and redaction | Changing commands require confirmation; secret commands and replies are replaced with redacted markers in the persisted audit log. |
 
 To put a repeater under control: *Control setup* on its card shows a block of commands (broker address, its account and
-the control key). Paste it into the repeater's Console page, then press *Read settings*.
+the control key). Paste it into the repeater's Console page; the dashboard then loads its settings automatically.
+
+**Firmware panel.** *Check for update* asks the repeater to query the release manifest, *Install latest firmware* starts
+the normal verified OTA update and *Roll back firmware* selects the previous slot. The panel shows the current build,
+update status, automatic-update policy and both OTA slots. Identity and settings are retained, and the firmware's normal
+60-second validation and automatic rollback still apply.
+
+**Public viewer.** `https://net.<domain>/public/` is a no-login, read-only view of repeater status, network links and
+recent mesh traffic. Caddy exposes only `/public` and `/public/api/*` without authentication. Those endpoints have no
+POST routes and exclude accounts, client addresses, keys, configuration, logs, private owner information and locations
+learned through private control commands. The administrator dashboard at `/` remains behind its login.
 
 **Approving new repeaters.** *Add an account* on the Accounts tab creates a repeater account with no device id. It is
 *pending*: it can connect and listen to statuses, but it cannot publish or be controlled. When the repeater connects, the

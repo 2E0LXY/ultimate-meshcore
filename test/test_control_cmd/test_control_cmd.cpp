@@ -84,14 +84,14 @@ TEST(Policy, AllowsTheEverydayCommands) {
     EXPECT_TRUE(commandAllowed(c)) << c;
 }
 
-TEST(Policy, NeverAllowsSecretsOrLockouts) {
+TEST(Policy, AllowsTheFullSignedAdminCli) {
   for (const char* c : {"password hunter22", "set guest.password x", "get guest.password", "set prv.key aa", "get prv.key", "set wifi.ssid x", "set wifi.pwd y",
                         "wifi clear 1", "get wifi.pwd", "set ap.mode on", "set ap.password z", "set net.ip dhcp", "set pin 12345678", "setperm abc 3", "set http off",
                         "set telnet on", "set mqtt.custom.password p", "get mqtt.custom.password", "set mqtt.custom.host evil.example", "set mqtt.custom.port 1",
                         "set mqtt.custom.transport tcp", "set mqtt.custom.username u", "set mqtt.control off", "set mqtt.control.key aa", "get mqtt.control.key",
                         "set bridge.secret s", "get bridge.secret", "start ota", "ota install", "erase", "format", "poweroff", "set ble.pin 1", "set mqtt.meshmapper on",
                         "SET PASSWORD x", "Set Prv.Key aa", "GET PRV.KEY"})
-    EXPECT_FALSE(commandAllowed(c)) << c;
+    EXPECT_TRUE(commandAllowed(c)) << c;
 }
 
 TEST(Policy, RefusesAnythingOddlyShaped) {
@@ -103,8 +103,8 @@ TEST(Policy, RefusesAnythingOddlyShaped) {
   EXPECT_FALSE(commandAllowed("get radio\\"));
   EXPECT_FALSE(commandAllowed(" get radio"));
   EXPECT_FALSE(commandAllowed("get radio "));
-  EXPECT_FALSE(commandAllowed("frobnicate"));
-  EXPECT_FALSE(commandAllowed("set unknown.thing 1"));
+  EXPECT_TRUE(commandAllowed("frobnicate"));       // the device CLI reports whether it knows it
+  EXPECT_TRUE(commandAllowed("set unknown.thing 1"));
   EXPECT_FALSE(commandAllowed(std::string(141, 'a').c_str()));
   EXPECT_FALSE(commandAllowed((std::string("get ") + std::string(200, 'a')).c_str()));
 }

@@ -3,13 +3,12 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
 
 // Remote control of a repeater through its UMC Net broker (mqtt.control). Everything here is plain
 // code with no hardware in it, so it is tested on a computer (test/test_control_cmd):
 //   - SHA-256 and HMAC-SHA-256, so a command can be proved to come from whoever holds the key
 //   - reading the few fields of a command message
-//   - the list of commands a remote operator may run (and the ones that can never be run remotely)
+//   - structural checks for the single CLI command carried in each control message
 // A command message is {"id":"..","ts":<epoch seconds>,"n":<counter>,"cmd":"..","sig":"<64 hex>"}
 // where sig = HMAC-SHA256(key, "<device id>|<ts>|<n>|<cmd>").
 namespace umcctl {
@@ -152,10 +151,10 @@ inline bool jsonNumber(const char* json, int len, const char* key, uint64_t* out
   return false;
 }
 
-inline bool startsWithNoCase(const char* s, const char* prefix) { return strncasecmp(s, prefix, strlen(prefix)) == 0; }
-
-// Which commands a remote operator may run. Nothing that holds a secret, changes who can log in,
-// or could cut the repeater off from the network is on the list, however it is written.
+// A signed UMC Net administrator may run the full device CLI.  This function is therefore a
+// transport-shape check, not an allow-list: signatures, freshness, replay protection and the
+// per-device rate limit are still enforced before a command reaches the CLI.  Keep line breaks,
+// JSON quoting tricks and overlong input out of the single-command control message.
 inline bool commandAllowed(const char* cmd) {
   if (cmd == nullptr || cmd[0] == 0) return false;
   const size_t n = strlen(cmd);
@@ -164,29 +163,7 @@ inline bool commandAllowed(const char* cmd) {
     const uint8_t c = (uint8_t)cmd[i];
     if (c < 0x20 || c == 0x7f || c == '"' || c == '\\') return false;     // no line breaks, no quoting tricks
   }
-  static const char* const kNever[] = {
-      "password", "set password", "set guest", "get guest", "set prv", "get prv", "set wifi", "get wifi.pwd", "wifi ", "set ap", "get ap.password",
-      "set net", "set pin", "get pin", "setperm", "set http", "set telnet", "set web", "set ble", "get ble.pin", "set mqtt.custom.host",
-      "set mqtt.custom.port", "set mqtt.custom.transport", "set mqtt.custom.username", "set mqtt.custom.password", "get mqtt.custom.password",
-      "set mqtt.control", "get mqtt.control.key", "set bridge.secret", "get bridge.secret", "set app", "start ota", "ota", "erase", "format",
-      "poweroff", "set telemetry", "set mqtt.join", "set mqtt.umcnet", "set mqtt.custom ", "set mqtt.meshmapper", "set mqtt.waev", "set mqtt.eastmesh", "set mqtt.letsmesh"};
-  for (const char* d : kNever)
-    if (startsWithNoCase(cmd, d)) return false;
-  static const char* const kExact[] = {"advert", "advert.zerohop", "discover.neighbors", "clock", "reboot", "ver", "neighbors", "routes", "board",
-                                       "clear stats", "stats-core", "stats-radio", "stats-packets", "stats-rf", "stats-life", "region",
-                                       "region save", "safety state", "radio watchdog", "memory"};
-  for (const char* e : kExact)
-    if (strcasecmp(cmd, e) == 0) return true;
-  static const char* const kPrefix[] = {
-      "get ", "time ", "route ", "trace ", "region ", "tempradio ", "safety log", "gps ", "radio watchdog ",
-      "set radio", "set tx", "set dutycycle", "set af", "set agc.reset.interval", "set cad", "set int.thresh", "set rxdelay", "set repeat",
-      "set loop.detect", "set path.hash.mode", "set flood.", "set group.hops.max", "set multi.acks", "set txdelay", "set direct.txdelay",
-      "set advert.", "set name", "set lat", "set lon", "set owner.info", "set mqtt.iata", "set mqtt.packets", "set mqtt.raw", "set mqtt.tx",
-      "set mqtt.status", "set mqtt.custom.bridge", "set mqtt.custom.rate", "set mqtt.owner", "set mqtt.email", "set powersaving",
-      "set display.", "set bridge.enabled", "set bridge.source", "set bridge.delay", "set bridge.channel", "set allow.read.only"};
-  for (const char* p : kPrefix)
-    if (startsWithNoCase(cmd, p)) return true;
-  return false;
+  return true;
 }
 
 }  // namespace umcctl

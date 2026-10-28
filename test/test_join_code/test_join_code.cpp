@@ -81,9 +81,9 @@ TEST(Base64, DecodesTheUrlSafeAlphabetWithoutPadding) {
   EXPECT_FALSE(b64urlDecode("a", o, sizeof(o), &n));           // a single stray character
 }
 
-TEST(ControlList, JoinAndSwitchCannotBeRunRemotely) {
-  EXPECT_FALSE(umcctl::commandAllowed("set mqtt.join UMC1.abc"));
-  EXPECT_FALSE(umcctl::commandAllowed("set mqtt.umcnet off"));
+TEST(ControlList, FullSignedAdminCliIncludesNetworkCommands) {
+  EXPECT_TRUE(umcctl::commandAllowed("set mqtt.join UMC1.abc"));
+  EXPECT_TRUE(umcctl::commandAllowed("set mqtt.umcnet off"));
   EXPECT_TRUE(umcctl::commandAllowed("get mqtt.umcnet"));
 }
 

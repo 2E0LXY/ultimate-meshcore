@@ -7,11 +7,11 @@ By **Daren Loxley 2E0LXY**
 
 [**⚡ Install with the USB web flasher**](https://2e0lxy.github.io/ultimate-meshcore/) · [**📖 User manual (A–Z)**](docs/umc/MANUAL.md) · [**⬇ Latest firmware**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) · [**📱 Android app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) · [**🖥 Windows / Linux app**](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest)
 
-> **Status: 0.1.23 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
+> **Status: 0.1.24 (early).** The Heltec V3 / V3.2 **repeater**, the **Ultimate MeshCore Client** and the **T-Deck touch client** run on hardware. Heltec V4 (OLED/TFT/R8) builds are published but not yet tested on that hardware. Room server and the T-TWR are in progress; see the [roadmap](docs/umc/ROADMAP.md).
 
 | Part | Current version | Download |
 |---|---|---|
-| Firmware (repeater, client, T-Deck) | **0.1.23** | [web flasher](https://2e0lxy.github.io/ultimate-meshcore/) · [releases](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) |
+| Firmware (repeater, client, T-Deck) | **0.1.24** | [web flasher](https://2e0lxy.github.io/ultimate-meshcore/) · [releases](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/latest) |
 | Desktop app (Windows / Linux) | **0.1.23** | [desktop-latest](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/desktop-latest) |
 | Android app | **0.1.13** | [app-latest](https://github.com/2E0LXY/ultimate-meshcore/releases/tag/app-latest) |
 | UMC Net server dashboard | **2.1** | [`server/umcnet`](server/umcnet/README.md) |
@@ -145,7 +145,7 @@ A live control-room view (screenshot above), refreshed every 15 seconds:
 
 ### MQTT, bridge, power
 - **MQTT observer**: location code, identity and what to publish. Choose a preset broker or a custom TCP/WSS broker (JWT supported), with two broker slots and a status view.
-- **UMC Net**: join your repeaters over the internet through your own broker. The bridge hands packets other repeaters heard to the local mesh (rate limited, off by default), and **remote control** lets the [UMC Net dashboard](#umc-net-network-dashboard-remote-control-and-approvals) run a safe list of signed commands on the repeater (off by default).
+- **UMC Net**: join your repeaters over the internet through your own broker. The bridge hands packets other repeaters heard to the local mesh (rate limited, off by default), and **remote control** lets the [UMC Net dashboard](#umc-net-network-dashboard-remote-control-and-approvals) run the complete signed administrator CLI on the repeater (off by default).
 - **ESP-NOW bridge** between nearby LoRa segments (channel, secret, delay, source), and RS-232 settings.
 - **Power & hardware**: power saving, battery calibration, GPS, display cycle settings and board info.
 
@@ -346,14 +346,16 @@ UMC Net joins repeaters over the internet through a broker you run yourself ([se
 | Overview | Repeaters and clients online, packets and messages a minute, dials for CPU, memory, disk, load, certificate and logins, a live data-flow diagram, the checks, per-repeater and bandwidth charts, latest events |
 | **Network** | A map of every node the repeaters hear, with a link for each pair coloured by hops (green direct, blue 1 hop, purple 2, amber 3, orange 4+), filters, a table of links and the journey of each packet |
 | Repeaters | One card per repeater (device id, model, firmware, battery, noise floor, airtime, clock offset, packet types) and which repeaters hear the same packets |
-| **Control** | Read and change a repeater's settings, send adverts, run safe commands, restart it, label it, all signed and recorded |
+| **Control** | Automatically preload and change repeater settings, run the complete signed CLI, update or roll back firmware, restart and label it; actions are confirmed and recorded |
 | Clients, Accounts | Everything connected; accounts with approve, block, new password and remove |
 | Traffic, Diagnostics, Broker, System, Log | Live packets with senders, the checks and refused logins, every broker statistic, the server, the broker's log |
 | **Settings** | Limits for every check, history length, confirmation of risky commands, alerts to a web address or ntfy, the dashboard password, downloads, service restarts |
 
 ![Network map](docs/images/umcnet-network.png)
 
-**Remote control, safely.** A repeater obeys nothing until you set a control key and turn `mqtt.control` on. Each command is signed (HMAC-SHA-256 over the device id, the time, a counter and the command), must be recent, newer than the repeater's last restart and in order, and is rate limited to 60 a minute. Only a safe list of commands is accepted: never passwords, private keys, WiFi, broker login, the control key or firmware installs. A wrong signature gets no answer at all. Risky commands (restart, radio, region, bridge) ask you to confirm first, and every action goes in an audit log.
+**Remote administration, safely.** A repeater obeys nothing until you set a control key and turn `mqtt.control` on. Each command is signed (HMAC-SHA-256 over the device id, the time, a counter and the command), must be recent, newer than the repeater's last restart and in order, and is rate limited to 60 a minute. The signed administrator gets the complete device CLI, including WiFi, broker and firmware commands. A wrong signature gets no answer at all. Commands that change the device ask for confirmation, every action goes in the audit log, and secret commands and replies are redacted there.
+
+**Public viewer.** `/public/` is a separate read-only dashboard with live repeater, network and traffic details. It has no write endpoints and never returns accounts, client addresses, control keys, configuration, logs, private owner information or repeater coordinates learned through private control commands.
 
 **Joining with one line.** On the Accounts tab, add a repeater (or press *Join code* on its row) and copy the line it shows: `set mqtt.join UMC1.…`. Paste it into the repeater's Console (or the *Join code* box on its MQTT page) and press Enter. The repeater applies the broker, its account, the area code, raw packets on, transmitted off, the bridge and (if the repeater is approved) the remote-control key, then connects. A damaged or incomplete code is refused instead of half-applied. `set mqtt.umcnet on|off` is the on/off switch afterwards, and `get mqtt.umcnet` shows where it stands. The broker address is built into the firmware, or carried in the code for another operator's server.
 

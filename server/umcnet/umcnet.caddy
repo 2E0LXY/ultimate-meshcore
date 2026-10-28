@@ -5,6 +5,10 @@ net.2e0lxy.uk {
 	handle @mqtt {
 		reverse_proxy 127.0.0.1:9101
 	}
+	@public path /public /public/*
+	handle @public {
+		reverse_proxy 127.0.0.1:9102
+	}
 	handle {
 		basic_auth {
 			admin __DASH_HASH__

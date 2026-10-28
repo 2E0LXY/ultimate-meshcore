@@ -24,21 +24,54 @@ class CommandList(unittest.TestCase):
     ALLOWED = ["get radio", "get tx", "set tx 20", "set radio 869.618,62.5,8,8", "advert", "advert.zerohop", "reboot", "ver", "neighbors", "set flood.max 20", "set loop.detect minimal",
                "set mqtt.custom.bridge on", "set mqtt.custom.rate 20", "set mqtt.raw on", "region put gb-yor gb", "region save", "stats-core", "set name 2E0LXY-REPEATER", "set advert.interval 60",
                "time 1760000000", "clear stats", "tempradio 869.618,62.5,8,8,10", "set repeat on", "get traffic", "route find leeds", "trace route abc"]
-    DENIED = ["password hunter22", "set guest.password x", "get guest.password", "set prv.key aa", "get prv.key", "set wifi.ssid x", "set wifi.pwd y", "wifi clear 1", "get wifi.pwd", "set ap.mode on",
+    FULL_ADMIN = ["password hunter22", "set guest.password x", "get guest.password", "set prv.key aa", "get prv.key", "set wifi.ssid x", "set wifi.pwd y", "wifi clear 1", "get wifi.pwd", "set ap.mode on",
               "set ap.password z", "set net.ip dhcp", "set pin 12345678", "setperm abc 3", "set http off", "set telnet on", "set mqtt.custom.password p", "get mqtt.custom.password",
               "set mqtt.custom.host evil.example", "set mqtt.custom.port 1", "set mqtt.custom.transport tcp", "set mqtt.custom.username u", "set mqtt.control off", "set mqtt.control.key aa",
               "get mqtt.control.key", "set bridge.secret s", "get bridge.secret", "start ota", "ota install", "erase", "format", "poweroff", "set ble.pin 1", "set mqtt.meshmapper on", "set mqtt.join UMC1.abc", "set mqtt.umcnet off",
-              "SET PASSWORD x", "Set Prv.Key aa", "GET PRV.KEY", "", " get radio", "get radio ", "get radio\nset tx 1", 'get "radio"', "get radio\\", "frobnicate", "set unknown.thing 1", "a" * 141]
+              "SET PASSWORD x", "Set Prv.Key aa", "GET PRV.KEY", "frobnicate", "set unknown.thing 1"]
+    DENIED = ["", " get radio", "get radio ", "get radio\nset tx 1", 'get "radio"', "get radio\\", "a" * 141]
 
     def test_allowed(self):
-        for c in self.ALLOWED: self.assertTrue(dash.command_allowed(c), c)
+        for c in self.ALLOWED + self.FULL_ADMIN: self.assertTrue(dash.command_allowed(c), c)
 
     def test_denied(self):
         for c in self.DENIED: self.assertFalse(dash.command_allowed(c), repr(c))
 
     def test_risky_ones_need_confirming(self):
-        for c in ("reboot", "set tx 10", "set radio 1,2,3,4", "region put x", "set name x", "set mqtt.raw off", "set flood.max 5", "clear stats", "time 1"): self.assertTrue(dash.command_risky(c), c)
-        for c in ("get radio", "advert", "stats-core", "neighbors", "ver", "discover.neighbors"): self.assertFalse(dash.command_risky(c), c)
+        for c in ("reboot", "set tx 10", "set radio 1,2,3,4", "region put x", "set name x", "set mqtt.raw off", "set flood.max 5", "clear stats", "time 1", "update install", "set wifi.pwd secret"): self.assertTrue(dash.command_risky(c), c)
+        for c in ("get radio", "stats-core", "neighbors", "ver"): self.assertFalse(dash.command_risky(c), c)
+
+    def test_secret_commands_are_redacted_from_the_audit_text(self):
+        self.assertEqual("set wifi.pwd [secret redacted] -> [reply redacted]", dash.audit_command("set wifi.pwd super-secret", "OK"))
+        self.assertNotIn("super-secret", dash.audit_command("set wifi.pwd super-secret", "OK"))
+
+    def test_read_replies_warm_the_settings_cache(self):
+        dev = "AB" * 32; dash.SETTINGS.clear()
+        dash.remember_setting(dev, "get radio", "> 869.618,62.5,8,8")
+        dash.remember_setting(dev, "get update.status", "> up to date")
+        self.assertEqual("> 869.618,62.5,8,8", dash.SETTINGS[dev]["values"]["radio"])
+        self.assertEqual("> up to date", dash.SETTINGS[dev]["values"]["update.status"])
+
+
+class PublicViewer(unittest.TestCase):
+    def test_public_response_excludes_private_admin_state(self):
+        dev = "CD" * 32
+        original = dash.overview
+        dash.overview = lambda: {"now": 1, "mqtt": {"state": "connected", "password": "no"}, "devices": [{"id": dev, "name": "Hill", "n_pkt": 4, "label": {"label": "North", "note": "private note"}, "settings": {"radio": "x", "lat": "53.1", "owner.info": "private"}}], "packets": [], "rates": {}, "types": {}, "heard_by": {}, "latency": {}}
+        try: out = dash.public_overview()
+        finally: dash.overview = original
+        raw = repr(out)
+        self.assertEqual({"state": "connected"}, out["mqtt"])
+        self.assertNotIn("accounts", out); self.assertNotIn("control", out)
+        self.assertNotIn("lat", out["devices"][0]["settings"]); self.assertNotIn("owner.info", out["devices"][0]["settings"])
+        self.assertNotIn("password", raw); self.assertNotIn("private note", raw); self.assertEqual(4, out["totals"]["packets"])
+
+    def test_public_network_strips_coordinates(self):
+        original = dash.network_view
+        dash.network_view = lambda: {"now": 1, "nodes": [{"key": "A", "name": "Hill", "lat": 53.1, "lon": -1.5}], "links": [], "journeys": []}
+        try: out = dash.public_network_view()
+        finally: dash.network_view = original
+        self.assertNotIn("lat", out["nodes"][0]); self.assertNotIn("lon", out["nodes"][0])
 
 
 class Settings(unittest.TestCase):

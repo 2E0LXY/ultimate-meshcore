@@ -1,6 +1,6 @@
 # Ultimate MeshCore — User Manual
 
-**Version 0.1.23** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
+**Version 0.1.24** · Covers the repeater and the **Ultimate MeshCore Client** firmware for Heltec V3 / V3.2 (and the Heltec V4 builds). Sections marked *(coming soon)* describe features that are planned but not in this release.
 
 ---
 
@@ -1041,9 +1041,11 @@ UMC Net links repeaters over the internet through a broker you run (Mosquitto be
 
 **Join with one line.** On the dashboard's Accounts tab add the repeater (or press *Join code* on its row) and copy the line it shows. Paste it into the repeater's Console, or into *Join code* on its MQTT page. It sets the broker, account, area, raw packets, bridge and remote-control key in one go. `get mqtt.umcnet` shows the state; `set mqtt.umcnet off` / `on` switches the link. A code carries the repeater's password: keep it private, and a new code (which gives the account a new password) replaces an old one.
 
-**Put a repeater under control (the long way).** On the dashboard open Control, pick the repeater, press *Control setup* and paste the commands it shows into the repeater's Console page (broker address, its account, and the control key). Press *Read settings* to check it answers.
+**Put a repeater under control (the long way).** On the dashboard open Control, pick the repeater, press *Control setup* and paste the commands it shows into the repeater's Console page (broker address, its account, and the control key). Its settings appear automatically; press *Refresh settings* only when you need an immediate reread.
 
-**What remote control can and cannot do.** It can read and change radio, forwarding, advert, identity and UMC Net settings, send adverts, show statistics and restart the repeater. It can never read or change passwords, private keys, WiFi, the access point, the broker address and login, the control key itself, or install firmware, whatever the dashboard sends. Commands are signed, recent, in order, limited to 60 a minute, and a wrong signature gets no reply.
+**Remote administration.** Settings are preloaded automatically, with *Refresh settings* available when a new copy is needed. The signed administrator can use the complete device CLI, including WiFi, broker and firmware commands. The Firmware panel checks for and installs the correct latest build, shows the active OTA slots and can roll back. Commands that change the device ask for confirmation; secret commands and replies are redacted from the server audit log. Commands remain signed, recent, in order and limited to 60 a minute, and a wrong signature gets no reply.
+
+The public viewer at `https://net.<domain>/public/` is read-only. It shows operational repeater, network and traffic details without a login, but it has no write API and excludes accounts, addresses, keys, private settings, logs and administrator state.
 
 **The map on a repeater's own page** draws a line from the device to every node it knows, coloured the same way, with a legend.
 

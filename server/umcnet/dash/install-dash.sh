@@ -2,7 +2,8 @@
 # Installs the UMC Net dashboard beside the broker:
 #   - a read-only "monitor" account for the broker,
 #   - a service on 127.0.0.1:9102 (Python standard library only, nothing to pip install),
-#   - the page at https://net.<domain>/ behind a login (the MQTT path /mqtt is unchanged).
+#   - the admin page at https://net.<domain>/ behind a login,
+#   - a read-only public viewer at https://net.<domain>/public/ (the MQTT path /mqtt is unchanged).
 # Run as root, after install.sh and enable-caddy.sh. Safe to run again: it updates in place.
 set -euo pipefail
 REF=${REF:-main}
@@ -15,15 +16,15 @@ getent group umcnet-dash >/dev/null || groupadd --system umcnet-dash
 id umcnet-dash >/dev/null 2>&1 || useradd --system --gid umcnet-dash --home-dir /nonexistent --shell /usr/sbin/nologin umcnet-dash
 install -d -o root -g root -m 755 /opt/umcnet-dash
 install -d -o umcnet-dash -g umcnet-dash -m 750 /var/lib/umcnet-dash
-for f in umcnet_dash.py dash.html umcnet-dash.service umcnet_admin.py umcnet-admin.service; do curl -fsSL "$RAW/dash/$f" -o "/opt/umcnet-dash/$f.new"; done
+for f in umcnet_dash.py dash.html public.html umcnet-dash.service umcnet_admin.py umcnet-admin.service; do curl -fsSL "$RAW/dash/$f" -o "/opt/umcnet-dash/$f.new"; done
 curl -fsSL "$RAW/umcnet-user" -o /opt/umcnet/umcnet-user.new && chmod 755 /opt/umcnet/umcnet-user.new && mv /opt/umcnet/umcnet-user.new /opt/umcnet/umcnet-user
 python3 -m py_compile /opt/umcnet-dash/umcnet_dash.py.new
-mv /opt/umcnet-dash/umcnet_dash.py.new /opt/umcnet-dash/umcnet_dash.py; mv /opt/umcnet-dash/dash.html.new /opt/umcnet-dash/dash.html
+mv /opt/umcnet-dash/umcnet_dash.py.new /opt/umcnet-dash/umcnet_dash.py; mv /opt/umcnet-dash/dash.html.new /opt/umcnet-dash/dash.html; mv /opt/umcnet-dash/public.html.new /opt/umcnet-dash/public.html
 mv /opt/umcnet-dash/umcnet-dash.service.new /etc/systemd/system/umcnet-dash.service
 python3 -m py_compile /opt/umcnet-dash/umcnet_admin.py.new && mv /opt/umcnet-dash/umcnet_admin.py.new /opt/umcnet-dash/umcnet_admin.py
 mv /opt/umcnet-dash/umcnet-admin.service.new /etc/systemd/system/umcnet-admin.service
 chmod 644 /opt/umcnet-dash/umcnet_admin.py
-chmod 644 /opt/umcnet-dash/umcnet_dash.py /opt/umcnet-dash/dash.html
+chmod 644 /opt/umcnet-dash/umcnet_dash.py /opt/umcnet-dash/dash.html /opt/umcnet-dash/public.html
 /opt/umcnet/umcnet-user export          # the dashboard keeps its own copy of the account list (no passwords)
 
 # the broker account the dashboard listens with
@@ -80,3 +81,4 @@ sleep 3
 systemctl is-active umcnet-admin umcnet-dash umcnet-mosquitto caddy
 curl -fsS http://127.0.0.1:9102/api/health && echo
 echo "dashboard: https://$HOST/   login: admin / $webpw"
+echo "public viewer: https://$HOST/public/   read-only, no login"

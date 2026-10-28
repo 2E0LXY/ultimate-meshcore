@@ -17,13 +17,14 @@ CFG = {
     "unit": os.environ.get("DASH_UNIT", "umcnet-mosquitto"), "host": os.environ.get("DASH_HOST", "net.2e0lxy.uk"),
     "services": os.environ.get("DASH_SERVICES", "umcnet-mosquitto,caddy,umcnet-dash,umcnet-admin").split(","),
     "static": os.environ.get("DASH_STATIC", os.path.join(os.path.dirname(os.path.abspath(__file__)), "dash.html")),
+    "public_static": os.environ.get("DASH_PUBLIC_STATIC", os.path.join(os.path.dirname(os.path.abspath(__file__)), "public.html")),
     "logfile": os.environ.get("DASH_LOGFILE", ""), "ctl_pass_file": os.environ.get("DASH_CTL_PASS_FILE", "/opt/umcnet-dash/ctl.pass"),
     "ctl_user": os.environ.get("DASH_CTL_USER", "controller"), "admin_sock": os.environ.get("DASH_ADMIN_SOCK", "/run/umcnet-admin/admin.sock"),
     "keep_days": int(os.environ.get("DASH_KEEP_DAYS", "14")), "journal": os.environ.get("DASH_JOURNAL", "1") == "1",
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.2"
+VERSION = "2.3"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -44,6 +45,16 @@ NODES = {}                                 # full public key -> what its adverts
 LINKS = {}                                 # (hearing device, heard node) -> counts, nearest hop count, signal
 JOURNEYS = collections.deque(maxlen=300)   # recent packets as a chain: sender, repeaters on the way, receiver
 PTYPES = {0: "REQ", 1: "RESP", 2: "MSG", 3: "ACK", 4: "ADVERT", 5: "CHAN", 6: "CHDATA", 7: "ANON", 8: "PATH", 9: "TRACE", 10: "MULTI", 11: "CTRL"}
+DEVICE_SETTING_KEYS = (
+    "radio", "tx", "dutycycle", "radio.rxgain", "agc.reset.interval", "cad",
+    "repeat", "loop.detect", "flood.max", "flood.max.unscoped", "flood.max.advert",
+    "group.hops.max", "multi.acks", "txdelay", "direct.txdelay", "advert.interval",
+    "flood.advert.interval", "name", "lat", "lon", "owner.info", "mqtt.iata", "mqtt.raw",
+    "mqtt.tx", "mqtt.custom.bridge", "mqtt.custom.rate", "powersaving",
+)
+STATUS_SETTING_KEYS = ("update.status", "update.auto", "update.interval", "build", "ota.state")
+PUBLIC_SETTING_KEYS = tuple(k for k in DEVICE_SETTING_KEYS if k not in ("lat", "lon", "owner.info"))
+SETTINGS = {}                              # device id -> values, update time and preload state
 
 # ----------------------------------------------------------------------------- packets
 def parse_packet(raw):
@@ -595,30 +606,29 @@ def admin_call(**req):
         return {"ok": False, "error": "the admin helper is not answering (%s)" % e}
 
 # ----------------------------------------------------------------------------- remote control of repeaters
-NEVER = ("password", "set password", "set guest", "get guest", "set prv", "get prv", "set wifi", "get wifi.pwd", "wifi ", "set ap", "get ap.password", "set net", "set pin", "get pin", "setperm",
-         "set http", "set telnet", "set web", "set ble", "get ble.pin", "set mqtt.custom.host", "set mqtt.custom.port", "set mqtt.custom.transport", "set mqtt.custom.username",
-         "set mqtt.custom.password", "get mqtt.custom.password", "set mqtt.control", "get mqtt.control.key", "set bridge.secret", "get bridge.secret", "set app", "start ota", "ota", "erase",
-         "format", "poweroff", "set telemetry", "set mqtt.join", "set mqtt.umcnet", "set mqtt.custom ", "set mqtt.meshmapper", "set mqtt.waev", "set mqtt.eastmesh", "set mqtt.letsmesh")
-EXACT = ("advert", "advert.zerohop", "discover.neighbors", "clock", "reboot", "ver", "neighbors", "routes", "board", "clear stats", "stats-core", "stats-radio", "stats-packets", "stats-rf",
-         "stats-life", "region", "region save", "safety state", "radio watchdog", "memory")
-PREFIX = ("get ", "time ", "route ", "trace ", "region ", "tempradio ", "safety log", "gps ", "radio watchdog ", "set radio", "set tx", "set dutycycle", "set af", "set agc.reset.interval", "set cad",
-          "set int.thresh", "set rxdelay", "set repeat", "set loop.detect", "set path.hash.mode", "set flood.", "set group.hops.max", "set multi.acks", "set txdelay", "set direct.txdelay",
-          "set advert.", "set name", "set lat", "set lon", "set owner.info", "set mqtt.iata", "set mqtt.packets", "set mqtt.raw", "set mqtt.tx", "set mqtt.status", "set mqtt.custom.bridge",
-          "set mqtt.custom.rate", "set mqtt.owner", "set mqtt.email", "set powersaving", "set display.", "set bridge.enabled", "set bridge.source", "set bridge.delay", "set bridge.channel",
-          "set allow.read.only")
-RISKY = ("reboot", "set radio", "set tx", "region", "set name", "tempradio", "set repeat", "set mqtt.", "set bridge.", "set loop.detect", "set flood.", "set dutycycle", "clear stats", "time ")
+READ_ONLY_EXACT = ("ver", "board", "neighbors", "routes", "stats-core", "stats-radio", "stats-packets", "stats-rf", "stats-life", "memory", "safety state")
+SECRET_WORDS = ("password", "guest", "prv", "private", "wifi.", "ap.", "net.ip", "set pin", "get pin", "ble.pin", "mqtt.custom.", "mqtt.control.key", "bridge.secret", "mqtt.join", "owner.info", "set lat", "set lon", "get lat", "get lon")
 
 def command_allowed(cmd):
-    """The same list the repeater enforces (src/helpers/mqtt/ControlCmd.h); here it only saves a round trip."""
+    """The signed administrator gets the full CLI; reject only malformed transport input."""
     if not isinstance(cmd, str) or not cmd or len(cmd) > 140 or cmd != cmd.strip(): return False
     if any(ord(c) < 32 or ord(c) == 127 or c in '"\\' for c in cmd): return False
-    low = cmd.lower()
-    if any(low.startswith(n) for n in NEVER): return False
-    return low in EXACT or any(low.startswith(p) for p in PREFIX)
+    return True
 
 def command_risky(cmd):
     low = cmd.lower()
-    return low in RISKY or any(low.startswith(r) for r in RISKY)
+    if any(s in low for s in SECRET_WORDS): return True
+    return not (low.startswith("get ") or low in READ_ONLY_EXACT or low.startswith("stats-") or low.startswith("safety log"))
+
+def command_secret(cmd):
+    low = (cmd or "").lower()
+    return any(s in low for s in SECRET_WORDS)
+
+def audit_command(cmd, reply=None):
+    if command_secret(cmd):
+        name = cmd.split(" ", 2)[:2]
+        return "%s [secret redacted]%s" % (" ".join(name), " -> [reply redacted]" if reply is not None else "")
+    return "%s%s" % (cmd, " -> %s" % reply if reply is not None else "")
 
 def sign(key_hex, dev, ts, n, cmd):
     return hmac.new(bytes.fromhex(key_hex), ("%s|%d|%d|%s" % (dev, ts, n, cmd)).encode(), hashlib.sha256).hexdigest()
@@ -649,6 +659,15 @@ def on_control_reply(topic, payload, retained=False):
     w = CTL["waiting"].get(j.get("id"))
     if w and w["dev"] == m.group(1).upper(): w["reply"] = j; w["event"].set()
 
+def remember_setting(dev, cmd, reply):
+    if not cmd.startswith("get "): return
+    key = cmd[4:]
+    if key not in DEVICE_SETTING_KEYS + STATUS_SETTING_KEYS: return
+    with LOCK:
+        s = SETTINGS.setdefault(dev, {"values": {}, "updated": 0, "loading": False, "error": ""})
+        s["values"][key] = reply
+        s["updated"] = time.time(); s["error"] = ""
+
 def send_command(dev, cmd, who="dashboard", confirm=False, timeout=14):
     dev = (dev or "").upper()
     if not CONF["control_enabled"]: return {"ok": False, "error": "remote control is switched off in the settings"}
@@ -673,12 +692,46 @@ def send_command(dev, cmd, who="dashboard", confirm=False, timeout=14):
     finally:
         CTL["waiting"].pop(cid, None)
     if not got:
-        audit(who, "command", dev[:12], "%s -> no answer" % cmd, False)
+        audit(who, "command", dev[:12], audit_command(cmd, "no answer"), False)
         return {"ok": False, "error": "no answer in %d s: control may be off on the repeater, the key may not match, or its clock may be wrong" % timeout}
     r = w["reply"]; ok = bool(r.get("ok")); text = str(r.get("reply", ""))
-    audit(who, "command", dev[:12], "%s -> %s" % (cmd, text), ok)
-    CTL["last"][dev] = {"cmd": cmd, "reply": text, "ok": ok, "t": time.time()}
+    audit(who, "command", dev[:12], audit_command(cmd, text), ok)
+    if ok: remember_setting(dev, cmd, text)
+    CTL["last"][dev] = {"cmd": "[secret command]" if command_secret(cmd) else cmd, "reply": "[redacted]" if command_secret(cmd) else text, "ok": ok, "t": time.time()}
     return {"ok": ok, "reply": text, "error": None if ok else text}
+
+def preload_settings(dev, force=False):
+    now = time.time()
+    with LOCK:
+        state = SETTINGS.setdefault(dev, {"values": {}, "updated": 0, "loading": False, "error": ""})
+        if state["loading"] or not force and state["updated"] and now - state["updated"] < 900: return
+        state["loading"] = True; state["error"] = ""
+    good = 0; error = ""
+    try:
+        for key in DEVICE_SETTING_KEYS + STATUS_SETTING_KEYS:
+            r = send_command(dev, "get " + key, "settings-preload", timeout=10)
+            if r.get("ok"): good += 1
+            elif not error: error = r.get("error", "could not read settings")
+            if "no answer" in str(r.get("error", "")): break
+            time.sleep(.08)
+    finally:
+        with LOCK:
+            state = SETTINGS.setdefault(dev, {"values": {}, "updated": 0, "loading": False, "error": ""})
+            state["loading"] = False; state["error"] = "" if good else error
+            if good: state["updated"] = time.time()
+
+def settings_loop():
+    """Keep every online controlled repeater's editable settings warm for the dashboard."""
+    time.sleep(12)
+    while True:
+        try:
+            now = time.time()
+            for dev in list(KEYS):
+                d = DEV.get(dev)
+                if d and d.get("last") and now - d["last"] < CONF["stale_minutes"] * 60 * 4:
+                    preload_settings(dev)
+        except Exception as e: sys.stderr.write("settings preload: %s\n" % e)
+        time.sleep(60)
 
 def setup_commands(name, password, dev, area):
     key = control_key(dev, create=True) if dev else None
@@ -798,7 +851,8 @@ def overview():
     with LOCK:
         devs = []
         for d in DEV.values():
-            x = dict(d); x["types"] = dict(d["types"]); x["topics"] = dict(d["topics"]); x["pm"] = round(rate_per_min("pkt:" + d["id"], 300), 2); x["has_key"] = d["id"] in KEYS; x["label"] = CONF["labels"].get(d["id"], {}); x["last_cmd"] = CTL["last"].get(d["id"]); x["age"] = round(now - d["last"], 1) if d["last"] else 10 ** 9; devs.append(x)
+            x = dict(d); x["types"] = dict(d["types"]); x["topics"] = dict(d["topics"]); x["pm"] = round(rate_per_min("pkt:" + d["id"], 300), 2); x["has_key"] = d["id"] in KEYS; x["label"] = CONF["labels"].get(d["id"], {}); x["last_cmd"] = CTL["last"].get(d["id"]); x["age"] = round(now - d["last"], 1) if d["last"] else 10 ** 9
+            cached = SETTINGS.get(d["id"], {}); x["settings"] = dict(cached.get("values", {})); x["settings_updated"] = cached.get("updated", 0); x["settings_loading"] = bool(cached.get("loading")); x["settings_error"] = cached.get("error", ""); devs.append(x)
         devs.sort(key=lambda d: -d["last"])
         clients = []
         for c in CLIENTS.values():
@@ -823,6 +877,24 @@ def overview():
     res["pending"] = pending_list()
     res["diagnostics"] = diagnostics(sysinfo, accs, cert)
     return res
+
+def public_overview():
+    """Operational data safe to publish: no accounts, addresses, logs, keys or write state."""
+    o = overview(); now = o["now"]; devices = []
+    for d in o["devices"]:
+        devices.append({k: d.get(k) for k in ("id", "area", "name", "first", "last", "last_status", "status", "model", "fw", "radio", "client", "repeat", "stats", "n_raw", "n_pkt", "n_rx", "n_tx", "types", "rssi", "snr", "bytes", "skew", "topics", "pm", "label", "age")})
+        devices[-1]["label"] = {"label": d.get("label", {}).get("label", "")}
+        devices[-1]["settings"] = {k: d.get("settings", {}).get(k) for k in PUBLIC_SETTING_KEYS if k in d.get("settings", {})}
+        devices[-1]["settings_updated"] = d.get("settings_updated", 0)
+    packets = [{k: p.get(k) for k in ("t", "area", "dev", "dname", "dir", "type", "flood", "hops", "via", "src", "dst", "chan", "key", "name", "len", "rssi", "snr")} for p in o["packets"]]
+    return {"version": VERSION, "now": now, "title": CONF["title"], "mqtt": {"state": o["mqtt"].get("state", "unknown")}, "devices": devices,
+            "packets": packets, "totals": {"packets": sum(d.get("n_pkt", 0) for d in devices)}, "nodes": len(NODES),
+            "rates": o["rates"], "types": o["types"], "heard_by": o["heard_by"], "latency": o["latency"]}
+
+def public_network_view():
+    n = network_view()
+    nodes = [{k: v for k, v in node.items() if k not in ("lat", "lon")} for node in n["nodes"]]
+    return {"now": n["now"], "nodes": nodes, "links": n["links"], "journeys": n["journeys"]}
 
 # ----------------------------------------------------------------------------- HTTP
 def csv_text(header, rows):
@@ -904,6 +976,10 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path); q = parse_qs(u.query)
         try:
+            if u.path in ("/public", "/public/", "/public/index.html"): return self.send(200, open(CFG["public_static"], "rb").read(), "text/html")
+            if u.path == "/public/api/overview": return self.send(200, json.dumps(public_overview(), default=str))
+            if u.path == "/public/api/network": return self.send(200, json.dumps(public_network_view(), default=str))
+            if u.path == "/public/api/health": return self.send(200, json.dumps({"ok": True, "mqtt": MQTT["state"]}))
             if u.path == "/api/network": return self.send(200, json.dumps(network_view()))
             if u.path == "/api/audit":
                 secs = max(60, min(90 * 86400, int(q.get("range", ["604800"])[0])))
@@ -938,7 +1014,7 @@ def export_accounts_soon():
 
 def main():
     db_init(); conf_load(); keys_load(); nodes_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
-    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop): threading.Thread(target=fn, daemon=True).start()
+    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)
     try: srv.serve_forever()

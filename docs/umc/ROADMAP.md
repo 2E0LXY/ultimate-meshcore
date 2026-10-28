@@ -4,6 +4,13 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.24
+
+- ✅ UMC Net automatically preloads every online repeater's editable settings and firmware/OTA state; *Refresh settings* remains available for an immediate reread
+- ✅ The signed administrator can use the complete device CLI, with confirmation for changes and audit redaction for secret commands and replies
+- ✅ Dashboard firmware controls check, install and roll back releases remotely while showing build, update and OTA-slot state
+- ✅ A separate `/public/` read-only viewer shows operational repeater, network and traffic detail without publishing accounts, addresses, keys, private settings, logs or write endpoints
+
 ## Done in 0.1.23
 
 - ✅ Browser/desktop message lifecycle: queued, submitting, pending ACK, delivered, reply-evidenced and failed; ACK RTT kept separate from a reply's return-path hop count
@@ -45,7 +52,7 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ## Done in 0.1.18
 
-- ✅ **Remote control of repeaters through UMC Net.** The dashboard's Control tab reads and changes a repeater's settings, sends adverts, runs a safe list of commands and restarts it. Commands are signed (HMAC-SHA-256 with a per-repeater key), time-limited, numbered so they cannot be replayed, rate-limited (60 a minute), and checked against a list that never includes passwords, keys, WiFi, broker settings or firmware installs; a bad signature gets no answer at all. Off by default (`mqtt.control`, `mqtt.control.key`), and settings on the MQTT page
+- ✅ **Remote control of repeaters through UMC Net.** The first release of the Control tab read and changed settings, sent adverts and ran a restricted command list. Commands are signed (HMAC-SHA-256 with a per-repeater key), time-limited, numbered so they cannot be replayed and rate-limited (60 a minute); a bad signature gets no answer at all. Off by default (`mqtt.control`, `mqtt.control.key`), and settings on the MQTT page. The restricted list was replaced by the confirmed, audit-redacted full administrator CLI in 0.1.24.
 - ✅ **Approval of new repeaters:** an account without a device id waits as *pending* (it may listen, nothing more); the dashboard shows who connected and from where, and you approve it by pasting the repeater's full device id, which must match the one that connected. Block, unblock, new password and remove from the Accounts tab
 - ✅ Dashboard settings (limits for every check, history, confirmation of risky commands), change the dashboard password, an audit log of everything done, alerts to a web address or ntfy, labels and notes for repeaters, CSV and JSON downloads; the privileged parts are a separate small root helper reached over a Unix socket
 
