@@ -94,9 +94,10 @@ static void blit(int x, int y, const uint16_t* px, int w, int h) {
 static void fill(int x, int y, int w, int h, uint16_t c) { gfx()->fillRect(x, y, w, h, c); }
 
 // ---------------------------------------------------------------------------------------
-// Typography. Every screen uses one family in three sizes, so nothing is drawn with the
-// blocky 5x7 built-in font any more.
-static const GFXfont* const F_TINY = &FreeSans6pt7b;       // chat bubbles
+// Typography. Lists and controls use FreeSans. Chat bodies deliberately use the built-in
+// 6x8 bitmap face: that is the proven default in established T-Deck firmware and remains
+// crisp on the small 320x240 panel where the 6pt proportional outline face looked ragged.
+static const GFXfont* const F_TINY = &FreeSans6pt7b;       // compact headings and status
 static const GFXfont* const F_SMALL = &FreeSans7pt7b;      // lists, labels, values, buttons
 static const GFXfont* const F_MED = &FreeSansBold12pt7b;   // the figure a card is about
 static const GFXfont* const F_BIG = &FreeSansBold24pt7b;   // the clock
@@ -369,6 +370,49 @@ static int textFWidth(const char* s, const GFXfont* font) { return richDraw(0, 0
 
 static void textFClip(int x, int y, int max_w, const char* s, uint16_t c, const GFXfont* font) {
   richDraw(x, y, s, c, font, max_w, true);
+}
+
+// Draw (or measure) folded text with Adafruit_GFX's fixed 6x8 bitmap font. Keeping the
+// UTF-8 folding and icon markers means station names and messages remain safe to render.
+static int monoDraw(int x, int y, const char* s, uint16_t c, int max_w, bool draw) {
+  if (s == NULL || s[0] == 0 || max_w <= 0) return 0;
+  char buf[160];
+  foldUtf8(s, buf, sizeof(buf));
+  const int limit = x + max_w;
+  int pen = x;
+  if (draw) {
+    gfx()->setFont(NULL);
+    gfx()->setTextSize(1);
+    gfx()->setTextColor(c);
+    gfx()->setTextWrap(false);
+  }
+  for (int i = 0; buf[i] != 0; i++) {
+    const uint8_t ch = (uint8_t)buf[i];
+    const bool is_icon = ch < 0x20;
+    const int adv = is_icon ? 10 : 6;
+    if (pen + adv > limit) {
+      if (draw && pen + 6 <= limit) {
+        gfx()->setCursor(pen, y);
+        gfx()->write('~');
+      }
+      break;
+    }
+    if (draw) {
+      if (is_icon) drawIcon(pen + 1, y, ch, c, 8);
+      else {
+        gfx()->setCursor(pen, y);
+        gfx()->write(ch);
+      }
+    }
+    pen += adv;
+  }
+  return pen - x;
+}
+
+static int monoWidth(const char* s) { return monoDraw(0, 0, s, 0, 4096, false); }
+
+static void monoClip(int x, int y, int max_w, const char* s, uint16_t c) {
+  monoDraw(x, y, s, c, max_w, true);
 }
 
 static void text(int x, int y, const char* s, uint16_t c, int size = 1) {
@@ -954,7 +998,7 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
   const int avatar = mine ? 0 : 14;                  // the column the incoming avatar sits in
   const int max_w = SCR_W - 44 - avatar;
   const int pad = 4;
-  const int line_h = F_TINY->yAdvance;
+  const int line_h = 9;                            // 6x8 bitmap glyph plus one clear row
   const int inner = max_w - pad * 2;
 
   // wrap on spaces
@@ -967,7 +1011,7 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
     char probe[sizeof(lines[0])];
     memcpy(probe, p, take);
     probe[take] = 0;
-    while (take > 1 && textFWidth(probe, F_TINY) > inner) probe[--take] = 0;    // trim to the width
+    while (take > 1 && monoWidth(probe) > inner) probe[--take] = 0;    // trim to the width
     if (p[take] != 0) {
       int brk = take;
       while (brk > 6 && p[brk] != ' ') brk--;                          // back to a space
@@ -983,7 +1027,7 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
 
   int widest = 0;
   for (int i = 0; i < line_count; i++) {
-    const int w = textFWidth(lines[i], F_TINY);
+    const int w = monoWidth(lines[i]);
     if (w > widest) widest = w;
   }
   const int bw = widest + pad * 2;
@@ -999,7 +1043,7 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
   if (selected) gfx()->drawRoundRect(bx - 2, by - 2, bw + 4, bh + 4, 8, TH.accent == fill_c ? 0xFFFF : TH.accent);
 
   const uint16_t tc = mine ? TH.mine_text : TH.theirs_text;
-  for (int i = 0; i < line_count; i++) textFClip(bx + pad, by + 3 + i * line_h, inner, lines[i], tc, F_TINY);
+  for (int i = 0; i < line_count; i++) monoClip(bx + pad, by + 3 + i * line_h, inner, lines[i], tc);
 
   if (!show_who) return by - 2;
 
@@ -1122,12 +1166,14 @@ void UITask::drawMessages() {
   const int top = BODY_Y + 2;
   // the list ends where the composer (and the reply bar, when there is one) begins
   const int list_bottom = SCR_H - TAB_H - COMPOSE_H - (_reply_to[0] ? 12 : 0) - 2;
+  const int status_h = 14;                           // full 13px tiny-font advance, plus separation
+  const int content_bottom = list_bottom - status_h;
   const int list_h = list_bottom - (top + 17);
 
   fill(0, top + 17, SCR_W, list_h, TH.bg);
 
   // newest at the bottom, working upwards
-  int y = list_bottom;
+  int y = content_bottom;
   const int first = umc_chatlog.count() - 1 - _msg_scroll;
   _msg_rows = 0;
   for (int i = first; i >= 0 && y > top + 28; i--) {
@@ -1159,7 +1205,7 @@ void UITask::drawMessages() {
     text(8, top + 40, "No messages yet.", TH.dim);
     text(8, top + 54, "Type below and press Enter to send.", TH.dim);
   } else if (_msg_sel < 0) {
-    text(6, list_bottom - 11, "Tap a message to see delivery details", TH.dim);
+    textFClip(6, content_bottom, SCR_W - 12, "Tap a message to see delivery details", TH.dim, F_TINY);
   } else {
     const UmcChatLog::Entry* e = umc_chatlog.get(_msg_sel);
     if (e != NULL) {
@@ -1179,7 +1225,7 @@ void UITask::drawMessages() {
         snprintf(state, sizeof(state), "Reply returned via %u hop%s · SNR %.1f", (unsigned)e->hops, e->hops == 1 ? "" : "s", e->snr4 / 4.0f);
       }
       const bool failed = e->outgoing && e->expect_ack && !e->delivered && (millis() - e->sent_ms) > kAckWaitMs;
-      textFClip(6, list_bottom - 11, SCR_W - 12, state, failed ? C_BAD : TH.dim, F_TINY);
+      textFClip(6, content_bottom, SCR_W - 12, state, failed ? C_BAD : TH.dim, F_TINY);
     }
   }
   // who we are writing to - drawn last, so a bubble scrolling off the top goes behind it
