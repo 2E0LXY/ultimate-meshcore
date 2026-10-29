@@ -1089,10 +1089,17 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   // defaults
   _prefs.airtime_factor = 1.0;
   strcpy(_prefs.node_name, "NONAME");
+#ifdef UMC_YORKSHIRE_DEFAULTS
+  _prefs.freq = 869.618f;
+  _prefs.sf = 8;
+  _prefs.bw = 62.5f;
+  _prefs.cr = 8;
+#else
   _prefs.freq = LORA_FREQ;
   _prefs.sf = LORA_SF;
   _prefs.bw = LORA_BW;
   _prefs.cr = LORA_CR;
+#endif
   _prefs.tx_power_dbm = LORA_TX_POWER;
   _prefs.gps_enabled = 0;       // GPS disabled by default
   _prefs.gps_interval = 0;      // No automatic GPS updates by default
@@ -1156,14 +1163,10 @@ void MyMesh::begin(bool has_display) {
 
   // load persisted prefs
   _store->loadPrefs(_prefs);
-  // Migrate UMC's former informal UK scopes to the LocalMesh identifiers. Only exact
-  // legacy defaults are changed; community-defined names are left untouched.
+  // Keep the harmless former "uk" shorthand compatible. Yorkshire's published region
+  // names are deliberately not rewritten: they are live community identifiers.
   const char* migrated_scope = nullptr;
   if (strcmp(_prefs.default_scope_name, "uk") == 0) migrated_scope = "gb";
-  else if (strcmp(_prefs.default_scope_name, "yorkshire") == 0) migrated_scope = "gb-yor";
-  else if (strcmp(_prefs.default_scope_name, "northwest") == 0) migrated_scope = "gb-nwk";
-  else if (strcmp(_prefs.default_scope_name, "eng-ne") == 0) migrated_scope = "gb-nth";
-  else if (strcmp(_prefs.default_scope_name, "eng-yh") == 0) migrated_scope = "gb-yor";
   if (migrated_scope != nullptr) {
     TransportKeyStore temp;
     TransportKey key;
@@ -1229,6 +1232,13 @@ void MyMesh::begin(bool has_display) {
   _store->loadContacts(this);
   bootstrapRTCfromContacts();
   addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
+#ifdef UMC_YORKSHIRE_DEFAULTS
+  // Public Yorkshire rooms. Loading saved channels afterwards replaces these slots when
+  // a user has already configured them, while a fresh radio is useful immediately.
+  addChannel("#yorkshire", "6hnpVn7sGxSMF08MudBN1w==");
+  addChannel("#northwest", "vXYxsH6KPlnQ07dNh3YeJg==");
+  addChannel("#northeast", "OxygrmADGT65+RmE7v713A==");
+#endif
   _store->loadChannels(this);
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);

@@ -1274,10 +1274,17 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.node_lat = ADVERT_LAT;
   _prefs.node_lon = ADVERT_LON;
   StrHelper::strncpy(_prefs.password, ADMIN_PASSWORD, sizeof(_prefs.password));
+#ifdef UMC_YORKSHIRE_DEFAULTS
+  _prefs.freq = 869.618f;
+  _prefs.sf = 8;
+  _prefs.bw = 62.5f;
+  _prefs.cr = 8;
+#else
   _prefs.freq = LORA_FREQ;
   _prefs.sf = LORA_SF;
   _prefs.bw = LORA_BW;
   _prefs.cr = LORA_CR;
+#endif
   _prefs.tx_power_dbm = LORA_TX_POWER;
   _prefs.advert_interval = 1;        // default to 2 minutes for NEW installs
   _prefs.flood_advert_interval = 47; // 47 hours
@@ -1334,6 +1341,28 @@ void MyMesh::begin(FILESYSTEM *fs, ArchiveStorage* archive) {
   acl.load(_fs, self_id);
   // TODO: key_store.begin();
   region_map.load(_fs);
+
+#ifdef UMC_YORKSHIRE_DEFAULTS
+  // Seed only an empty database. Upgrades must never replace an operator's saved tree.
+  if (region_map.getCount() == 0) {
+    static const char* const names[] = {
+        "yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire"};
+    RegionEntry* yorkshire = nullptr;
+    for (const char* name : names) {
+      RegionEntry* r = region_map.putRegion(name, 0);
+      if (r != nullptr) {
+        r->flags = 0;
+        if (strcmp(name, "yorkshire") == 0) yorkshire = r;
+      }
+    }
+    region_map.getWildcard().flags |= REGION_DENY_FLOOD;
+    if (yorkshire != nullptr) {
+      region_map.setHomeRegion(yorkshire);
+      region_map.setDefaultRegion(yorkshire);
+    }
+    region_map.save(_fs);
+  }
+#endif
 
   // establish default-scope
   {

@@ -23,10 +23,6 @@ constexpr const char* kNs = "umc";
 
 const char* canonicalRegion(const char* name) {
   if (strcmp(name, "uk") == 0) return "gb";
-  if (strcmp(name, "yorkshire") == 0) return "gb-yor";
-  if (strcmp(name, "northwest") == 0) return "gb-nwk";
-  if (strcmp(name, "eng-ne") == 0) return "gb-nth";
-  if (strcmp(name, "eng-yh") == 0) return "gb-yor";
   return name;
 }
 
@@ -108,14 +104,16 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.beep_on_msg = true;
   p.flash_on_msg = false;
   p.ack_display = 2;
-  // Public choices from the LocalMesh GB and island-of-Ireland conventions. This is only
-  // the client's scope picker: selecting one scope never configures or mixes repeater trees.
+  // Exact public names used by MeshCore Yorkshire, followed by the wider LocalMesh choices.
+  // A client's overall/default scope stays empty; each public room is scoped separately.
   static const char* const kRegions[] = {
+      "yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire",
       "gb", "gb-eng", "gb-sco", "gb-wls", "gb-nwk", "gb-yor", "gb-mid", "gb-sth",
       "gb-swt", "gb-est", "gb-nth", "ioi", "bhd", "snn", "dub", "noc", "sco", "ioi-admin"};
   for (size_t i = 0; i < sizeof(kRegions) / sizeof(kRegions[0]) && i < UMC_MAX_REGIONS; i++) {
     strncpy(p.regions[i], kRegions[i], sizeof(p.regions[i]) - 1);
   }
+  strcpy(p.ch_scopes, "#yorkshire=yorkshire;#northwest=northwest;#northeast=eng-ne");
 }
 
 bool UmcPrefsStore::isValidPin(const char* pin) {
@@ -175,7 +173,7 @@ void UmcPrefsStore::load(UmcPrefs& p) {
     snprintf(p.pin, sizeof(p.pin), "%08lu", static_cast<unsigned long>(r));
     save(p);
   } else if (regions_changed) {
-    save(p);  // persist one-time migration from UMC's former informal UK names
+    save(p);  // persist safe spelling cleanup without changing community region names
   }
 #endif
 }

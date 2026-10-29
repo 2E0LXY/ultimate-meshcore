@@ -41,7 +41,7 @@ struct UmcPrefs {
   // of its own. Communities agree these between themselves, so they are typed in, not
   // built in.
   char regions[32][30];
-  // Region scope per channel, as "#local=gb-yor;#national=gb". A channel not
+  // Region scope per channel, as "#yorkshire=yorkshire;#northeast=eng-ne". A channel not
   // listed uses the default scope. This is how the community guides ask channels to be
   // set up - one region per channel, not one for everything.
   char ch_scopes[160];

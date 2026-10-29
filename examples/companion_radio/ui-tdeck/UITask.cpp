@@ -954,7 +954,7 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
   const int avatar = mine ? 0 : 14;                  // the column the incoming avatar sits in
   const int max_w = SCR_W - 44 - avatar;
   const int pad = 4;
-  const int line_h = 11;
+  const int line_h = F_TINY->yAdvance;
   const int inner = max_w - pad * 2;
 
   // wrap on spaces
@@ -987,7 +987,7 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
     if (w > widest) widest = w;
   }
   const int bw = widest + pad * 2;
-  const int bh = line_count * line_h + 3;
+  const int bh = line_count * line_h + 5;
   const int bx = mine ? SCR_W - bw - 6 : 6 + avatar;
   const int by = y_bottom - bh;
 
@@ -999,12 +999,12 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
   if (selected) gfx()->drawRoundRect(bx - 2, by - 2, bw + 4, bh + 4, 8, TH.accent == fill_c ? 0xFFFF : TH.accent);
 
   const uint16_t tc = mine ? TH.mine_text : TH.theirs_text;
-  for (int i = 0; i < line_count; i++) textFClip(bx + pad, by + 2 + i * line_h, inner, lines[i], tc, F_TINY);
+  for (int i = 0; i < line_count; i++) textFClip(bx + pad, by + 3 + i * line_h, inner, lines[i], tc, F_TINY);
 
   if (!show_who) return by - 2;
 
   // the heading above the run: who it was from, when, and a tick on our own messages
-  const int hy = by - 9;
+  const int hy = by - F_TINY->yAdvance;
   char stamp[24];
   if (when) {
     DateTime dt(when);
@@ -1150,6 +1150,8 @@ void UITask::drawMessages() {
       _msg_row_y[_msg_rows] = y;            // top of this bubble
       _msg_row_bottom[_msg_rows] = bottom_before;
       _msg_row_idx[_msg_rows] = i;
+      _msg_name_top[_msg_rows] = (!e->outgoing && !same_run) ? y + 2 : -1;
+      _msg_name_bottom[_msg_rows] = (!e->outgoing && !same_run) ? y + 2 + F_TINY->yAdvance : -1;
       _msg_rows++;
     }
   }
@@ -1183,11 +1185,44 @@ void UITask::drawMessages() {
   // who we are writing to - drawn last, so a bubble scrolling off the top goes behind it
   fill(0, top, SCR_W, 16, TH.card);
   char hdr[48];
-  snprintf(hdr, sizeof(hdr), "To: %s%s", _to_channel ? "#" : "", _to_name);
-  textClip(4, top + 4, SCR_W - 60, hdr, TH.text);
-  button(SCR_W - 52, top, 50, 16, "change");
+  snprintf(hdr, sizeof(hdr), "To: %s", _to_name);
+  textClip(4, top + 4, SCR_W - 72, hdr, TH.text);
+  button(SCR_W - 70, top, 68, 16, "Channels", _conversation_picker);
+  if (_conversation_picker) drawConversationPicker(top + 17, list_bottom);
   if (_quick_open) drawQuickPanel();
   drawCompose();
+}
+
+void UITask::drawConversationPicker(int top, int bottom) {
+  fill(0, top, SCR_W, bottom - top, TH.bg);
+  textF(7, top + 4, "CHANNELS / ROOMS", TH.accent, F_SMALL);
+  _picker_rows = 0;
+  int y = top + 20;
+  ChannelDetails ch;
+  for (int i = 0; i < MAX_GROUP_CHANNELS && y + 19 <= bottom && _picker_rows < 12; i++) {
+    if (!the_mesh.getChannel(i, ch) || !ch.name[0]) continue;
+    const bool active = _to_channel && _to_channel_idx == i;
+    fill(4, y, SCR_W - 8, 18, active ? TH.mine : TH.card);
+    textFClip(10, y + 3, SCR_W - 20, ch.name, active ? TH.mine_text : TH.text, F_SMALL);
+    _picker_y[_picker_rows] = y;
+    _picker_kind[_picker_rows] = 0;
+    _picker_idx[_picker_rows++] = i;
+    y += 20;
+  }
+  ContactInfo c;
+  for (int i = 0; i < contactCount() && y + 19 <= bottom && _picker_rows < 12; i++) {
+    if (!contactAt(i, c) || c.type != ADV_TYPE_ROOM) continue;
+    const bool active = !_to_channel && memcmp(c.id.pub_key, _to_key, 6) == 0;
+    fill(4, y, SCR_W - 8, 18, active ? TH.mine : TH.card);
+    char name[42];
+    snprintf(name, sizeof(name), "Room: %s", c.name[0] ? c.name : "unnamed");
+    textFClip(10, y + 3, SCR_W - 20, name, active ? TH.mine_text : TH.text, F_SMALL);
+    _picker_y[_picker_rows] = y;
+    _picker_kind[_picker_rows] = 1;
+    _picker_idx[_picker_rows++] = i;
+    y += 20;
+  }
+  if (_picker_rows == 0) textF(8, top + 26, "No channels or rooms found", TH.dim, F_SMALL);
 }
 
 // The canned replies, over the conversation. Tapping one loads it into the composer so it
@@ -2282,7 +2317,7 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
     case SP_REGION:
       if (row == scopeCount()) {
         snprintf(label, label_n, "Yorkshire starter");
-        snprintf(value, value_n, "%s", _setup_confirm == row ? "tap again" : "radio, gb-yor, channels");
+        snprintf(value, value_n, "%s", _setup_confirm == row ? "tap again" : "radio + scoped rooms");
         break;
       }
       if (row == scopeCount() + 2) {
@@ -2292,7 +2327,7 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
       }
       if (row == scopeCount() + 1) {
         snprintf(label, label_n, "Repeater commands");
-        snprintf(value, value_n, "region put gb-yor gb ...");
+        snprintf(value, value_n, "Yorkshire + neighbours");
         break;
       }
       if (row < scopeCount()) {
@@ -2636,16 +2671,16 @@ void UITask::setupAction(int row) {
         _edit_len = 0;
         return;
       } else if (row == scopeCount() + 1) {
-        // LocalMesh's broad + local hierarchy for a Yorkshire repeater. Keep wildcard
-        // enabled for unscoped/backward-compatible traffic.
+        // Exact MeshCore Yorkshire repeater scopes. Unscoped floods are denied.
         StrHelper::strncpy(_console_out,
-                           "On each repeater:\nregion put gb\nregion put gb-yor gb\n"
-                           "region allowf gb\nregion allowf gb-yor\nregion home gb-yor\nregion allowf *\nregion save",
+                           "On each repeater:\nregion put yorkshire\nregion default yorkshire\n"
+                           "region put eng-yh\nregion put northwest\nregion put eng-ne\n"
+                           "region put derbyshire\nregion put lincolnshire\nregion denyf *\nregion save",
                            sizeof(_console_out));
         setupOpen(SP_CONSOLE);
         return;
       } else if (row == scopeCount()) {
-        // The shared radio profile, LocalMesh's exact Yorkshire scope, and three public channels.
+        // Shared radio profile and per-room Yorkshire scopes; the overall scope remains unset.
         if (_setup_confirm != row) {           // it changes the radio, so ask first
           _setup_confirm = row;
           StrHelper::strncpy(_setup_status, "Tap again: this retunes the radio", sizeof(_setup_status));
@@ -2657,16 +2692,16 @@ void UITask::setupAction(int row) {
           StrHelper::strncpy(_setup_status, radio, sizeof(_setup_status));
           break;
         }
-        umcCli("set scope gb-yor");
+        umcCli("set scope -");
         int added = 0;
         for (const char* name : {"yorkshire", "northwest", "northeast"}) {
           if (addHashChannel(name)) added++;
         }
         // each channel sends in its own region, as the community guide sets them up
-        umcCli("set chscope #yorkshire gb-yor");
-        umcCli("set chscope #northwest gb-nwk");
-        umcCli("set chscope #northeast gb-nth");
-        snprintf(_setup_status, sizeof(_setup_status), "UK narrow, scope gb-yor, %d channels", added);
+        umcCli("set chscope #yorkshire yorkshire");
+        umcCli("set chscope #northwest northwest");
+        umcCli("set chscope #northeast eng-ne");
+        snprintf(_setup_status, sizeof(_setup_status), "UK narrow, Yorkshire rooms, %d added", added);
       } else {
         setupOpen(SP_ROOT);
         return;
@@ -2959,35 +2994,30 @@ void UITask::handleTouch(const TouchEvent& ev) {
 
   if (_tab == TAB_MSGS) {
     const int top = BODY_Y + 2;
-    if (hit(ev, SCR_W - 52, top, 50, 16)) {   // change conversation
-      // cycle: channels with a name, then contacts we have messages from
-      ChannelDetails ch;
-      if (_to_channel) {
-        int next = _to_channel_idx + 1;
-        while (next < MAX_GROUP_CHANNELS && (!the_mesh.getChannel(next, ch) || !ch.name[0])) next++;
-        if (next < MAX_GROUP_CHANNELS) {
-          _to_channel_idx = next;
-          StrHelper::strncpy(_to_name, ch.name, sizeof(_to_name));
-        } else if (contactCount() > 0) {
-          selectContact(0);
-        }
-      } else {
-        // move to the next contact, then wrap back to channel 0
-        int idx = -1;
-        ContactInfo c;
-        for (int i = 0; i < contactCount(); i++) {
-          if (contactAt(i, c) && memcmp(c.id.pub_key, _to_key, 6) == 0) { idx = i; break; }
-        }
-        if (idx >= 0 && idx + 1 < the_mesh.getNumContacts()) {
-          selectContact(idx + 1);
-        } else {
-          _to_channel = true;
-          _to_channel_idx = 0;
-          if (the_mesh.getChannel(0, ch)) StrHelper::strncpy(_to_name, ch.name, sizeof(_to_name));
-        }
-      }
+    if (hit(ev, SCR_W - 70, top, 68, 16)) {
+      _conversation_picker = !_conversation_picker;
+      _quick_open = false;
       _dirty = true;
       return;
+    }
+    if (_conversation_picker && ev.released) {
+      for (int i = 0; i < _picker_rows; i++) {
+        if (ev.y < _picker_y[i] || ev.y >= _picker_y[i] + 18) continue;
+        if (_picker_kind[i] == 0) {
+          ChannelDetails ch;
+          if (the_mesh.getChannel(_picker_idx[i], ch)) {
+            _to_channel = true;
+            _to_channel_idx = _picker_idx[i];
+            StrHelper::strncpy(_to_name, ch.name, sizeof(_to_name));
+          }
+        } else {
+          selectContact(_picker_idx[i]);
+        }
+        _conversation_picker = false;
+        _dirty = true;
+        return;
+      }
+      if (ev.y >= top + 17) return;
     }
     if (hit(ev, SCR_W - 62, SCR_H - TAB_H - COMPOSE_H + 3, 58, 20)) { sendCompose(); return; }
     if (hit(ev, SCR_W - 106, SCR_H - TAB_H - COMPOSE_H + 3, 42, 20)) {
@@ -3023,6 +3053,17 @@ void UITask::handleTouch(const TouchEvent& ev) {
         if (ev.y >= _msg_row_y[i] && ev.y < _msg_row_bottom[i]) {
           const UmcChatLog::Entry* e = umc_chatlog.get(_msg_row_idx[i]);
           if (e != NULL) {
+            if (!e->outgoing && ev.y >= _msg_name_top[i] && ev.y < _msg_name_bottom[i]) {
+              ContactInfo c;
+              for (int j = 0; j < contactCount(); j++) {
+                if (contactAt(j, c) && memcmp(c.id.pub_key, e->key, 6) == 0) {
+                  selectContact(j);
+                  _reply_to[0] = 0;
+                  _msg_sel = -1;
+                  return;
+                }
+              }
+            }
             const bool retry = _msg_sel == _msg_row_idx[i] && e->outgoing && e->channel == 0xFF &&
                                e->expect_ack != 0 && !e->delivered && (millis() - e->sent_ms) > kAckWaitMs;
             if (retry) { retryFailedMessage(_msg_row_idx[i]); return; }

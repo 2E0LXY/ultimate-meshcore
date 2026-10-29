@@ -1193,6 +1193,11 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
     static const char* const gb_swt[] = {"gb:", "gb-swt:gb", nullptr};
     static const char* const gb_est[] = {"gb:", "gb-est:gb", nullptr};
     static const char* const gb_nth[] = {"gb:", "gb-nth:gb", nullptr};
+    static const char* const yorkshire[] = {
+        "yorkshire:", "eng-yh:", "northwest:", "eng-ne:", nullptr};
+    static const char* const northwest[] = {"northwest:", nullptr};
+    static const char* const eng_ne[] = {"eng-ne:", nullptr};
+    static const char* const eng_yh[] = {"eng-yh:", nullptr};
     static const char* const ioi[] = {"ioi:", nullptr};
     static const char* const bhd[] = {"ioi:", "bhd:ioi", nullptr};
     static const char* const snn[] = {"ioi:", "snn:ioi", nullptr};
@@ -1207,8 +1212,8 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
         {"gb-est", gb_est, "gb-est"}, {"gb-nth", gb_nth, "gb-nth"}, {"ioi", ioi, "ioi"},
         {"bhd", bhd, "bhd"}, {"snn", snn, "snn"}, {"dub", dub, "dub"}, {"noc", noc, "noc"},
         {"sco", sco, "sco"}, {"ioi-admin", ioi_admin, "ioi-admin"},
-        // Compatibility aliases create the current LocalMesh identifiers, never the old names.
-        {"uk", gb, "gb"}, {"northwest", gb_nwk, "gb-nwk"}, {"yorkshire", gb_yor, "gb-yor"}};
+        {"yorkshire", yorkshire, "yorkshire"}, {"northwest", northwest, "northwest"},
+        {"eng-ne", eng_ne, "eng-ne"}, {"eng-yh", eng_yh, "eng-yh"}, {"uk", gb, "gb"}};
     const Preset* chosen = nullptr;
     for (const auto& p : presets) {
       if (strcmp(v, p.id) == 0) chosen = &p;
@@ -1251,10 +1256,19 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
       snprintf(reply, reply_size, "Err - %s: %s", cmd, r);
       return true;
     }
+    snprintf(cmd, sizeof(cmd), "region default %s", chosen->home);
+    r[0] = 0;
+    _host->umcCommand(cmd, r, sizeof(r));
+    if (strncmp(r, "Err", 3) == 0) {
+      snprintf(reply, reply_size, "Err - %s: %s", cmd, r);
+      return true;
+    }
     // The Yorkshire mesh's standing advice: two neighbouring regions, drop unscoped (spam) floods, and save so it all
     // survives a reboot. Applied whenever Yorkshire is set up.
     if (strcmp(chosen->id, "gb-yor") == 0 || strcmp(chosen->id, "yorkshire") == 0) {
-      static const char* const extra[] = {"region put derbyshire", "region put lincolnshire", "region denyf *", "region save", nullptr};
+      static const char* const extra[] = {
+          "region put derbyshire", "region allowf derbyshire", "region put lincolnshire",
+          "region allowf lincolnshire", "region denyf *", "region save", nullptr};
       for (const char* const* e = extra; *e != nullptr; e++) {
         r[0] = 0;
         _host->umcCommand(*e, r, sizeof(r));

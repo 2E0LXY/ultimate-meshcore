@@ -247,7 +247,7 @@ const CL = ["companion"];
 
 // ================================================================ presets / constants
 const PRESETS = [
-  ["EU/UK (Narrow)", 869.618, 62.5, 8, 5], ["EU/UK (Medium Range)", 869.525, 250, 10, 5], ["EU/UK (Long Range)", 869.525, 250, 11, 5],
+  ["EU/UK (Narrow)", 869.618, 62.5, 8, 8], ["EU/UK (Medium Range)", 869.525, 250, 10, 5], ["EU/UK (Long Range)", 869.525, 250, 11, 5],
   ["Switzerland", 869.618, 62.5, 8, 5], ["Czech Republic", 869.432, 62.5, 7, 5], ["Portugal 869", 869.618, 62.5, 7, 5],
   ["Portugal 433", 433.375, 62.5, 9, 5], ["EU 433MHz", 433.65, 250, 11, 5], ["USA/Canada", 910.525, 62.5, 7, 5],
   ["USA Arizona", 908.205, 62.5, 9, 8], ["USA Philly", 902.25, 500, 11, 5], ["Australia", 915.8, 250, 10, 5],
@@ -663,7 +663,7 @@ async function runAction(act, reload) {
     // From the MeshCore Yorkshire guide: https://docs.meshcoreyorkshire.uk/repeaters/suggested-repeater-commands/
     const cmds = ["set flood.max 20", "set flood.max.advert 0", "set flood.max.unscoped 32", "set path.hash.mode 2",
       "set loop.detect minimal", "set flood.advert.interval 0", "set advert.interval 60", "set dutycycle 10"];
-    const regions = ["region put gb", "region put gb-yor gb", "region allowf gb", "region allowf gb-yor", "region home gb-yor", "region default gb-yor", "region put derbyshire", "region put lincolnshire", "region denyf *", "region save"];
+    const regions = ["region put yorkshire", "region put eng-yh", "region put northwest", "region put eng-ne", "region put derbyshire", "region put lincolnshire", "region allowf yorkshire", "region allowf eng-yh", "region allowf northwest", "region allowf eng-ne", "region allowf derbyshire", "region allowf lincolnshire", "region home yorkshire", "region default yorkshire", "region denyf *", "region save"];
     const withRegions = confirm(`Apply the Yorkshire mesh recommendations?\n\n${cmds.join("\n")}\n\nOK also adds the regions:\n${regions.join("\n")}\n\nCancel to stop, or Cancel then use the Regions page for regions only.`);
     if (!withRegions) return;
     const all = cmds.concat(regions);
@@ -1107,9 +1107,10 @@ async function renderRegions(view) {
     <table><thead><tr><th>Region</th><th>Flooding</th><th></th></tr></thead><tbody id="rBody"></tbody></table>
     <p class="msg" id="rDirty"></p>
     <div class="row"><button class="btn" id="rRef">Refresh</button><button class="btn pri" id="rSave">Save regions</button></div></div>
-    <div class="card"><h2>LocalMesh presets</h2><p class="sub">Choose one convention. Great Britain uses a <code>gb</code> parent; the island of Ireland uses the separate <code>ioi</code> hierarchy and must not be mixed with <code>gb-*</code>. The preset adds the parent and selected region, allows both, and sets home. Press <b>Save regions</b> afterwards.</p>
+    <div class="card"><h2>Region presets</h2><p class="sub">Yorkshire uses the exact community names shown below. Great Britain <code>gb-*</code> and island-of-Ireland <code>ioi</code> are separate conventions. A preset adds and allows its regions, then sets home and default.</p>
       <div class="row"><select id="rPreset" style="max-width:360px">
         <option value="">Choose a region…</option>
+        <optgroup label="MeshCore Yorkshire"><option value="yorkshire">Yorkshire recommended set</option><option value="northwest">North West — northwest</option><option value="eng-ne">North East — eng-ne</option><option value="eng-yh">Yorkshire & Humber — eng-yh</option></optgroup>
         <optgroup label="Great Britain"><option value="gb">Great Britain — gb</option><option value="gb-eng">England — gb-eng</option><option value="gb-sco">Scotland — gb-sco</option><option value="gb-wls">Wales — gb-wls</option><option value="gb-nwk">North West — gb-nwk</option><option value="gb-yor">Yorkshire — gb-yor</option><option value="gb-mid">Midlands — gb-mid</option><option value="gb-sth">South East — gb-sth</option><option value="gb-swt">South West — gb-swt</option><option value="gb-est">East of England — gb-est</option><option value="gb-nth">North East — gb-nth</option></optgroup>
         <optgroup label="Island of Ireland"><option value="ioi">Island of Ireland — ioi</option><option value="bhd">Ulster — bhd</option><option value="snn">Munster — snn</option><option value="dub">Leinster — dub</option><option value="noc">Connacht — noc</option><option value="sco">Optional Scotland link — sco</option><option value="ioi-admin">Optional admin / wardrive — ioi-admin</option></optgroup>
       </select><button class="btn" id="rPresetApply">Apply preset</button></div></div>
@@ -2368,6 +2369,10 @@ async function renderMap(view) {
 
 // ---------------------------------------------------------------- Region page (client)
 const REGION_PRESETS = [
+  {label: "Yorkshire room", scope: "yorkshire", group: "MeshCore Yorkshire"},
+  {label: "Yorkshire & Humber room", scope: "eng-yh", group: "MeshCore Yorkshire"},
+  {label: "North West room", scope: "northwest", group: "MeshCore Yorkshire"},
+  {label: "North East room", scope: "eng-ne", group: "MeshCore Yorkshire"},
   {label: "Great Britain", scope: "gb", group: "Great Britain"}, {label: "England", scope: "gb-eng", group: "Great Britain"},
   {label: "Scotland", scope: "gb-sco", group: "Great Britain"}, {label: "Wales", scope: "gb-wls", group: "Great Britain"},
   {label: "North West", scope: "gb-nwk", group: "Great Britain"}, {label: "Yorkshire", scope: "gb-yor", group: "Great Britain"},
@@ -2384,7 +2389,7 @@ async function renderClientRegion(view) {
       <div class="grid" id="rgNow"></div></div>
     <div class="card"><h2>Set up for your region</h2><p class="sub">Great Britain and island-of-Ireland codes are separate conventions. Select only the convention used by your local repeaters.</p><div id="rgPresets"></div></div>
     <div class="card"><h2>Region scope for everything this radio sends</h2><p class="sub">Used when a channel has no scope of its own (and for adverts and direct messages that flood). Use the exact 1-29 character lowercase identifier.</p>
-      <div class="row"><input type="text" id="rgScope" maxlength="29" pattern="[a-z0-9-]+" placeholder="gb-yor" style="max-width:220px"><button class="btn pri" id="rgSave">Save</button><button class="btn" id="rgClear">None</button></div></div>
+      <div class="row"><input type="text" id="rgScope" maxlength="29" pattern="[a-z0-9-]+" placeholder="leave blank for per-channel scopes" style="max-width:280px"><button class="btn pri" id="rgSave">Save</button><button class="btn" id="rgClear">None</button></div></div>
     <div class="card"><h2>Room servers</h2><p class="sub">Room servers are contacts: they appear on the Contacts page when their advert is heard (or in the waiting list if manual add is on). Open one and use <b>Log in…</b>, then its posts arrive in Messages.</p>
       <div id="rgRooms"></div></div>`;
   MC.start();
