@@ -16,15 +16,15 @@ getent group umcnet-dash >/dev/null || groupadd --system umcnet-dash
 id umcnet-dash >/dev/null 2>&1 || useradd --system --gid umcnet-dash --home-dir /nonexistent --shell /usr/sbin/nologin umcnet-dash
 install -d -o root -g root -m 755 /opt/umcnet-dash
 install -d -o umcnet-dash -g umcnet-dash -m 750 /var/lib/umcnet-dash
-for f in umcnet_dash.py umcnet_enrol.py dash.html public.html umcnet-dash.service umcnet_admin.py umcnet-admin.service; do curl -fsSL "$RAW/dash/$f" -o "/opt/umcnet-dash/$f.new"; done
+for f in umcnet_dash.py umcnet_enrol.py umcnet_msgs.py dash.html public.html umcnet-dash.service umcnet_admin.py umcnet-admin.service; do curl -fsSL "$RAW/dash/$f" -o "/opt/umcnet-dash/$f.new"; done
 curl -fsSL "$RAW/umcnet-user" -o /opt/umcnet/umcnet-user.new && chmod 755 /opt/umcnet/umcnet-user.new && mv /opt/umcnet/umcnet-user.new /opt/umcnet/umcnet-user
-python3 -m py_compile /opt/umcnet-dash/umcnet_dash.py.new /opt/umcnet-dash/umcnet_enrol.py.new
-mv /opt/umcnet-dash/umcnet_enrol.py.new /opt/umcnet-dash/umcnet_enrol.py; mv /opt/umcnet-dash/umcnet_dash.py.new /opt/umcnet-dash/umcnet_dash.py; mv /opt/umcnet-dash/dash.html.new /opt/umcnet-dash/dash.html; mv /opt/umcnet-dash/public.html.new /opt/umcnet-dash/public.html
+python3 -m py_compile /opt/umcnet-dash/umcnet_dash.py.new /opt/umcnet-dash/umcnet_enrol.py.new /opt/umcnet-dash/umcnet_msgs.py.new
+mv /opt/umcnet-dash/umcnet_enrol.py.new /opt/umcnet-dash/umcnet_enrol.py; mv /opt/umcnet-dash/umcnet_msgs.py.new /opt/umcnet-dash/umcnet_msgs.py; mv /opt/umcnet-dash/umcnet_dash.py.new /opt/umcnet-dash/umcnet_dash.py; mv /opt/umcnet-dash/dash.html.new /opt/umcnet-dash/dash.html; mv /opt/umcnet-dash/public.html.new /opt/umcnet-dash/public.html
 mv /opt/umcnet-dash/umcnet-dash.service.new /etc/systemd/system/umcnet-dash.service
 python3 -m py_compile /opt/umcnet-dash/umcnet_admin.py.new && mv /opt/umcnet-dash/umcnet_admin.py.new /opt/umcnet-dash/umcnet_admin.py
 mv /opt/umcnet-dash/umcnet-admin.service.new /etc/systemd/system/umcnet-admin.service
 chmod 644 /opt/umcnet-dash/umcnet_admin.py
-chmod 644 /opt/umcnet-dash/umcnet_dash.py /opt/umcnet-dash/umcnet_enrol.py /opt/umcnet-dash/dash.html /opt/umcnet-dash/public.html
+chmod 644 /opt/umcnet-dash/umcnet_dash.py /opt/umcnet-dash/umcnet_enrol.py /opt/umcnet-dash/umcnet_msgs.py /opt/umcnet-dash/dash.html /opt/umcnet-dash/public.html
 /opt/umcnet/umcnet-user export          # the dashboard keeps its own copy of the account list (no passwords)
 
 # The broker accounts are only touched when they are missing or their permissions are out of date: changing an account reloads

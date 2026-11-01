@@ -156,7 +156,7 @@ class Network(unittest.TestCase):
         return bytes([(4 << 2) | 1, len(hops)]) + bytes(hops) + body
 
     def setUp(self):
-        dash.NODES.clear(); dash.LINKS.clear(); dash.JOURNEYS.clear()
+        dash.NODES.clear(); dash.LINKS.clear(); dash.JOURNEYS.clear(); dash.DEV.clear()
 
     def test_an_advert_gives_its_position_and_kind(self):
         i = dash.parse_packet(self.advert(self.KEY_A, "Hill", 53.7012, -1.5534))
@@ -190,16 +190,20 @@ class Network(unittest.TestCase):
 
     def test_a_response_links_to_the_node_its_sender_hash_names(self):
         recv = "AA" * 32
-        dash.NODES[self.KEY_B.upper()] = {"key": self.KEY_B.upper(), "name": "B", "type": 2, "lat": None, "lon": None, "first": 0, "last": 0, "adverts": 1}
+        dash.NODES[self.KEY_B.upper()] = {"key": self.KEY_B.upper(), "name": "B", "type": 2, "lat": None, "lon": None, "first": 0, "last": time.time(), "adverts": 1}
         raw = bytes([(1 << 2) | 1, 1, 0x33, 0xAA, 0x22, 9, 9])               # RESP: destination AA, sender 22, via 33
         dash.note_network(recv, dash.parse_packet(raw), 4.0, -95, time.time())
         self.assertIn((recv, self.KEY_B.upper()), dash.LINKS)
         self.assertEqual("B", dash.network_view()["nodes"][0]["name"])
 
     def test_the_view_lists_nodes_links_and_journeys(self):
+        d = dash.device("AA" * 32, "LBA"); d["last"] = time.time(); d["name"] = "Rep"
         dash.note_network("AA" * 32, dash.parse_packet(self.advert(self.KEY_A, "Hill", 53.7, -1.5, hops=[0x44])), 6.0, -97, time.time())
         v = dash.network_view()
-        self.assertEqual((1, 1, 1), (len(v["nodes"]), len(v["links"]), len(v["journeys"])))
+        self.assertEqual((2, 1, 1), (len(v["nodes"]), len(v["links"]), len(v["journeys"])))                      # the repeater, the node it heard, their link
+        rep = next(n for n in v["nodes"] if n["key"] == "AA" * 32); self.assertTrue(rep["online"] and rep["info"]["name"] == "Rep")
+        self.assertEqual(1, len(dash.network_view(hours=1)["nodes"][:1])); d["last"] = 0; dash.NODES[self.KEY_A.upper()]["last"] = time.time() - 3 * 86400
+        self.assertEqual(0, len(dash.network_view(hours=24)["nodes"]))                                           # not on the network and not heard lately: not on the map
         self.assertEqual(1, v["links"][0]["hops"]); self.assertEqual("44", v["journeys"][0]["path"][0]["h"])
 
 
@@ -318,6 +322,82 @@ class RiskyCommands(unittest.TestCase):
     def test_the_secret_words_still_redact_the_audit_log(self):
         self.assertIn("[secret redacted]", dash.audit_command("set wifi.pwd hunter2"))
         self.assertIn("[secret redacted]", dash.audit_command("get lat", "53.1"))
+
+
+class Messages(unittest.TestCase):
+    """Channel messages: the crypto matches the firmware's own code, and the dashboard's engine reads, dedupes and sends."""
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        sp = importlib.util.spec_from_file_location("umcnet_msgs", os.path.join(HERE, "umcnet_msgs.py"))
+        cls.M = importlib.util.module_from_spec(sp); sp.loader.exec_module(cls.M)
+
+    def setUp(self):                      # the defaults, whatever an earlier test saved
+        dash.CONF.clear(); dash.CONF.update(json.loads(json.dumps(dash.DEFAULTS)))
+
+    def test_aes_matches_fips_197(self):
+        key = bytes(range(16)); pt = bytes.fromhex("00112233445566778899aabbccddeeff"); ct = bytes.fromhex("69c4e0d86a7b0430d8cdb78070b4c55a")
+        self.assertEqual(ct, self.M.aes_encrypt_block(key, pt)); self.assertEqual(pt, self.M.aes_decrypt_block(key, ct))
+
+    def test_message_bytes_match_the_firmwares_own_code(self):
+        # produced by src/Utils.cpp encryptThenMAC (built from the firmware sources) for key i*7+3, ts 1790000000, "2E0LXY-TEST: hello yorkshire"
+        import base64, hashlib, hmac, struct
+        key = bytes((i * 7 + 3) & 255 for i in range(16)); ch = self.M.Channel("t", base64.b64encode(key).decode())
+        cipher = self.M.aes_ecb(ch.key, struct.pack("<I", 1790000000) + b"\x00" + b"2E0LXY-TEST: hello yorkshire", True)
+        self.assertEqual("7b740379decd3c1c7f5bd690655bf7eb88e2a7cafbe721ed2b2a92921a4b2652337d54969b82137a1eeb0fdcd5ba4a1c9153", (hmac.new(ch.secret, cipher, hashlib.sha256).digest()[:2] + cipher).hex())
+
+    def test_hashtag_and_public_channels(self):
+        import base64
+        self.assertEqual("6hnpVn7sGxSMF08MudBN1w==", base64.b64encode(self.M.Channel("#yorkshire").key).decode())      # UMC's built-in key for #yorkshire
+        self.assertEqual(0x11, self.M.Channel("Public", self.M.PUBLIC_PSK).hash)                                       # MeshCore's Public channel hash
+        with self.assertRaises(ValueError): self.M.Channel("secret-room")
+
+    def test_a_scoped_message_names_its_region_and_only_the_right_channel_reads_it(self):
+        yk = self.M.Channel("#yorkshire"); raw = self.M.build_group_text(yk, "Daren", "hello", 1790000000, region="eng-yh"); p = self.M.parse_wire(raw)
+        self.assertEqual(0, p["route"]); self.assertEqual("eng-yh", self.M.find_region(["yorkshire", "eng-yh"], p)); self.assertEqual("", self.M.find_region(["yorkshire"], p))
+        ch, ts, flags, text = self.M.decrypt_group([self.M.Channel("#other"), yk], p["payload"]); self.assertEqual(("#yorkshire", "Daren: hello"), (ch.name, text))
+        self.assertIsNone(self.M.decrypt_group([self.M.Channel("#other")], p["payload"]))
+        u = self.M.parse_wire(self.M.build_group_text(yk, "A", "x", 1790000000)); self.assertEqual((1, None), (u["route"], u["codes"]))
+
+    def test_damage_is_refused(self):
+        yk = self.M.Channel("#yorkshire"); p = self.M.parse_wire(self.M.build_group_text(yk, "A", "x", 1790000000))["payload"]
+        for i in range(len(p)):
+            bad = bytearray(p); bad[i] ^= 0x40
+            self.assertIsNone(self.M.decrypt_group([yk], bytes(bad)), i)
+
+    def test_the_engine_records_a_message_once_with_every_repeater_that_heard_it(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM messages"); dash.DEV.clear()
+        for i, n in enumerate(("A", "B")): dash.device("%02X" % (i + 1) * 32, "LBA")["name"] = "Repeater " + n
+        yk = self.M.Channel("#yorkshire"); raw = self.M.build_group_text(yk, "Sam", "anyone on?", int(time.time()), region="yorkshire")
+        now = time.time(); dash.note_message("01" * 32, raw, "5.5", "-90", now); dash.note_message("02" * 32, raw, "9.0", "-80", now + 1); dash.note_message("01" * 32, raw, "5.5", "-90", now + 2)
+        v = dash.messages_view(); self.assertEqual(1, len(v["messages"])); m = v["messages"][0]
+        self.assertEqual(("#yorkshire", "yorkshire", "Sam", "anyone on?", "rx"), (m["chan"], m["region"], m["sender"], m["text"], m["dir"])); self.assertEqual(["Repeater A", "Repeater B"], sorted(h["name"] for h in m["heard"]))
+        self.assertEqual(1, len(dash.messages_view(region="yorkshire")["messages"])); self.assertEqual(0, len(dash.messages_view(region="eng-yh")["messages"])); self.assertEqual(1, len(dash.messages_view(q="anyone")["messages"]))
+        other = self.M.build_group_text(self.M.Channel("#nobody-knows"), "X", "secret", int(now)); dash.note_message("01" * 32, other, "1", "-100", now)
+        self.assertEqual(1, len(dash.messages_view()["messages"])); self.assertEqual(1, sum(x["n"] for x in dash.messages_view()["unreadable"].values()))   # counted, not shown
+
+    def test_settings_for_channels_and_regions_are_validated(self):
+        self.assertIsNone(dash.conf_update({"messages": {"channels": [{"name": "Public", "psk": self.M.PUBLIC_PSK}, {"name": "#sheffield"}], "regions": ["yorkshire", "#derbyshire"], "sender": "2E0LXY-DASH"}}))
+        self.assertEqual(["yorkshire", "derbyshire"], dash.CONF["messages"]["regions"])
+        for bad in ({"channels": [{"name": "no-key"}]}, {"channels": [{"name": "#x", "psk": "AAAA"}]}, {"regions": ["bad name"]}, {"sender": "x" * 40}, {"keep_days": 0}):
+            self.assertIsNotNone(dash.conf_update({"messages": bad}), bad)
+
+    def test_a_sent_message_is_built_for_the_bridge_and_limited(self):
+        class Conn:
+            up = True
+            def __init__(self): self.sent = []
+            def publish(self, topic, payload, retain=False): self.sent.append((topic, payload))
+        dash.db_init(); dash.DB.execute("DELETE FROM messages"); dash.DEV.clear(); d = dash.device("01" * 32, "LBA"); d["last"] = time.time(); d["name"] = "Rep"
+        c = Conn(); dash.CTL["conn"] = c; dash.TX_TIMES.clear()
+        r = dash.send_message("t", "#yorkshire", "yorkshire", "hello from the dashboard"); self.assertTrue(r["ok"], r)
+        topic, body = c.sent[0]; self.assertEqual("meshcore/LBA/%s/raw" % dash.DASH_ID, topic); self.assertIn(b'"data":"', body)          # the exact form a repeater's bridge parses
+        j = json.loads(body); p = self.M.parse_wire(bytes.fromhex(j["data"])); ch, ts, fl, text = self.M.decrypt_group([self.M.Channel("#yorkshire")], p["payload"]); self.assertEqual("UMC-DASH: hello from the dashboard", text)
+        self.assertEqual("yorkshire", self.M.find_region(["yorkshire"], p)); v = dash.messages_view(); self.assertEqual(("tx", "UMC-DASH"), (v["messages"][0]["dir"], v["messages"][0]["sender"]))
+        for _ in range(5): dash.send_message("t", "#yorkshire", "", "x")
+        self.assertIn("6 messages", dash.send_message("t", "#yorkshire", "", "x")["error"])
+        dash.TX_TIMES.clear()
+        for bad in (("#nope", "", "x"), ("#yorkshire", "mars", "x"), ("#yorkshire", "", ""), ("#yorkshire", "", "x" * 200), ("#yorkshire", "", "a\nb")): self.assertFalse(dash.send_message("t", *bad)["ok"], bad)
+        dash.CTL["conn"] = None
 
 
 class AdminHelper(unittest.TestCase):

@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import umcnet_enrol as ENR
+import umcnet_msgs as MSG
 
 CFG = {
     "mqtt_host": os.environ.get("DASH_MQTT_HOST", "127.0.0.1"), "mqtt_port": int(os.environ.get("DASH_MQTT_PORT", "1884")),
@@ -26,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.4.1"
+VERSION = "2.5"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -137,21 +138,37 @@ def nodes_load():
     for l in d.get("links", []):
         LINKS[(l["r"], l["s"])] = {"n": l["n"], "hops_min": l["hops_min"], "hops_last": l.get("hops_last", 0), "snr": l.get("snr"), "rssi": l.get("rssi"), "first": l.get("first", 0), "last": l["last"], "types": collections.Counter(l.get("types", {}))}
 
-def network_view():
-    now = time.time()
+def device_info(d, now):
+    """What the dashboard knows about a connected repeater, for its popup on the map."""
+    st = d.get("stats") or {}; sv = (SETTINGS.get(d["id"]) or {}).get("values", {}); br = d.get("bridge") or {}
+    strip = lambda v: str(v or "").lstrip("> ").strip()
+    return {"id": d["id"], "name": d["name"], "area": d["area"], "board": d.get("model", ""), "fw": d.get("fw", ""), "client": d.get("client", ""), "radio": d.get("radio", ""), "repeat": d.get("repeat", ""), "status": d.get("status", ""),
+            "first": d.get("first", 0), "last": d.get("last", 0), "skew": d.get("skew"), "pm": round(rate_per_min("pkt:" + d["id"], 300), 2), "n_rx": d.get("n_rx", 0), "n_tx": d.get("n_tx", 0), "rssi": d.get("rssi"), "snr": d.get("snr"),
+            "stats": {k: st.get(k) for k in ("battery_mv", "uptime_secs", "noise_floor", "tx_air_secs", "rx_air_secs", "recv_errors", "n_sent_flood", "n_sent_direct", "n_recv_flood", "n_recv_direct", "total_up_time_secs", "queue_len", "errors") if k in st} or dict(st),
+            "bridge": br, "types": dict(d.get("types") or {}), "build": strip(sv.get("build")), "update": strip(sv.get("update.status")), "tx_power": strip(sv.get("tx")), "advert_every": strip(sv.get("advert.interval")), "flood_advert_every": strip(sv.get("flood.advert.interval")),
+            "flood_max": strip(sv.get("flood.max")), "bridge_on": strip(sv.get("mqtt.custom.bridge")).split(",")[0], "include_tx": strip(sv.get("mqtt.tx")), "has_key": d["id"] in KEYS}
+
+def network_view(hours=24):
+    now = time.time(); cutoff = now - max(1.0, float(hours)) * 3600
     with LOCK:
         nodes = []; seen = set()
         for k, n in NODES.items():
             d = DEV.get(k); seen.add(k)
-            nodes.append({"key": k, "name": (d["name"] if d and d["name"] else n["name"]) or k[:8], "type": n["type"], "lat": n["lat"], "lon": n["lon"], "last": n["last"], "adverts": n["adverts"], "connected": bool(d and d["last"] and now - d["last"] < CONF["stale_minutes"] * 60)})
+            conn = bool(d and d["last"] and now - d["last"] < CONF["stale_minutes"] * 60)
+            if not conn and n["last"] < cutoff: continue                       # not on the network and not heard lately: not on the map
+            nodes.append({"key": k, "name": (d["name"] if d and d["name"] else n["name"]) or k[:8], "type": n["type"], "lat": n["lat"], "lon": n["lon"], "last": n["last"], "first": n.get("first", 0), "adverts": n["adverts"], "connected": conn,
+                          "online": conn and (d.get("status") != "offline"), "info": device_info(d, now) if d else None})
         for k, d in DEV.items():
-            if k not in seen: nodes.append({"key": k, "name": d["name"] or k[:8], "type": 2, "lat": d.get("lat"), "lon": d.get("lon"), "last": d["last"], "adverts": 0, "connected": bool(d["last"] and now - d["last"] < CONF["stale_minutes"] * 60)})
+            if k not in seen:
+                conn = bool(d["last"] and now - d["last"] < CONF["stale_minutes"] * 60)
+                if conn: nodes.append({"key": k, "name": d["name"] or k[:8], "type": 2, "lat": d.get("lat"), "lon": d.get("lon"), "last": d["last"], "first": d.get("first", 0), "adverts": 0, "connected": True, "online": d.get("status") != "offline", "info": device_info(d, now)})
         for n in nodes:                                       # a connected repeater's position may come from the control channel
             d = DEV.get(n["key"])
             if d and n["lat"] is None and d.get("lat") is not None: n["lat"], n["lon"] = d["lat"], d["lon"]
-        links = [{"recv": a, "node": b, "hops": l["hops_min"], "hops_last": l["hops_last"], "n": l["n"], "snr": l["snr"], "rssi": l["rssi"], "first": l["first"], "last": l["last"], "types": dict(l["types"])} for (a, b), l in LINKS.items()]
+        keep = {n["key"] for n in nodes}
+        links = [{"recv": a, "node": b, "hops": l["hops_min"], "hops_last": l["hops_last"], "n": l["n"], "snr": l["snr"], "rssi": l["rssi"], "first": l["first"], "last": l["last"], "types": dict(l["types"])} for (a, b), l in LINKS.items() if a in keep and b in keep]
         journeys = [dict(j) for j in list(JOURNEYS)[-80:]][::-1]
-    return {"now": now, "nodes": nodes, "links": links, "journeys": journeys}
+    return {"now": now, "hours": hours, "nodes": nodes, "links": links, "journeys": journeys}
 
 def locate_loop():
     """Ask each repeater that has a control key where it is, until we know (for the map)."""
@@ -236,6 +253,8 @@ def on_publish(topic, payload, retained=False):
             except (ValueError, TypeError): pass
             if direction == "rx" and raw:
                 note_network(did, info, j.get("SNR"), j.get("RSSI"), now)
+                try: note_message(did, raw, j.get("SNR"), j.get("RSSI"), now)
+                except Exception as e: sys.stderr.write("message: %s\n" % e)
                 h = hashlib.sha1(raw).hexdigest()[:16]
                 e = HEARD.get(h)
                 if e is None: e = HEARD[h] = {"t": now, "devs": {}, "type": info.get("type", "?")}; note_rate("unique")
@@ -468,6 +487,7 @@ def db_init():
     DB = sqlite3.connect(os.path.join(CFG["data"], "dash.sqlite"), check_same_thread=False, isolation_level=None)
     DB.execute("PRAGMA journal_mode=WAL"); DB.execute("PRAGMA synchronous=NORMAL")
     DB.execute("CREATE TABLE IF NOT EXISTS samples(ts INTEGER, k TEXT, v REAL)"); DB.execute("CREATE INDEX IF NOT EXISTS s_k ON samples(k, ts)")
+    DB.execute("CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, seen INTEGER, chan TEXT, chash TEXT, region TEXT, sender TEXT, text TEXT, pkey TEXT UNIQUE, dir TEXT, hops INTEGER, snr REAL, rssi INTEGER, heard TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS m_seen ON messages(seen)")
     DB.execute("CREATE TABLE IF NOT EXISTS events(ts INTEGER, kind TEXT, client TEXT, user TEXT, ip TEXT, text TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS e_ts ON events(ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS audit(ts INTEGER, who TEXT, action TEXT, target TEXT, detail TEXT, ok INTEGER)"); DB.execute("CREATE INDEX IF NOT EXISTS a_ts ON audit(ts)")
 
@@ -496,6 +516,7 @@ def sampler_loop():
         try:
             if int(time.time()) % 300 < 60: nodes_save()
             enrol_housekeeping()
+            if int(time.time()) % 3600 < 60: messages_housekeeping()
             now = int(time.time()); vals = snapshot_values()
             DB.executemany("INSERT INTO samples VALUES(?,?,?)", [(now, k, float(v)) for k, v in vals.items()])
             if now % 3600 < 60:
@@ -514,11 +535,15 @@ def history(keys, seconds):
     return out
 
 # ----------------------------------------------------------------------------- settings of the dashboard itself
-DEFAULTS = {"enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
+DASH_ID = "DA" * 32                          # the id the dashboard publishes its own messages under (a repeater's bridge hands them to its radio)
+MSG_DEFAULTS = {"tx_enabled": True, "sender": "UMC-DASH", "keep_days": 30,
+                "channels": [{"name": "Public", "psk": MSG.PUBLIC_PSK}, {"name": "#yorkshire"}, {"name": "#northwest"}, {"name": "#northeast"}, {"name": "#derbyshire"}, {"name": "#lincolnshire"}, {"name": "#sheffield"}, {"name": "#wakefield"}],
+                "regions": ["yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire", "sheffield", "wakefield"]}
+DEFAULTS = {"messages": MSG_DEFAULTS, "map_hours": 24, "enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
             "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14, "confirm_risky": True, "control_enabled": True,
             "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True},
             "labels": {}}
-RANGES = {"stale_minutes": (2, 1440), "cert_warn_days": (2, 60), "cert_bad_days": (1, 30), "disk_warn_pct": (50, 99), "mem_warn_pct": (50, 99), "flap_count": (2, 50),
+RANGES = {"map_hours": (1, 8760), "stale_minutes": (2, 1440), "cert_warn_days": (2, 60), "cert_bad_days": (1, 30), "disk_warn_pct": (50, 99), "mem_warn_pct": (50, 99), "flap_count": (2, 50),
           "skew_seconds": (5, 3600), "auth_fail_warn": (1, 1000), "auth_fail_bad": (2, 10000), "keep_days": (1, 90)}
 CONF = json.loads(json.dumps(DEFAULTS))
 
@@ -530,6 +555,7 @@ def conf_load():
     merged = json.loads(json.dumps(DEFAULTS))
     for k, v in raw.items():
         if k == "alerts" and isinstance(v, dict): merged["alerts"].update({a: b for a, b in v.items() if a in merged["alerts"]})
+        elif k == "messages" and isinstance(v, dict): merged["messages"].update(v)
         elif k in merged: merged[k] = v
     CONF.clear(); CONF.update(merged)
 
@@ -564,6 +590,34 @@ def conf_update(patch):
                     if not isinstance(b, str) or (b and not re.match(r"^https?://[^\s]{4,300}$", b)): return "the alert address must start with http:// or https://"
                     new["alerts"][a] = b.strip()
                 else: new["alerts"][a] = bool(b)
+        elif k == "messages":
+            if not isinstance(v, dict): return "messages must be an object"
+            m = new["messages"]
+            for a, b in v.items():
+                if a == "tx_enabled": m[a] = bool(b)
+                elif a == "keep_days":
+                    try: b = int(b)
+                    except (TypeError, ValueError): return "keep_days must be a whole number"
+                    if not 1 <= b <= 365: return "keep_days must be between 1 and 365"
+                    m[a] = b
+                elif a == "sender":
+                    if not isinstance(b, str) or not re.match(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,23}$", b.strip()): return "the sender name is 1 to 24 letters, digits, spaces, dots, dashes or underscores"
+                    m[a] = b.strip()
+                elif a == "regions":
+                    if not isinstance(b, list) or len(b) > 40 or not all(isinstance(x, str) and re.match(r"^[A-Za-z0-9][A-Za-z0-9-]{0,30}$", x.strip().lstrip("#")) for x in b): return "regions: a list of names (letters, digits, dashes)"
+                    m[a] = [x.strip().lstrip("#") for x in b]
+                elif a == "channels":
+                    if not isinstance(b, list) or len(b) > 40: return "channels: a list of up to 40"
+                    out = []
+                    for c in b:
+                        if not isinstance(c, dict) or not isinstance(c.get("name"), str): return "each channel needs a name"
+                        e = {"name": c["name"].strip()}
+                        if c.get("psk"): e["psk"] = str(c["psk"]).strip()
+                        try: MSG.Channel(e["name"], e.get("psk"))
+                        except Exception as ex: return "channel %s: %s" % (e["name"], ex)
+                        if len(e["name"]) > 31 or not re.match(r"^[A-Za-z0-9#][A-Za-z0-9 #_-]*$", e["name"]): return "channel names are letters, digits, # _ - and spaces"
+                        out.append(e)
+                    m[a] = out
         elif k == "labels":
             if not isinstance(v, dict): return "labels must be an object"
             lab = {}
@@ -654,6 +708,126 @@ def control_key(dev, create=False, new=False):
         if (new or create and dev not in KEYS):
             KEYS[dev] = {"key": secrets.token_hex(32), "created": int(time.time())}; keys_save()
         return KEYS.get(dev, {}).get("key")
+
+# ----------------------------------------------------------------------------- messages (channels and regions)
+MSGSTAT = {}                                # channel hash -> {"n", "last", "regions"}: messages we cannot read (no key for that channel)
+TX_TIMES = collections.deque(maxlen=20)
+
+def msg_channels():
+    out = []
+    for c in CONF["messages"]["channels"]:
+        try: out.append(MSG.Channel(c["name"], c.get("psk") or None))
+        except Exception: pass
+    return out
+
+def note_message(did, raw, snr, rssi, now):
+    """A repeater heard a packet: if it is a group text, record it (once, with every repeater that heard it)."""
+    if did == DASH_ID or not DB: return
+    p = MSG.parse_wire(raw)
+    if not p or p["ptype"] != 5 or len(p["payload"]) < 19: return
+    pkey = hashlib.sha1(p["payload"]).hexdigest()[:20]
+    entry = {"d": did, "h": len(p["path"]), "s": float(snr) if snr not in (None, "") else None, "r": int(rssi) if rssi not in (None, "") else None, "t": int(now)}
+    regions = CONF["messages"]["regions"]
+    region = (MSG.find_region(regions, p) or "?") if p["codes"] else ""
+    with LOCK:
+        row = DB.execute("SELECT id, heard, region, hops, snr FROM messages WHERE pkey=?", (pkey,)).fetchone()
+        if row:
+            heard = json.loads(row[1] or "[]"); old = next((e for e in heard if e["d"] == did), None)
+            if old is None: heard.append(entry)
+            elif entry["h"] < old["h"]: old.update(entry)
+            hops = min(row[3] if row[3] is not None else 99, entry["h"]); snrs = [x for x in (row[4], entry["s"]) if x is not None]
+            DB.execute("UPDATE messages SET heard=?, hops=?, snr=?, region=? WHERE id=?", (json.dumps(heard, separators=(",", ":")), hops, max(snrs) if snrs else None, row[2] if row[2] not in ("", "?") or not region else region, row[0]))
+            return
+    r = MSG.decrypt_group(msg_channels(), p["payload"])
+    with LOCK:
+        if r is None:                                           # a channel we have no key for: count it, nothing more
+            st = MSGSTAT.setdefault("%02X" % p["payload"][0], {"n": 0, "last": 0, "regions": collections.Counter()}); st["n"] += 1; st["last"] = now; st["regions"][region or "-"] += 1
+            return
+        ch, ts, flags, text = r
+        sender, body = MSG.split_sender(text)
+        try: DB.execute("INSERT OR IGNORE INTO messages(ts,seen,chan,chash,region,sender,text,pkey,dir,hops,snr,rssi,heard) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (ts, int(now), ch.name, "%02X" % ch.hash, region, sender, body, pkey, "rx", entry["h"], entry["s"], entry["r"], json.dumps([entry], separators=(",", ":"))))
+        except Exception as e: sys.stderr.write("messages: %s\n" % e)
+
+def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
+    where, args = [], []
+    if chan: where.append("chan=?"); args.append(chan)
+    if region == "-": where.append("region=''")
+    elif region: where.append("region=?"); args.append(region)
+    if direction in ("rx", "tx"): where.append("dir=?"); args.append(direction)
+    if before: where.append("id<?"); args.append(int(before))
+    if q: where.append("(text LIKE ? OR sender LIKE ?)"); args += ["%" + q + "%"] * 2
+    sql = "SELECT id,ts,seen,chan,chash,region,sender,text,dir,hops,snr,rssi,heard FROM messages" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC LIMIT ?"
+    with LOCK:
+        rows = DB.execute(sql, args + [max(1, min(int(limit), 300))]).fetchall()
+        day = int(time.time()) - 86400
+        counts = [{"chan": r[0], "region": r[1], "n": r[2]} for r in DB.execute("SELECT chan, region, COUNT(*) FROM messages WHERE seen>? GROUP BY chan, region", (day,)).fetchall()]
+        unread = {k: {"n": v["n"], "last": v["last"], "regions": dict(v["regions"])} for k, v in MSGSTAT.items()}
+        names = {d["id"]: (d["name"] or d["id"][:8]) for d in DEV.values()}
+    out = []
+    for r in rows:
+        heard = json.loads(r[12] or "[]")
+        out.append({"id": r[0], "ts": r[1], "seen": r[2], "chan": r[3], "chash": r[4], "region": r[5], "sender": r[6], "text": r[7], "dir": r[8], "hops": r[9], "snr": r[10], "rssi": r[11],
+                    "heard": [{"name": names.get(h["d"], h["d"][:8]), "hops": h["h"], "snr": h["s"], "rssi": h["r"]} for h in sorted(heard, key=lambda x: x["h"])]})
+    c = CONF["messages"]
+    return {"messages": out, "channels": [{"name": x["name"], "hash": "%02X" % MSG.Channel(x["name"], x.get("psk")).hash} for x in c["channels"]], "regions": c["regions"], "counts": counts,
+            "unreadable": unread, "tx_enabled": bool(c["tx_enabled"]), "sender": c["sender"]}
+
+def send_message(who, chan, region, text, sender=None):
+    c = CONF["messages"]
+    if not c["tx_enabled"]: return {"ok": False, "error": "sending is switched off in Settings"}
+    conn = CTL.get("conn")
+    if not conn or not conn.up: return {"ok": False, "error": "the control link to the broker is down, so the message cannot be handed to the repeaters"}
+    text = (text or "").strip()
+    if not text: return {"ok": False, "error": "type a message first"}
+    if len(text.encode("utf-8")) > 130: return {"ok": False, "error": "that message is too long (130 characters at most)"}
+    if any(ord(ch) < 32 for ch in text): return {"ok": False, "error": "no line breaks"}
+    sender = (sender or c["sender"] or "UMC-DASH").strip()
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,23}$", sender): return {"ok": False, "error": "the sender name is 1 to 24 letters, digits, spaces, dots, dashes or underscores"}
+    ch = next((x for x in msg_channels() if x.name == chan), None)
+    if not ch: return {"ok": False, "error": "that channel is not set up"}
+    region = (region or "").strip().lstrip("#")
+    if region and region not in c["regions"]: return {"ok": False, "error": "that region is not in the list"}
+    now = time.time()
+    with LOCK:
+        while TX_TIMES and now - TX_TIMES[0] > 60: TX_TIMES.popleft()
+        if len(TX_TIMES) >= 6: return {"ok": False, "error": "at most 6 messages a minute"}
+        TX_TIMES.append(now)
+    live = [d for d in DEV.values() if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60]
+    if not live: return {"ok": False, "error": "no repeater is online to send it"}
+    raw = MSG.build_group_text(ch, sender, text, int(now), region or None)
+    area = CONF["join_iata"]
+    body = json.dumps({"origin": "UMC Dashboard", "origin_id": DASH_ID, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now)), "type": "RAW", "data": raw.hex().upper()}, separators=(",", ":")).encode()
+    conn.publish("meshcore/%s/%s/raw" % (area, DASH_ID), body)
+    pkey = hashlib.sha1(MSG.parse_wire(raw)["payload"]).hexdigest()[:20]
+    with LOCK: DB.execute("INSERT OR IGNORE INTO messages(ts,seen,chan,chash,region,sender,text,pkey,dir,hops,snr,rssi,heard) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (int(now), int(now), ch.name, "%02X" % ch.hash, region, sender, text, pkey, "tx", 0, None, None, "[]"))
+    audit(who, "message sent", ch.name + (" / " + region if region else ""), "%s: %s" % (sender, text[:60]))
+    return {"ok": True, "repeaters": [d["name"] or d["id"][:8] for d in live]}
+
+BRIDGE_RX = re.compile(r"heard (\d+), passed on (\d+), dropped (\d+)")
+def bridge_poll_loop():
+    """Once a minute ask each online repeater how many packets its UMC Net bridge heard from the others and passed on to its radio."""
+    time.sleep(90)
+    while True:
+        try:
+            for dev in list(KEYS):
+                d = DEV.get(dev)
+                if not d or not d.get("last") or time.time() - d["last"] > CONF["stale_minutes"] * 60: continue
+                r = send_command(dev, "get mqtt.custom.bridge", "bridge-poll", timeout=10, quiet=True)
+                m = BRIDGE_RX.search(r.get("reply") or "") if r.get("ok") else None
+                if not m: continue
+                heard, passed, dropped = (int(x) for x in m.groups()); now = time.time(); b = d.get("bridge")
+                if b and now - b["t"] < 400 and heard >= b["heard"] and passed >= b["passed"]:
+                    dt = max(1.0, (now - b["t"]) / 60.0)
+                    d["bridge"] = {"t": now, "heard": heard, "passed": passed, "dropped": dropped, "heard_pm": round((heard - b["heard"]) / dt, 2), "passed_pm": round((passed - b["passed"]) / dt, 2), "dropped_pm": round((dropped - b["dropped"]) / dt, 2)}
+                else: d["bridge"] = {"t": now, "heard": heard, "passed": passed, "dropped": dropped, "heard_pm": 0, "passed_pm": 0, "dropped_pm": 0}
+                time.sleep(1.2)
+        except Exception as e: sys.stderr.write("bridge poll: %s\n" % e)
+        time.sleep(55)
+
+def messages_housekeeping():
+    try:
+        with LOCK: DB.execute("DELETE FROM messages WHERE seen<?", (int(time.time()) - CONF["messages"]["keep_days"] * 86400,))
+    except Exception: pass
 
 # ----------------------------------------------------------------------------- zero-touch enrolment (docs/umc/ENROL.md)
 ENROL = {"pending": {}, "declined": {}, "approved": {}}
@@ -786,7 +960,7 @@ def remember_setting(dev, cmd, reply):
         s["values"][key] = reply
         s["updated"] = time.time(); s["error"] = ""
 
-def send_command(dev, cmd, who="dashboard", confirm=False, timeout=14):
+def send_command(dev, cmd, who="dashboard", confirm=False, timeout=14, quiet=False):
     dev = (dev or "").upper()
     if not CONF["control_enabled"]: return {"ok": False, "error": "remote control is switched off in the settings"}
     if not re.match(r"^[0-9A-F]{64}$", dev): return {"ok": False, "error": "no such repeater"}
@@ -810,10 +984,10 @@ def send_command(dev, cmd, who="dashboard", confirm=False, timeout=14):
     finally:
         CTL["waiting"].pop(cid, None)
     if not got:
-        audit(who, "command", dev[:12], audit_command(cmd, "no answer"), False)
+        if not quiet: audit(who, "command", dev[:12], audit_command(cmd, "no answer"), False)
         return {"ok": False, "error": "no answer in %d s: control may be off on the repeater, the key may not match, or its clock may be wrong" % timeout}
     r = w["reply"]; ok = bool(r.get("ok")); text = str(r.get("reply", ""))
-    audit(who, "command", dev[:12], audit_command(cmd, text), ok)
+    if not quiet or not ok: audit(who, "command", dev[:12], audit_command(cmd, text), ok)
     if ok: remember_setting(dev, cmd, text)
     CTL["last"][dev] = {"cmd": "[secret command]" if command_secret(cmd) else cmd, "reply": "[redacted]" if command_secret(cmd) else text, "ok": ok, "t": time.time()}
     return {"ok": ok, "reply": text, "error": None if ok else text}
@@ -1082,6 +1256,7 @@ class H(BaseHTTPRequestHandler):
                     try: out["join"] = make_join_code(name, r["password"], CONF["join_iata"], control_key(dev, create=True) if re.match(r"^[0-9A-F]{64}$", dev) else None, CONF["join_bridge"])
                     except ValueError as e: out["join_error"] = str(e)
                 return self.send(200, json.dumps(out))
+            if p == "/api/messages/send": return self.send(200, json.dumps(send_message(who, str(body.get("channel", "")), str(body.get("region", "")), str(body.get("text", "")), body.get("sender"))))
             if p == "/api/enrol/approve":
                 r = enrol_approve(who, body.get("id", ""), body.get("name"), body.get("bridge")); return self.send(200, json.dumps(r))
             if p == "/api/enrol/decline": return self.send(200, json.dumps(enrol_decline(who, body.get("id", ""))))
@@ -1114,7 +1289,11 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/public/api/overview": return self.send(200, json.dumps(public_overview(), default=str))
             if u.path == "/public/api/network": return self.send(200, json.dumps(public_network_view(), default=str))
             if u.path == "/public/api/health": return self.send(200, json.dumps({"ok": True, "mqtt": MQTT["state"]}))
-            if u.path == "/api/network": return self.send(200, json.dumps(network_view()))
+            if u.path == "/api/network": return self.send(200, json.dumps(network_view(float(parse_qs(u.query).get("hours", [CONF["map_hours"]])[0]))))
+            if u.path == "/api/messages":
+                q = parse_qs(u.query); g = lambda k, d="": q.get(k, [d])[0]
+                try: return self.send(200, json.dumps(messages_view(g("channel"), g("region"), g("dir"), int(g("before", "0") or 0), int(g("limit", "100") or 100), g("q"))))
+                except ValueError: return self.send(400, '{"error":"bad request"}')
             if u.path == "/api/audit":
                 secs = max(60, min(90 * 86400, int(q.get("range", ["604800"])[0])))
                 rows = DB.execute("SELECT ts,who,action,target,detail,ok FROM audit WHERE ts>=? ORDER BY ts DESC LIMIT 500", (int(time.time()) - secs,)).fetchall()
@@ -1148,7 +1327,7 @@ def export_accounts_soon():
 
 def main():
     db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
-    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop): threading.Thread(target=fn, daemon=True).start()
+    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)
     try: srv.serve_forever()

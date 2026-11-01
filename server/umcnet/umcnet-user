@@ -97,7 +97,8 @@ def acl_for(name, info):
             out += [f"topic read umcnet/v1/+/dev/{dev}/cmd", f"topic write umcnet/v1/+/dev/{dev}/resp"]
     elif role == "controller":
         out += ["topic write umcnet/v1/+/dev/+/cmd", "topic read umcnet/v1/+/dev/+/resp",
-                "topic read umcnet/v1/enrol/hello", "topic write umcnet/v1/enrol/grant/#"]      # zero-touch enrolment: hear requests, answer them
+                "topic read umcnet/v1/enrol/hello", "topic write umcnet/v1/enrol/grant/#",
+                "topic write meshcore/+/%s/raw" % ("DA" * 32)]      # messages sent from the dashboard (handed to the repeaters' bridges)      # zero-touch enrolment: hear requests, answer them
     elif role == "enrol":
         # the public doorbell a new repeater knocks with: it may send its signed request and read the answers,
         # which are encrypted so that only the repeater they are for can open them
