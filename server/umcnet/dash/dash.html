@@ -381,7 +381,8 @@ function vControl(o) {
   const loadState = d.settings_loading ? "Loading settings…" : d.settings_updated ? `Settings loaded ${ago(d.settings_updated)}` : d.settings_error ? `Settings unavailable: ${d.settings_error}` : "Waiting to preload settings…";
   const state = !o.config.control_enabled ? "Remote control is switched off in Settings." : o.control.state !== "connected" ? "The control link to the broker is not ready: " + (o.control.error || o.control.state) : !d.has_key ? "No control key yet for this repeater. Press Control setup and paste the commands into its Console." : !online ? "This repeater has not been heard from for a while, so a command would not reach it." : "";
   const field = ([k, label, type, ph]) => {
-    const v = rep(vals[k]), id = "cf_" + k.replace(/\W/g, "_");
+    // some replies are a whole status line ("on, heard 14397, passed on 13807, ..."): a drop-down needs just the first word
+    const raw = rep(vals[k]), v = (type === "onoff" || type.startsWith("select:")) ? raw.split(/[\s,]+/)[0].toLowerCase() : raw, id = "cf_" + k.replace(/\W/g, "_");
     const input = type === "onoff" ? `<select id="${id}" data-keep="1">${["", "on", "off"].map(x => `<option ${x === v ? "selected" : ""}>${x}</option>`).join("")}</select>` : type.startsWith("select:") ? `<select id="${id}">${[""].concat(type.slice(7).split(",")).map(x => `<option ${x === v ? "selected" : ""}>${x}</option>`).join("")}</select>` : `<input id="${id}" type="${type === "number" ? "text" : "text"}" value="${esc(v)}" placeholder="${esc(ph || "")}" style="width:100%">`;
     return `<tr><td style="width:36%"><b>${esc(label)}</b><div class="tr" style="font-size:11px">${esc(k)}</div></td><td>${input}</td><td style="width:90px"><button class="tool" data-apply="${k}" data-fid="${id}">Apply</button></td></tr>`;
   };
