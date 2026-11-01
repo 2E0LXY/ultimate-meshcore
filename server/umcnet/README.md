@@ -208,3 +208,9 @@ are only given to the administrator. Re-running `install-dash.sh` keeps every lo
 **Messages** refresh every five seconds while the tab is open; new ones are highlighted and counted on the tab when you are
 elsewhere. **Reply** fills in the channel, the region and `@[sender]`. Room servers' messages are encrypted for their members
 only, so they cannot be shown. On the map a station that was reflashed or replaced (new key, same name) is shown once, newest first.
+
+### Screenshots
+
+`server/umcnet/dash/shots_dashboard.py <folder>` takes the dashboard pictures used in the README and manual from a real broker and
+dashboard fed by simulated repeaters with demo names; `web/umc/shots_web.py <folder>` takes the repeater and client page pictures
+from their built-in demo mode, and the web flasher.

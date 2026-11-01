@@ -344,14 +344,30 @@ UMC Net joins repeaters over the internet through a broker you run yourself ([se
 | Tab | What it gives you |
 |---|---|
 | Overview | Repeaters and clients online, packets and messages a minute, dials for CPU, memory, disk, load, certificate and logins, a live data-flow diagram, the checks, per-repeater and bandwidth charts, latest events |
+| **Messages** | Every channel message your repeaters hear, live, with channel, region, sender and which repeaters heard it; send and reply into a channel or region |
 | **Network** | A map of every node the repeaters hear, with a link for each pair coloured by hops (green direct, blue 1 hop, purple 2, amber 3, orange 4+), filters, a table of links and the journey of each packet |
 | Repeaters | One card per repeater (device id, model, firmware, battery, noise floor, airtime, clock offset, packet types) and which repeaters hear the same packets |
 | **Control** | Automatically preload and change repeater settings, run the complete signed CLI, update or roll back firmware, restart and label it; actions are confirmed and recorded |
 | Clients, Accounts | Everything connected; accounts with approve, block, new password and remove |
 | Traffic, Diagnostics, Broker, System, Log | Live packets with senders, the checks and refused logins, every broker statistic, the server, the broker's log |
+| **Users** | A login for each person: administrator, owner (controls only their own repeaters, sees everything) or viewer |
 | **Settings** | Limits for every check, history length, confirmation of risky commands, alerts to a web address or ntfy, the dashboard password, downloads, service restarts |
 
-![Network map](docs/images/umcnet-network.png)
+![Network map: online repeaters are green with a yellow edge; click one for its details](docs/images/umcnet-network.png)
+
+**Messages.** Every group message your repeaters hear appears live on the Messages tab: the channel, the region it was sent into, who sent it and which of your repeaters heard it, how many hops away. Pick a channel or region to narrow it, and **Reply** or send into any channel or region; your repeaters transmit it. The dashboard reads the channels you list in Settings (a `#hashtag` channel needs only its name).
+
+![Messages](docs/images/umcnet-messages.png)
+
+**Data flow.** The overview shows both directions: what each repeater hears and publishes (green), and what the broker hands back for its radio to send out for the bridge (amber), so you can see one repeater's traffic reaching the others.
+
+<img src="docs/images/umcnet-flow.png" width="640" alt="Data flow in both directions">
+
+**A login for each person.** The administrator adds people on the **Users** tab. An owner sees the whole network and every message but controls and updates only the repeaters ticked for them; a viewer only looks. Each person changes their own password, and messages they send go out under their own name.
+
+| Users (administrator) | What an owner sees on Control |
+|---|---|
+| <img src="docs/images/umcnet-users.png" width="420"> | <img src="docs/images/umcnet-owner.png" width="420"> |
 
 **Remote administration, safely.** A repeater obeys nothing until you set a control key and turn `mqtt.control` on. Each command is signed (HMAC-SHA-256 over the device id, the time, a counter and the command), must be recent, newer than the repeater's last restart and in order, and is rate limited to 60 a minute. The signed administrator gets the complete device CLI, including WiFi, broker and firmware commands. A wrong signature gets no answer at all. Commands that change the device ask for confirmation, every action goes in the audit log, and secret commands and replies are redacted there.
 
@@ -365,7 +381,7 @@ UMC Net joins repeaters over the internet through a broker you run yourself ([se
 
 **Approving new repeaters.** A new repeater account waits as *pending*: it can connect and listen, but cannot publish or be controlled. The dashboard shows who connected, from where and the start of its device id; you paste its full id (it must match the one that connected) and approve. Block shuts an account out at once, and the dashboard warns if a different device uses an approved account.
 
-| Control | Accounts and approval |
+| Control (settings, firmware and neighbours with names, read when you open it) | Accounts and approval |
 |---|---|
 | <img src="docs/images/umcnet-control.png" width="420"> | <img src="docs/images/umcnet-accounts.png" width="420"> |
 

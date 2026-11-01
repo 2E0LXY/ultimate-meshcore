@@ -80,6 +80,8 @@ It builds on upstream MeshCore 1.17.1 and the MeshCore-EastMesh fork, and brings
 
 ### 3.1 Web flasher (easiest)
 
+![The web flasher: pick the board and the firmware type, then Install](../images/web-flasher.png)
+
 1. Open **https://2e0lxy.github.io/ultimate-meshcore/** in Chrome or Edge on a computer.
 2. Choose your **board** and **firmware type**.
 3. Plug the device in, press **Install**, select the USB serial port and flash the fixed firmware image.
@@ -140,6 +142,8 @@ pio run -e umc_heltec_v3_repeater
 
 ## 4. First-time setup
 
+![The setup wizard on a new device](../images/setup-wizard.png)
+
 A new or erased device, or one where you run `setup start`, enters **setup mode**.
 
 1. The display shows **SETUP: join WiFi**, the hotspot name `UMC-Setup-XXXX` and **Open – no password**.
@@ -198,6 +202,8 @@ Display modes (`set display.mode`):
 
 ## 6. The web interface
 
+![Every setting has a ? with what it is, how to use it, why it matters and how it works](../images/repeater-help.png)
+
 Open `http://<device IP>/` or `http://umc-<name>.local/` from any device on the same network.
 
 - **Sign in** with the admin password. Sessions end after 30 minutes idle (`set http.timeout`).
@@ -213,6 +219,8 @@ Every web setting is a normal command. You can do the same from the USB serial c
 
 ## 7. Dashboard
 
+![The repeater's dashboard](../images/repeater-dashboard.png)
+
 - **Node summary**: uptime, battery, UTC clock, packets received/sent, neighbour count, transmit queue, repeat status, free memory.
 - **Network**: WiFi network, LAN IP, signal, hotspot, `.local` name, MQTT status.
 - **Radio**: preset name, frequency, BW · SF · CR, TX power, noise floor, last RSSI/SNR, TX airtime.
@@ -224,6 +232,8 @@ The dashboard refreshes every 15 seconds.
 ---
 
 ## 8. Radio
+
+![Radio settings](../images/repeater-radio.png)
 
 All nodes in a mesh must use the same **frequency, bandwidth and spreading factor**. The coding rate can differ.
 
@@ -243,6 +253,8 @@ All nodes in a mesh must use the same **frequency, bandwidth and spreading facto
 ---
 
 ## 9. Mesh & routing
+
+![Mesh and routing settings](../images/repeater-mesh.png)
 
 *(Repeaters and room servers)*
 
@@ -283,6 +295,8 @@ Actions: `advert` (flood advert now), `advert.zerohop`, `discover.neighbors`.
 
 ## 11. Regions
 
+![Regions](../images/repeater-regions.png)
+
 Regions limit how far **flood** traffic spreads, so local chatter stays local.
 
 - Each repeater keeps a **region tree**. `*` is everything without a region.
@@ -303,6 +317,8 @@ Commands: `region`, `region put <name> [parent]`, `region remove <name>`, `regio
 ---
 
 ## 12. Network
+
+![Network: WiFi networks, address, hotspot, services and time](../images/repeater-network.png)
 
 ### 12.1 WiFi networks
 
@@ -366,6 +382,8 @@ The device checks every 30 seconds that your router is still reachable. If the r
 
 ## 13. MQTT
 
+![MQTT: the UMC Net switch at the top, everything else under Advanced](../images/repeater-umcnet-join.png)
+
 MQTT uploads what the repeater hears to network maps and analysers.
 
 1. Set a **location code** (IATA airport code for your area, e.g. `LBA`): `set mqtt.iata LBA`. Brokers stay idle while it is `UNSET`.
@@ -421,6 +439,12 @@ A bridge links two LoRa areas through another medium. The Heltec V3 build includ
 ---
 
 ## 16. Neighbours, routes, trace and live traffic
+
+| Routes and trace | Live traffic |
+|---|---|
+| <img src="../images/repeater-routes.png" width="420"> | <img src="../images/repeater-traffic.png" width="420"> |
+
+![The map on the repeater's own page](../images/repeater-map.png)
 
 - **Neighbours** page: repeaters heard directly, with their **name**, how long ago and SNR. Names come from adverts; a neighbour restored after a reboot shows "name not heard yet" until its next advert (names saved before the reboot are kept). **Forget** removes one. **Discover neighbours** asks nearby repeaters to answer.
 
@@ -487,6 +511,8 @@ Other ways to reach the same command line:
 ---
 
 ## 18. Firmware updates
+
+![Firmware and maintenance](../images/firmware-update.png)
 
 ### 18.0 Through the browser (every board)
 
@@ -560,6 +586,14 @@ esptool --chip esp32s3 --port COMx -b 921600 write-flash 0x0 firmware-merged.bin
 
 ## 20. Using apps and other tools
 
+| Messages | Contacts | Channels |
+|---|---|---|
+| <img src="../images/app-messages.png" width="280"> | <img src="../images/app-contacts.png" width="280"> | <img src="../images/app-channels.png" width="280"> |
+
+| Radio | Map |
+|---|---|
+| <img src="../images/app-radio.png" width="420"> | <img src="../images/app-map.png" width="420"> |
+
 | Tool | How it connects to a UMC repeater |
 |---|---|
 | **Official MeshCore app**, **meshcore-open** | Connect to your own client radio, then log in to the repeater over the mesh with its admin password. Status, settings and command line all work. |
@@ -587,6 +621,10 @@ Notes:
 - `get app.status` shows whether it's on and how many apps are connected.
 
 ### 20.1 Ultimate MeshCore Desktop (Windows and Linux)
+
+| Connect | Messages |
+|---|---|
+| <img src="../images/desktop-connect.png" width="420"> | <img src="../images/desktop-messages.png" width="420"> |
 
 A program for your computer that gives you the complete web interface for any radio you can reach, including ones with no WiFi.
 
@@ -642,6 +680,8 @@ On **Firmware & maintenance**, **Update through this browser** and **Upload a fi
 
 ## 21. Ultimate MeshCore Client
 
+![The client's dashboard](../images/client-dashboard.png)
+
 The **Ultimate MeshCore Client** is the companion (personal radio) version of UMC. It is the standard MeshCore companion firmware, so every MeshCore app works with it, with the UMC web interface, WiFi and updates added on top.
 
 ### 21.1 What it does
@@ -676,6 +716,10 @@ Every link sees the same contacts, channels and messages. The browser keeps its 
 
 ### 21.4 Messages
 
+| Channel messages | A direct message |
+|---|---|
+| <img src="../images/client-messages.png" width="420"> | <img src="../images/client-dm.png" width="420"> |
+
 - The left column lists channels and contacts, newest conversation first, with unread counts. The search box filters by name.
 - Type a message and press **Enter** (Shift+Enter adds a new line). The counter shows bytes used. Direct messages allow 160 bytes; channel messages lose a few bytes to your name.
 - Direct messages show **queued**, **submitting to radio**, **sent · pending delivery ACK**, **delivered** (with ACK round-trip time), **reply received**, or **failed**. A reply's hop figure is its **return path**; MeshCore's ACK does not report the exact outbound hop count.
@@ -688,6 +732,8 @@ Every link sees the same contacts, channels and messages. The browser keeps its 
 - History is stored **in this browser** (last 400 messages per conversation). **Clear history** removes it from this browser only.
 
 ### 21.5 Contacts
+
+![Contacts, with repeater status](../images/client-contacts.png)
 
 - Filter by type or favourites, and search by name or key.
 - **Open** shows the tools for a contact:
@@ -708,12 +754,18 @@ Every link sees the same contacts, channels and messages. The browser keeps its 
 
 ### 21.5a Routes, trace and map
 
+| Routes and trace | Map |
+|---|---|
+| <img src="../images/client-routes.png" width="420"> | <img src="../images/client-map.png" width="420"> |
+
 - **Routes & trace** lists every contact with the route direct messages take, naming each repeater (ids are the first bytes of their keys). **Set route** fixes a route, e.g. `a1,b2,c3`; **Discover** asks the mesh for the best one; **Reset** floods the next message so a new route is learnt; **Trace** shows the signal each hop heard.
 - **Trace any path** at the top traces a hop list you type, out and back (`a1,b2,a1`).
 - **Map** shows everyone who shares a location on OpenStreetMap (blue = this radio, orange = repeaters, green = room servers, purple = people). The map is drawn by your browser, so it needs internet access; without it you get a list with map links. The Map page is on repeaters too, using the nodes they have heard.
 - **Region** selects an exact Great Britain or island-of-Ireland scope and lists the room servers the radio knows.
 
 ### 21.6 Channels
+
+![Channels](../images/client-channels.png)
 
 | Kind | Use it when |
 |---|---|
@@ -726,6 +778,8 @@ Every link sees the same contacts, channels and messages. The browser keeps its 
 
 ### 21.6a Region scope (Great Britain and island of Ireland)
 
+![Region scope](../images/client-region.png)
+
 Regional meshes ask clients to **scope** flood traffic so it does not cross the whole country. Set **Region scope for sends** (Messaging settings, or `set scope gb-yor`) and flood messages, channel posts and adverts carry that exact scope; repeaters configured for it pass them on and others drop them.
 
 - Great Britain uses `gb` and the documented `gb-*` examples. The island of Ireland uses the separate `ioi`, `bhd`, `snn`, `dub` and `noc` community codes; do not substitute `gb-nir` or mix the trees.
@@ -737,6 +791,10 @@ Regional meshes ask clients to **scope** flood traffic so it does not cross the 
 
 ### 21.7 Client settings
 
+| Messaging settings | Bluetooth and apps |
+|---|---|
+| <img src="../images/client-messaging-settings.png" width="420"> | <img src="../images/client-apps.png" width="420"> |
+
 | Page | Settings |
 |---|---|
 | **Radio** | Preset / frequency / bandwidth / SF / CR (applied immediately), TX power, RX boosted gain, airtime factor, RX delay. |
@@ -746,6 +804,8 @@ Regional meshes ask clients to **scope** flood traffic so it does not cross the 
 | **Network, Live traffic, Console, Firmware, Backup** | As for the repeater (sections 12, 16–19). |
 
 ### 21.8 T-Deck and T-Deck Plus: touch screen and maps
+
+<img src="../images/tdeck-splash.png" width="420" alt="T-Deck start screen">
 
 The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x240 screen, using the keyboard, trackball and touch panel. It is the same client firmware, so Bluetooth, USB, WiFi apps, the web interface and updates all work as on any other board.
 
@@ -1033,6 +1093,8 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 
 ## UMC Net: network dashboard, remote control and approvals
 
+![The UMC Net dashboard](../images/umcnet-overview.png)
+
 UMC Net links repeaters over the internet through a broker you run (Mosquitto behind Caddy). Three parts:
 
 1. **On the repeater** (MQTT page): the custom broker settings, *UMC Net bridge* (hands packets other repeaters heard to the local mesh, off by default, rate limited) and *Remote control* (obeys signed commands from your dashboard, off by default, needs a control key).
@@ -1040,6 +1102,8 @@ UMC Net links repeaters over the internet through a broker you run (Mosquitto be
 3. **Accounts and approval**: each repeater has its own broker account. A new account is *pending* until you approve it by pasting the repeater's full device id; it can listen but cannot publish or be controlled until then.
 
 **Join with one switch (firmware 0.1.27).** In the repeater's MQTT page switch **UMC Net** on (or `set mqtt.umcnet on`). Open the dashboard's **Accounts** tab, check the request (name, device id), and press **Approve**. The repeater is given its own account, remote control and the bridge, encrypted so only it can read them, and connects within a minute; nothing is typed. **Decline** ignores it until you press **Forget**; **Remove** takes an approved repeater off the network. See [ENROL.md](ENROL.md).
+
+<img src="../images/umcnet-enrol.png" width="560" alt="A repeater asking to join"> <img src="../images/repeater-umcnet-join.png" width="300" alt="The UMC Net switch on the repeater">
 
 **Join with one line.** On the dashboard's Accounts tab add the repeater (or press *Join code* on its row) and copy the line it shows. Paste it into the repeater's Console, or into *Join code* on its MQTT page. It sets the broker, account, area, raw packets, bridge and remote-control key in one go. `get mqtt.umcnet` shows the state; `set mqtt.umcnet off` / `on` switches the link. A code carries the repeater's password: keep it private, and a new code (which gives the account a new password) replaces an old one.
 
@@ -1052,3 +1116,40 @@ The public viewer at `https://net.<domain>/public/` is read-only. It shows opera
 **The map on a repeater's own page** draws a line from the device to every node it knows, coloured the same way, with a legend.
 
 The full installation and operating guide is in [`server/umcnet/README.md`](../../server/umcnet/README.md).
+
+### Messages
+
+The **Messages** tab shows every group message your repeaters hear, live (it refreshes every few seconds and counts new ones on the tab while you are elsewhere): the channel, the region it was sent into, the sender, the text and which of your repeaters heard it and how many hops away. Narrow it by channel, region, heard or sent, or search. To send, pick a channel and (if you like) a region, type up to 130 characters and press **Send**; **Reply** on a message fills in its channel, region and `@[sender]`. Your repeaters transmit it through their bridge. The dashboard can read only the channels listed under **Settings → Messaging** (a `#hashtag` channel needs only its name, any other its key), and names a region only if it is in the list there. Room servers' messages are encrypted for their members and cannot be shown.
+
+![Messages](../images/umcnet-messages.png)
+
+![Channels and regions the Messages tab uses](../images/umcnet-settings-messaging.png)
+
+### The map
+
+Your repeaters that are connected and online are green dots with a yellow edge; one that is not on the network is not drawn. Other nodes appear if heard in the time you choose (an hour to 30 days). Click any dot for its details; for your repeaters that is the board, firmware, uptime, battery, noise floor, airtime, packet mix, bridge traffic, the main settings and who it hears. A station that was reflashed or replaced is shown once, under its newest key.
+
+![The map with a repeater's details](../images/umcnet-network.png)
+
+### Data flow
+
+The overview's data-flow picture shows both directions for each repeater: **in**, packets it hears by radio and publishes (green), and **out**, packets the broker hands back for its radio to transmit for the bridge (amber), read once a minute. If one repeater shows packets in and another shows packets out, the bridge is carrying traffic between them.
+
+<img src="../images/umcnet-flow.png" width="640" alt="Data flow in both directions">
+
+### Control and neighbours
+
+The Control tab reads the repeater's settings, firmware state and neighbours (with names from any repeater's adverts) as soon as you open it, and the neighbours again every minute.
+
+![Control](../images/umcnet-control.png)
+
+<img src="../images/umcnet-neighbours.png" width="700" alt="Neighbours with names">
+
+### Logins for each person
+
+The administrator adds people on the **Users** tab: a login name, a password (12 or more characters with a capital letter and a number), a role and the repeaters they control. An **owner** sees the whole network and every message, but controls, updates and restarts only their own repeaters, and sends messages under their own name; a **viewer** only looks. Each person changes their own password on their Settings tab. Removing a login stops it at once.
+
+![Users](../images/umcnet-users.png)
+
+![What an owner sees: only their own repeater on Control](../images/umcnet-owner.png)
+

@@ -76,7 +76,7 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 .dash2 code{background:#0d2219;border:1px solid #1b3a30;border-radius:6px;padding:1px 6px;font-size:12px;color:#8dffb0}
 .dash2 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .dash2 .tr{color:var(--mu)}.dash2 .conn b{white-space:nowrap}
-.umcpop .leaflet-popup-content-wrapper{background:#0d2219;color:#e9f7ef;border:1px solid #1f4a37;border-radius:12px}.umcpop .leaflet-popup-tip{background:#0d2219}.umcpop .leaflet-popup-content{margin:12px 14px;max-height:430px;overflow:auto}.pop h3{margin:0 0 6px;font-size:15px}.pop h4{margin:10px 0 3px;font-size:12px;color:#9fd8b6}.pp{border-collapse:collapse;width:100%}.pp td{padding:2px 10px 2px 0;font-size:12px;vertical-align:top;border:0}.pp td:first-child{white-space:nowrap}
+.umcpop .leaflet-popup-content-wrapper{background:#0d2219;color:#e9f7ef;border:1px solid #1f4a37;border-radius:12px}.umcpop .leaflet-popup-tip{background:#0d2219}.umcpop .leaflet-popup-content{margin:12px 14px;max-height:430px;overflow:auto}.pop h3{margin:0 0 6px;font-size:15px}.pop h4{margin:10px 0 3px;font-size:12px;color:#9fd8b6}.pp{border-collapse:collapse;width:100%}.pp td{padding:2px 10px 2px 0;font-size:12px;vertical-align:top;border:0;white-space:normal;overflow-wrap:anywhere}.pp td:first-child{white-space:nowrap}
 @keyframes newmsg{from{background:#2fe27a33}to{background:transparent}}tr.newmsg td{animation:newmsg 4s ease-out}
 </style></head>
 <body><div class="wrap"><div class="dash2">
@@ -231,16 +231,16 @@ function who(o, p) {
 const level = (v, good, warn, hib = false) => v == null ? "#7fa392" : (hib ? (v >= good ? "#2fe27a" : v >= warn ? "#f2c14e" : "#ff5d6c") : (v <= good ? "#2fe27a" : v <= warn ? "#f2c14e" : "#ff5d6c"));
 
 function flowNet(o) {
-  const devs = o.devices.slice(0, 6), W = 820, H = 70 + Math.max(devs.length, 3) * 56, cy = H / 2;
+  const devs = o.devices.slice(0, 6), W = 820, H = 92 + Math.max(devs.length, 3) * 56, cy = (H - 22) / 2;
   const edge = (x1, y1, x2, y2, cls, rate, on) => D.flowEdge(x1, y1, x2, y2, cls, rate, on);
   let e = "", nodes = "";
   const box = (x, y, w, h, t, sub, cls = "") => `<g class="fn ${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11"/><text x="${x + w / 2}" y="${y + h / 2 - 1}" text-anchor="middle">${esc(t.length > 20 ? t.slice(0, 19) + "…" : t)}</text><text x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle" class="sb">${esc(sub.length > 26 ? sub.slice(0, 25) + "…" : sub)}</text></g>`;
   devs.forEach((d, i) => {
-    const y = 40 + i * ((H - 80) / Math.max(1, devs.length - 1 || 1)) + (devs.length === 1 ? (H - 80) / 2 : 0), on = d.age < 300, br = d.bridge || {}, hear = d.pm || 0, send = br.passed_pm || 0;
+    const y = 40 + i * ((H - 102) / Math.max(1, devs.length - 1 || 1)) + (devs.length === 1 ? (H - 102) / 2 : 0), on = d.age < 300, br = d.bridge || {}, hear = d.pm || 0, send = br.passed_pm || 0;
     e += edge(190, y - 9, 330, cy - 7, "rx", hear + 1, on && hear > 0) + edge(330, cy + 7, 190, y + 9, "tx", send + 1, on && send > 0);
-    nodes += box(10, y - 26, 180, 52, d.name || d.id.slice(0, 8), `hears ${hear.toFixed(1)}/min · sends ${send.toFixed(1)}/min`, on ? "" : "off");
+    nodes += box(10, y - 26, 180, 52, d.name || d.id.slice(0, 8), `in ${hear.toFixed(1)} · out ${send.toFixed(1)} /min`, on ? "" : "off");
   });
-  e += `<text x="10" y="${H - 8}" fill="#7fa392" font-size="11">green: heard on the radio and sent to the broker · amber: passed back by the broker and transmitted by the bridge · so what one repeater hears, the others send</text>`;
+  e += `<text x="10" y="${H - 8}" fill="#7fa392" font-size="11">green: heard by radio, sent to the broker · amber: from the broker, sent by radio (bridge)</text>`;
   const msgs = o.rates.messages, cl = num(o, "$SYS/broker/clients/connected"), up = o.mqtt.state === "connected";
   e += edge(450, cy, 520, cy, "net", msgs + 1, msgs > 0 || cl > 0);
   const subs = o.clients.filter(c => c.state === "connected" && c.user !== "dash");
@@ -572,7 +572,7 @@ function pendBanner(o) {
 const HOPC = h => h === 0 ? "#2fe27a" : h === 1 ? "#4aa8ff" : h === 2 ? "#a58bff" : h === 3 ? "#f2c14e" : "#ff8f5a";
 const HOPN = h => h === 0 ? "direct" : h === 1 ? "1 hop" : h + " hops";
 const KINDN = {1: "person", 2: "repeater", 3: "room server", 4: "sensor"};
-S.net = null; S.nf = {h0: true, h1: true, h2: true, h3: true, h4: true, conn: false, recv: "", fitted: false, hours: 24}; S.msg = {channel: "", region: "", dir: "", q: "", data: null, sent: ""}; S.msgUp = false; S.map = null; S.layer = null; S.netUp = false;
+S.net = null; S.nf = {h0: true, h1: true, h2: true, h3: true, h4: true, conn: false, recv: "", fitted: false, hours: 24}; S.mg = {channel: "", region: "", dir: "", q: "", data: null, sent: ""}; S.msgUp = false; S.map = null; S.layer = null; S.netUp = false;
 function loadLeaflet() {
   if (window.L) return Promise.resolve();
   return new Promise((ok, bad) => {
@@ -599,7 +599,7 @@ function popupHtml(x, n, nodes, now) {
     const mix = Object.entries(i.types || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${esc(k)} ${v}`).join(" · ");
     const bridge = br.t ? `heard from the others ${br.heard_pm}/min · sent out by radio ${br.passed_pm}/min · held back ${br.dropped_pm}/min <span class="tr">(totals ${br.heard} / ${br.passed} / ${br.dropped})</span>` : (i.bridge_on ? "bridge " + esc(i.bridge_on) : "");
     return `<div class="pop"><h3>${esc(x.name)} <span class="tag" style="background:#2fe27a;color:#06130d">online</span></h3>` + pkv([
-      ["Last data", ago(i.last)], ["Seen first", ago(i.first)], ["Board", esc(i.board)], ["Firmware", esc([i.fw, i.build ? "build " + i.build.replace(/^.*?(\w{7}).*$/, "$1") : ""].filter(Boolean).join(" · "))], ["Updates", esc(i.update)],
+      ["Last data", ago(i.last)], ["Seen first", ago(i.first)], ["Board", esc(i.board)], ["Firmware", esc([i.build ? "UMC " + i.build.split(" ")[0] + ((i.build.match(/commit:(\w+)/) || [])[1] ? " (" + i.build.match(/commit:(\w+)/)[1] + ")" : "") : "", i.fw ? "MeshCore " + i.fw : ""].filter(Boolean).join(" · "))], ["Updates", esc(i.update)],
       ["Radio", esc(i.radio)], ["Repeating", esc(i.repeat)], ["Transmit power", i.tx_power ? esc(i.tx_power) + " dBm" : ""], ["Position", pos], ["Area", esc(i.area)], ["Uptime", up != null ? dur(up) : ""],
       ["Battery", st.battery_mv ? (st.battery_mv / 1000).toFixed(2) + " V" : ""], ["Noise floor", st.noise_floor != null ? st.noise_floor + " dBm" : ""], ["Last signal", i.rssi != null ? `${i.rssi} dBm${i.snr != null ? " · SNR " + i.snr + " dB" : ""}` : ""],
       ["Air time", air], ["Heard", `${i.pm} packets/min · ${i.n_rx} received · ${i.n_tx} sent (since the dashboard started)`], ["Packet mix", mix], ["Bridge", bridge], ["Include transmitted", esc(i.include_tx)],
@@ -611,7 +611,7 @@ function popupHtml(x, n, nodes, now) {
 }
 
 async function msgLoad() {
-  const m = S.msg, p = new URLSearchParams({channel: m.channel, region: m.region, dir: m.dir, q: m.q, limit: 150});
+  const m = S.mg, p = new URLSearchParams({channel: m.channel, region: m.region, dir: m.dir, q: m.q, limit: 150});
   try { m.data = await jget("/api/messages?" + p); } catch (e) { m.err = e.message; }
   msgUpdate();
 }
@@ -620,7 +620,7 @@ function vMessages(o) {
   return `<div class="panels">${panel("Messages", "everything your repeaters hear in your channels, and what you send", `<div id="msgBar"></div><div id="msgChips" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0"></div><div id="msgFeed"><div class="empty">Loading…</div></div>`, "messages")}</div>`;
 }
 function msgUpdate() {
-  const m = S.msg, d = m.data, bar = $("#msgBar"); if (!bar || !d) return; S.msgUp = true;
+  const m = S.mg, d = m.data, bar = $("#msgBar"); if (!bar || !d) return; S.msgUp = true;
   const sig = JSON.stringify([d.channels.map(c => c.name), d.regions, d.tx_enabled]);
   if (bar.dataset.sig !== sig) {
     const keep = {text: ($("#msgText") || {}).value || "", sender: ($("#msgSender") || {}).value, chan: ($("#msgChan") || {}).value, reg: ($("#msgReg") || {}).value};
@@ -648,18 +648,18 @@ document.addEventListener("click", async e => {
 });
 document.addEventListener("input", e => {
   const el = e.target; if (el.id === "msgText") { const c = $("#msgCount"); if (c) c.textContent = new TextEncoder().encode(el.value).length + "/130"; }
-  if (el.dataset && el.dataset.mf === "q") { S.msg.q = el.value; clearTimeout(S.msgT); S.msgT = setTimeout(msgLoad, 350); }
+  if (el.dataset && el.dataset.mf === "q") { S.mg.q = el.value; clearTimeout(S.msgT); S.msgT = setTimeout(msgLoad, 350); }
 });
-document.addEventListener("change", e => { const el = e.target.closest("[data-mf]"); if (!el || el.dataset.mf === "q") return; S.msg[el.dataset.mf] = el.value; msgLoad(); });
+document.addEventListener("change", e => { const el = e.target.closest("[data-mf]"); if (!el || el.dataset.mf === "q") return; S.mg[el.dataset.mf] = el.value; msgLoad(); });
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-mfset]"); if (t) { S.msg.channel = t.dataset.mfset; const sel = $("#mfChan"); if (sel) sel.value = S.msg.channel; msgLoad(); return; }
+  const t = e.target.closest("[data-mfset]"); if (t) { S.mg.channel = t.dataset.mfset; const sel = $("#mfChan"); if (sel) sel.value = S.mg.channel; msgLoad(); return; }
   const g = e.target.closest('[data-act="gocontrol"]'); if (g) { S.sel = g.dataset.id; S.tab = "control"; draw(); return; }
   if (e.target.id !== "msgSend") return;
   const chan = $("#msgChan").value, reg = $("#msgReg").value, text = $("#msgText").value.trim(), sender = $("#msgSender").value.trim();
-  if (!text) { S.msg.sent = "Type a message first."; msgUpdate(); $("#msgRes").textContent = S.msg.sent; return; }
+  if (!text) { S.mg.sent = "Type a message first."; msgUpdate(); $("#msgRes").textContent = S.mg.sent; return; }
   if (!confirm(`Send this to ${chan}${reg ? " in " + reg : " (no region)"}?\n\n${sender}: ${text}\n\nIt goes out over the air from every repeater on this network that can carry it.`)) return;
   e.target.disabled = true; const r = await post("/api/messages/send", {channel: chan, region: reg, text, sender}); e.target.disabled = false;
-  S.msg.sent = r.ok ? `Sent. Handed to ${r.repeaters.join(", ")}.` : (r.error || "Could not send"); $("#msgRes").textContent = S.msg.sent; if (r.ok) { $("#msgText").value = ""; $("#msgCount").textContent = "0/130"; } msgLoad();
+  S.mg.sent = r.ok ? `Sent. Handed to ${r.repeaters.join(", ")}.` : (r.error || "Could not send"); $("#msgRes").textContent = S.mg.sent; if (r.ok) { $("#msgText").value = ""; $("#msgCount").textContent = "0/130"; } msgLoad();
 });
 
 // Control tab: neighbours with names, read on opening (and again each minute while it is open)
