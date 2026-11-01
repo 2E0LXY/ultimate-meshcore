@@ -112,7 +112,7 @@ Source tags: `UP` upstream MeshCore · `APP` official MeshCore app · `FORK` com
 |---|---|---|---|---|---|
 | S1 | **Fleet management**: groups, templates (for example the Yorkshire region set), apply to many repeaters with a dry run, a per-repeater result table, a rollback, and scheduled commands. Triggered by "run these four commands on every repeater" | NEW | **P0** | L | 2 |
 | S2 | **Server hardening**: key-only SSH, no root password login, fail2ban, firewall rules, backup and restore of server state, rotating the credentials that were shared in chat | NEW | **P0** | M | 0 |
-| S3 | **Zero-touch enrolment**: a new repeater proves its identity with a signed handshake, appears for approval, and is given its account and control key encrypted to it, so no code or pasting is needed | NEW | P1 | L | 2 |
+| S3 | ✅ *done in 0.1.27* **Zero-touch enrolment**: a new repeater proves its identity with a signed handshake, appears for approval, and is given its account and control key encrypted to it, so no code or pasting is needed | NEW | P1 | L | 2 |
 | S4 | **Staged firmware rollout**: canary repeater, health check, then the rest, with automatic rollback if a repeater does not come back | NEW | P1 | L | 2 |
 | S5 | Roles (viewer, operator, admin), two-factor sign-in, API tokens, audit export | NEW | P1 | L | 2 |
 | S6 | Alert rules per metric, quiet hours, escalation; email, Telegram, Discord and ntfy templates | NEW | P2 | M | 2 |

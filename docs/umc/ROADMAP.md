@@ -6,6 +6,12 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.27
+
+- ✅ **Zero-touch join.** One *UMC Net* switch on the repeater (MQTT page, or `set mqtt.umcnet on`): it fills in the broker, port, secure connection and area itself, knocks on the broker with a public `enrol` account and sends a request signed with its own identity key. The dashboard shows a notification (bell bar, Accounts count, optional alert) with **Approve** and **Decline**; on approval it makes the repeater's account, switches remote control and the bridge on, and sends the details back encrypted to that repeater's key. The manual settings and the join code are under *Advanced*. Crypto tested against RFC 7748 and 8032 vectors and between C++ and Python; the full flow against a real broker (`e2e_enrol.py`). Dashboard 2.4. See `docs/umc/ENROL.md`
+- ✅ Dashboard alerts can go to a private ntfy server (`install-ntfy.sh`, dashboard 2.3.1)
+- ✅ Help text for *Region presets*
+
 ## Done in 0.1.24
 
 - ✅ UMC Net automatically preloads every online repeater's editable settings and firmware/OTA state; *Refresh settings* remains available for an immediate reread
