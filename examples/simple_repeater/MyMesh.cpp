@@ -2894,7 +2894,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   } else if (strcmp(command, "get mqtt.umcnet") == 0) {
     mqtt.formatUmcNetReply(reply, 160);
   } else if (memcmp(command, "set mqtt.umcnet ", 16) == 0) {
-    strcpy(reply, mqtt.setUmcNet(&command[16]) ? "OK" : "Err - on|off (on needs a join code first: set mqtt.join <code>)");
+    strcpy(reply, mqtt.setUmcNet(&command[16]) ? (mqtt.isEnrolling() ? "OK - asking to join UMC Net: approve this repeater on the dashboard" : "OK") : "Err - on|off");
   } else if (strcmp(command, "get mqtt.control") == 0) {
     mqtt.formatControlReply(reply, 160);
   } else if (memcmp(command, "set mqtt.control.key ", 21) == 0) {

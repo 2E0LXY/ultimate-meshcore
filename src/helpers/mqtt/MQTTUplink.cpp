@@ -2,6 +2,14 @@
 #include "NetPacket.h"
 #include "ControlCmd.h"
 #include "JoinCode.h"
+#include "Enrol.h"
+
+#ifndef UMCNET_ENROL_USER
+#define UMCNET_ENROL_USER "enrol"                      // the public account a repeater knocks with; it can only send and receive enrolment messages
+#endif
+#ifndef UMCNET_ENROL_PASSWORD
+#define UMCNET_ENROL_PASSWORD "enrol-open-door-v1"     // deliberately public: it opens nothing but the doorbell
+#endif
 
 #ifndef UMCNET_DEFAULT_HOST
 #define UMCNET_DEFAULT_HOST "net.2e0lxy.uk"      // the broker a join code points at unless it names another
@@ -265,8 +273,13 @@ bool MQTTUplink::isBrokerConfigured(const BrokerState& broker) const {
   if (!broker.spec->custom) {
     return true;
   }
+  if (_prefs.custom_enrol) return _prefs.custom_host[0] != 0;     // knocking needs only the broker address
   return _prefs.custom_host[0] != 0 && _prefs.custom_username[0] != 0 && _prefs.custom_password[0] != 0;
 }
+
+bool MQTTUplink::isEnrolling() const { return _prefs.custom_enrol != 0 && (_prefs.enabled_mask & kCustomBit) != 0; }
+
+const char* MQTTUplink::customPassword() const { return _prefs.custom_enrol ? UMCNET_ENROL_PASSWORD : _prefs.custom_password; }
 
 uint8_t MQTTUplink::normalizeEnabledMask(uint8_t mask) {
   uint8_t normalized = 0;
@@ -538,11 +551,12 @@ void MQTTUplink::refreshBrokerIdentity(BrokerState& broker) {
     return;
   }
   if (broker.spec->custom) {
-    StrHelper::strncpy(broker.username, _prefs.custom_username, sizeof(broker.username));
+    StrHelper::strncpy(broker.username, _prefs.custom_enrol ? UMCNET_ENROL_USER : _prefs.custom_username, sizeof(broker.username));
   } else {
     snprintf(broker.username, sizeof(broker.username), "v1_%s", _device_id);
   }
-  snprintf(broker.client_id, sizeof(broker.client_id), "mqtt_%s-%.6s", broker.spec->key, _device_id);
+  if (broker.spec->custom && _prefs.custom_enrol) snprintf(broker.client_id, sizeof(broker.client_id), "umc-enrol-%.12s", _device_id);
+  else snprintf(broker.client_id, sizeof(broker.client_id), "mqtt_%s-%.6s", broker.spec->key, _device_id);
   formatTopic(broker.status_topic, sizeof(broker.status_topic), "status");
 }
 
@@ -659,6 +673,9 @@ void MQTTUplink::destroyBroker(BrokerState& broker, bool reset_retry_state) {
 void MQTTUplink::queuePublish(BrokerState& broker, const char* topic, const char* payload, bool retain) {
   if (broker.client == nullptr || !broker.connected) {
     return;
+  }
+  if (broker.spec->custom && _prefs.custom_enrol && strcmp(topic, umcenrol::kTopicHello) != 0) {
+    return;                                   // knocking: the enrol account may only send its request
   }
   MQTT_LOG("%s publish topic=%s retain=%d bytes=%u", broker.spec->label, topic, retain ? 1 : 0,
            static_cast<unsigned>(strlen(payload)));
@@ -857,6 +874,14 @@ void MQTTUplink::handleMqttEvent(void* handler_args, esp_event_base_t, int32_t e
       broker->connected_since_ms = now_ms;
       MQTT_LOG("%s connected", broker->spec->label);
       logMqttMemorySnapshot("connected", broker->spec->label);
+      if (_self != nullptr && broker->spec->custom && _self->_prefs.custom_enrol && broker->client != nullptr) {
+        char topic[100];                                  // the answer to our request, encrypted to this repeater's key
+        snprintf(topic, sizeof(topic), "umcnet/v1/enrol/grant/%s", _self->_device_id);
+        esp_mqtt_client_subscribe(broker->client, topic, 1);
+        _self->_enrol_next_hello = 0;                     // send the request at once
+        MQTT_LOG("%s knocking: subscribed to %s", broker->spec->label, topic);
+        break;
+      }
       if (_self != nullptr && broker->spec->custom && _self->_prefs.custom_bridge && broker->client != nullptr) {
         char topic[40];                                   // every repeater's raw packets in this area
         snprintf(topic, sizeof(topic), "meshcore/%s/+/raw", _self->_prefs.iata);
@@ -919,7 +944,8 @@ void MQTTUplink::ensureBroker(BrokerState& broker, bool allow_new_connect) {
     return;
   }
   bool enabled = (_prefs.enabled_mask & broker.spec->bit) != 0;
-  bool iata_configured = !isUnsetIataValue(_prefs.iata);
+  // a repeater that is only knocking has no area yet: the approval brings it
+  bool iata_configured = !isUnsetIataValue(_prefs.iata) || (broker.spec->custom && _prefs.custom_enrol);
   if (!enabled || !iata_configured || !isBrokerConfigured(broker)) {
     if (broker.client != nullptr || broker.token != nullptr || broker.connected || broker.connect_announced ||
         broker.reconnect_pending || broker.next_connect_attempt != 0 || broker.last_connect_attempt != 0 ||
@@ -1014,7 +1040,7 @@ void MQTTUplink::ensureBroker(BrokerState& broker, bool allow_new_connect) {
     cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
   }
   if (broker.spec->custom) {
-    cfg.credentials.authentication.password = _prefs.custom_password;
+    cfg.credentials.authentication.password = customPassword();
     if (brokerUsesWss(broker)) {
 #if defined(MQTT_USE_CRT_BUNDLE)
       cfg.broker.verification.crt_bundle_attach = MQTT_CRT_BUNDLE_ATTACH;
@@ -1031,10 +1057,12 @@ void MQTTUplink::ensureBroker(BrokerState& broker, bool allow_new_connect) {
   cfg.credentials.username = broker.username;
   cfg.credentials.client_id = broker.client_id;
   cfg.session.keepalive = 30;
-  cfg.session.last_will.topic = broker.status_topic;
-  cfg.session.last_will.msg = broker.offline_payload;
-  cfg.session.last_will.qos = 1;
-  cfg.session.last_will.retain = 1;
+  if (!(broker.spec->custom && _prefs.custom_enrol)) {      // the enrol account may not publish a status
+    cfg.session.last_will.topic = broker.status_topic;
+    cfg.session.last_will.msg = broker.offline_payload;
+    cfg.session.last_will.qos = 1;
+    cfg.session.last_will.retain = 1;
+  }
   cfg.network.reconnect_timeout_ms = 10000;
   cfg.network.timeout_ms = 10000;
   cfg.network.disable_auto_reconnect = true;
@@ -1049,7 +1077,7 @@ void MQTTUplink::ensureBroker(BrokerState& broker, bool allow_new_connect) {
     cfg.transport = MQTT_TRANSPORT_OVER_TCP;
   }
   cfg.username = broker.username;
-  cfg.password = broker.spec->custom ? _prefs.custom_password : broker.token;
+  cfg.password = broker.spec->custom ? customPassword() : broker.token;
   cfg.client_id = broker.client_id;
   cfg.keepalive = 30;
   cfg.buffer_size = 768;
@@ -1126,6 +1154,8 @@ void MQTTUplink::loop(const MQTTStatusSnapshot& snapshot) {
   }
   drainNet();
   drainControl();
+  drainGrant();
+  enrolTick();
 
   _last_status = snapshot;
 
@@ -1218,7 +1248,7 @@ void MQTTUplink::formatStatusReply(char* reply, size_t reply_size) const {
     if ((_prefs.enabled_mask & bit) == 0) {
       return "off";
     }
-    if (isUnsetIataValue(_prefs.iata)) {
+    if (isUnsetIataValue(_prefs.iata) && !(_prefs.custom_enrol && bit == kCustomBit)) {
       return "invalid iata";
     }
     const BrokerState* broker = nullptr;
@@ -1489,6 +1519,17 @@ bool MQTTUplink::setCustomTransport(const char* transport) {
 void MQTTUplink::onNetMessage(const char* topic, int topic_len, const char* data, int data_len, int offset,
                               int total) {
   if (topic == nullptr || data == nullptr) return;
+  if (_prefs.custom_enrol && topic_len > 22 && memcmp(topic, "umcnet/v1/enrol/grant/", 22) == 0) {
+    char want[100];
+    const int wl = snprintf(want, sizeof(want), "umcnet/v1/enrol/grant/%s", _device_id);
+    if (wl == topic_len && strncasecmp(topic, want, wl) == 0 && offset == 0 && data_len == total && data_len < (int)sizeof(_grant_in) && !_grant_ready) {
+      memcpy(_grant_in, data, data_len);
+      _grant_len = data_len;
+      __sync_synchronize();
+      _grant_ready = true;
+    }
+    return;
+  }
   if (_prefs.custom_control && topic_len > 4 && memcmp(topic + topic_len - 4, "/cmd", 4) == 0) {
     char want[120];
     const int wl = snprintf(want, sizeof(want), "umcnet/v1/%s/dev/%s/cmd", _prefs.iata, _device_id);
@@ -1693,16 +1734,110 @@ bool MQTTUplink::applyJoin(const char* code, char* reply, size_t reply_size) {
 
 bool MQTTUplink::setUmcNet(const char* value) {
   if (value == nullptr) return false;
-  if (strcasecmp(value, "off") == 0) return setEndpointEnabled(kCustomBit, false);
-  if (strcasecmp(value, "on") != 0 || _prefs.custom_username[0] == 0 || _prefs.custom_host[0] == 0) return false;   // nothing to join yet
-  return setEndpointEnabled(kCustomBit, true);
+  if (strcasecmp(value, "off") == 0) {
+    _prefs.custom_enrol = 0;
+    savePrefs();
+    return setEndpointEnabled(kCustomBit, false);
+  }
+  if (strcasecmp(value, "on") != 0) return false;
+  if (_prefs.custom_username[0] != 0 && _prefs.custom_host[0] != 0) {            // already joined: just switch the link on
+    _prefs.custom_enrol = 0;
+    savePrefs();
+    return setEndpointEnabled(kCustomBit, true);
+  }
+  // No account yet: fill in everything this network needs and ask the dashboard to let us join.
+  _prefs.custom_enrol = 1;
+  _enrol_hellos = 0;
+  if (_prefs.custom_host[0] == 0) setCustomHost(UMCNET_DEFAULT_HOST);
+  setCustomPort("443");
+  setCustomTransport("wss");
+  const bool ok = setEndpointEnabled(kCustomBit, true);
+  refreshIdentityStrings();
+  savePrefs();
+  for (BrokerState& broker : _brokers) {
+    if (broker.spec != nullptr && broker.spec->bit == kCustomBit) destroyBroker(broker);   // reconnect as the enrol account
+  }
+  return ok;
+}
+
+// Every minute for the first five minutes, then every five minutes, until the dashboard answers.
+void MQTTUplink::enrolTick() {
+  if (!_running || !isEnrolling()) return;
+  const unsigned long now = millis();
+  if (now < _enrol_next_hello) return;
+  for (BrokerState& broker : _brokers) {
+    if (broker.spec == nullptr || broker.spec->bit != kCustomBit || !broker.connected || broker.client == nullptr) continue;
+    if (_network == nullptr || !_network->hasTimeSync()) return;                   // the request is signed with the time
+    sendEnrolHello(broker);
+    _enrol_hellos = _enrol_hellos < 250 ? _enrol_hellos + 1 : _enrol_hellos;
+    _enrol_next_hello = now + (_enrol_hellos < 5 ? 60000UL : 300000UL);
+    return;
+  }
+}
+
+void MQTTUplink::sendEnrolHello(BrokerState& broker) {
+  uint8_t rnd[8];
+  for (int i = 0; i < 8; i += 4) {
+    const uint32_t r = esp_random();
+    memcpy(&rnd[i], &r, 4);
+  }
+  char nonce[17];
+  umcctl::toHex(rnd, 8, nonce);
+  for (char* c = nonce; *c; c++) if (*c >= 'A' && *c <= 'F') *c = (char)(*c - 'A' + 'a');
+  const uint32_t ts = (uint32_t)time(nullptr);
+  char msg[160];
+  const size_t ml = umcenrol::helloMessage(_device_id, ts, nonce, msg, sizeof(msg));
+  if (ml == 0) return;
+  uint8_t sig[64];
+  _identity->sign(sig, reinterpret_cast<const uint8_t*>(msg), (int)ml);
+  char sig_hex[129];
+  umcctl::toHex(sig, 64, sig_hex);
+  const char* name = (_node_name != nullptr && _node_name[0] != 0) ? _node_name : _device_id;
+  char body[420];
+  const char* fw =
+#ifdef UMC_VERSION
+      UMC_VERSION;
+#else
+      FIRMWARE_VERSION;
+#endif
+  if (umcenrol::helloJson(_device_id, name, fw, board.getManufacturerName(), ts, nonce, sig_hex, body, sizeof(body)) == 0) return;
+  MQTT_LOG("knocking: asking to join (attempt %u)", (unsigned)_enrol_hellos + 1);
+  queuePublish(broker, umcenrol::kTopicHello, body, false);
+}
+
+// The dashboard approved us: open the grant (only this repeater's key can), apply it exactly like a join code.
+void MQTTUplink::drainGrant() {
+  if (!_grant_ready) return;
+  char text[sizeof(_grant_in)];
+  const int n = _grant_len;
+  memcpy(text, _grant_in, n);
+  text[n] = 0;
+  __sync_synchronize();
+  _grant_ready = false;
+  umcenrol::Grant g;
+  if (!umcenrol::parseGrant(text, &g)) {
+    MQTT_LOG("grant: not understood");
+    return;
+  }
+  uint8_t shared[32];
+  _identity->calcSharedSecret(shared, g.eph);
+  char code[200];
+  if (!umcenrol::openGrant(g, shared, _identity->pub_key, code, sizeof(code))) {
+    MQTT_LOG("grant: not for this repeater, or damaged");
+    return;
+  }
+  char reply[160];
+  _prefs.custom_enrol = 0;                       // so the new account, not the doorbell, is used from here on
+  if (applyJoin(code, reply, sizeof(reply))) {
+    MQTT_LOG("grant applied: %s", reply);
+  } else {
+    _prefs.custom_enrol = 1;
+    MQTT_LOG("grant could not be applied: %s", reply);
+  }
+  savePrefs();
 }
 
 void MQTTUplink::formatUmcNetReply(char* reply, size_t reply_size) const {
-  if (_prefs.custom_username[0] == 0) {
-    snprintf(reply, reply_size, "> off, not joined yet: set mqtt.join <code> (make one on the dashboard)");
-    return;
-  }
   const bool on = (_prefs.enabled_mask & kCustomBit) != 0;
   char status[160], state[40] = "off";
   formatStatusReply(status, sizeof(status));                         // "... p:custom:wss:up s:- ..."
@@ -1711,6 +1846,14 @@ void MQTTUplink::formatUmcNetReply(char* reply, size_t reply_size) const {
     size_t i = 0;
     while (c[i] != 0 && c[i] != ' ' && i + 1 < sizeof(state)) { state[i] = c[i]; i++; }
     state[i] = 0;
+  }
+  if (_prefs.custom_enrol && _prefs.custom_username[0] == 0) {
+    snprintf(reply, reply_size, "> %s, asking to join: approve %.8s on the dashboard, broker %s", on ? "on" : "off", _device_id, state);
+    return;
+  }
+  if (_prefs.custom_username[0] == 0) {
+    snprintf(reply, reply_size, "> off, not joined yet: set mqtt.umcnet on (or set mqtt.join <code>)");
+    return;
   }
   snprintf(reply, reply_size, "> %s, joined as %s, area %s, broker %s, bridge %s, control %s", on ? "on" : "off", _prefs.custom_username, _prefs.iata, state,
            _prefs.custom_bridge ? "on" : "off", _prefs.custom_control ? "on" : "off");
@@ -1846,6 +1989,7 @@ bool MQTTUplink::setCustomRate(const char*) { return false; }
 bool MQTTUplink::setControl(const char*) { return false; }
 bool MQTTUplink::applyJoin(const char*, char* reply, size_t n) { snprintf(reply, n, "Err - unsupported"); return false; }
 bool MQTTUplink::setUmcNet(const char*) { return false; }
+bool MQTTUplink::isEnrolling() const { return false; }
 void MQTTUplink::formatUmcNetReply(char* reply, size_t n) const { snprintf(reply, n, "> unsupported"); }
 bool MQTTUplink::setControlKey(const char*) { return false; }
 void MQTTUplink::formatControlReply(char* reply, size_t reply_size) const { snprintf(reply, reply_size, "> unsupported"); }

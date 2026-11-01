@@ -101,7 +101,8 @@ public:
   // defaults baked into this firmware unless the code names another), raw packets on, transmitted off,
   // the bridge as the code says, and the control key if it has one. `set mqtt.umcnet on|off` is the switch.
   bool applyJoin(const char* code, char* reply, size_t reply_size);
-  bool setUmcNet(const char* value);         // on | off (on needs a join first)
+  bool setUmcNet(const char* value);         // on | off: with no account yet, on asks the dashboard to let this repeater join
+  bool isEnrolling() const;
   void formatUmcNetReply(char* reply, size_t reply_size) const;
   bool hasCustomPassword() const { return _prefs.custom_password[0] != 0; }
   bool sendStatusNow();
@@ -188,6 +189,16 @@ private:
   char _ctl_after_cmd[40] = {0};
   uint32_t _ctl_boot_epoch = 0;
   void drainControl();
+  // zero-touch enrolment (docs/umc/ENROL.md)
+  unsigned long _enrol_next_hello = 0;
+  uint8_t _enrol_hellos = 0;
+  char _grant_in[400];
+  volatile int _grant_len = 0;
+  volatile bool _grant_ready = false;
+  void enrolTick();
+  void sendEnrolHello(BrokerState& broker);
+  void drainGrant();
+  const char* customPassword() const;
   void publishControlReply(const char* id, bool ok, const char* text);
   static MQTTUplink* _self;
   void onNetMessage(const char* topic, int topic_len, const char* data, int data_len, int offset, int total);

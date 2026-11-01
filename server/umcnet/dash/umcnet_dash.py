@@ -8,6 +8,8 @@ broker's log for who connects and who is refused, samples the machine, and serve
 import base64, collections, csv, hashlib, hmac, io, json, os, re, secrets, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import umcnet_enrol as ENR
 
 CFG = {
     "mqtt_host": os.environ.get("DASH_MQTT_HOST", "127.0.0.1"), "mqtt_port": int(os.environ.get("DASH_MQTT_PORT", "1884")),
@@ -24,7 +26,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.3.1"
+VERSION = "2.4"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -263,9 +265,9 @@ class MqttConn:
         self.sock = None; self.lock = threading.Lock(); self.up = False; self.error = ""
         status.update(state="starting", since=0, reconnects=0, error="")
 
-    def publish(self, topic, payload):
+    def publish(self, topic, payload, retain=False):
         body = _s(topic) + payload
-        with self.lock: self.sock.sendall(bytes([0x30]) + _rl(len(body)) + body)
+        with self.lock: self.sock.sendall(bytes([0x31 if retain else 0x30]) + _rl(len(body)) + body)
 
     def run(self):
         backoff = 2
@@ -313,7 +315,7 @@ CTL_STATUS = {}
 def control_loop():
     if not os.path.exists(CFG["ctl_pass_file"]):
         CTL_STATUS.update(state="not set up", error="no control account yet: run install-dash.sh again"); return
-    CTL["conn"] = MqttConn(CFG["ctl_user"], CFG["ctl_pass_file"], ["umcnet/v1/+/dev/+/resp"], on_control_reply, CTL_STATUS)
+    CTL["conn"] = MqttConn(CFG["ctl_user"], CFG["ctl_pass_file"], ["umcnet/v1/+/dev/+/resp", "umcnet/v1/enrol/hello"], on_control_reply, CTL_STATUS)
     CTL["conn"].run()
 
 # ----------------------------------------------------------------------------- broker log: who connects, who is refused
@@ -493,6 +495,7 @@ def sampler_loop():
         time.sleep(60)
         try:
             if int(time.time()) % 300 < 60: nodes_save()
+            enrol_housekeeping()
             now = int(time.time()); vals = snapshot_values()
             DB.executemany("INSERT INTO samples VALUES(?,?,?)", [(now, k, float(v)) for k, v in vals.items()])
             if now % 3600 < 60:
@@ -511,7 +514,7 @@ def history(keys, seconds):
     return out
 
 # ----------------------------------------------------------------------------- settings of the dashboard itself
-DEFAULTS = {"join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
+DEFAULTS = {"enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
             "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14, "confirm_risky": True, "control_enabled": True,
             "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True},
             "labels": {}}
@@ -546,7 +549,7 @@ def conf_update(patch):
             lo, hi = RANGES[k]
             if not lo <= v <= hi: return "%s must be between %d and %d" % (k, lo, hi)
             new[k] = v
-        elif k in ("confirm_risky", "control_enabled", "join_bridge"): new[k] = bool(v)
+        elif k in ("confirm_risky", "control_enabled", "join_bridge", "enrol_enabled"): new[k] = bool(v)
         elif k == "join_iata":
             if not isinstance(v, str) or not re.match(r"^[A-Za-z0-9]{3}$", v): return "join_iata: the three-character area code"
             new[k] = v.upper()
@@ -651,7 +654,121 @@ def control_key(dev, create=False, new=False):
             KEYS[dev] = {"key": secrets.token_hex(32), "created": int(time.time())}; keys_save()
         return KEYS.get(dev, {}).get("key")
 
+# ----------------------------------------------------------------------------- zero-touch enrolment (docs/umc/ENROL.md)
+ENROL = {"pending": {}, "declined": {}, "approved": {}}
+
+def enrol_path(): return os.path.join(CFG["data"], "enrol.json")
+
+def enrol_save():
+    try:
+        with LOCK: data = json.dumps(ENROL)
+        tmp = enrol_path() + ".tmp"; open(tmp, "w").write(data); os.replace(tmp, enrol_path())
+    except Exception as e: sys.stderr.write("enrol: %s\n" % e)
+
+def enrol_load():
+    try: d = json.load(open(enrol_path()))
+    except Exception: return
+    for k in ENROL:
+        if isinstance(d.get(k), dict): ENROL[k].update(d[k])
+
+def enrol_slug(name, dev):
+    base = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")[:20].strip("-")
+    if len(base) < 2: base = "rpt-" + dev[:6].lower()
+    taken = {a["name"] for a in accounts()}
+    slug, n = base, 2
+    while slug in taken: slug = "%s-%d" % (base[:20], n); n += 1
+    return slug
+
+def enrol_hello(payload, retained=False):
+    """A repeater is asking to join. Only a request signed by the key that its id names is accepted."""
+    if retained or not CONF.get("enrol_enabled", True): return
+    info, why = ENR.verify_hello(payload)
+    now = time.time()
+    if not info:
+        with LOCK: COUNT["enrol_refused"] += 1
+        if why in ("signature does not match the id", "clock too far off"): event("enrol", "a request was refused: " + why, at=now)
+        return
+    dev = info["id"]; new = False
+    with LOCK:
+        if dev in ENROL["declined"]: ENROL["declined"][dev]["last"] = now; return
+        p = ENROL["pending"].get(dev)
+        if p is None:
+            if len(ENROL["pending"]) >= 50: return                  # a flood of requests: keep what is waiting
+            ENROL["pending"][dev] = p = {"id": dev, "first": now, "count": 0}; new = True
+        if now - p.get("last", 0) < 20 and not new: return            # one update every 20 s is plenty
+        p.update(name=info["name"], fw=info["fw"], board=info["bd"], last=now, count=p["count"] + 1)
+    if new:
+        event("enrol", "%s (%s...) is asking to join" % (info["name"] or "a repeater", dev[:8]), "", "enrol", "", now)
+        enrol_save()
+        send_alert("A repeater is asking to join", "%s (id %s...) is asking to join UMC Net. Open the dashboard, Accounts tab, to approve or decline it." % (info["name"] or "A repeater", dev[:8]), "info", "enrol")
+    elif int(now) % 5 == 0: enrol_save()
+
+def enrol_approve(who, dev, name=None, bridge=None):
+    dev = str(dev).upper()
+    conn = CTL.get("conn")
+    if not conn or not conn.up: return {"ok": False, "error": "the control link to the broker is down, so the answer could not be sent"}
+    with LOCK: p = ENROL["pending"].get(dev)
+    if not p: return {"ok": False, "error": "that request is no longer waiting"}
+    existing = next((a for a in accounts() if a["device"] == dev), None)
+    if existing: slug = existing["name"]; r = admin_call(op="user_passwd", name=slug)
+    else:
+        slug = enrol_slug(name or p.get("name"), dev); r = admin_call(op="user_add", name=slug, role="repeater", device=dev)
+    if not r.get("ok") or not r.get("password"):
+        audit(who, "enrol approve", dev[:12], r.get("error") or r.get("output") or "failed", False)
+        return {"ok": False, "error": r.get("error") or r.get("output") or "could not make the account"}
+    try: code = make_join_code(slug, r["password"], CONF["join_iata"], control_key(dev, create=True), CONF["join_bridge"] if bridge is None else bool(bridge))
+    except ValueError as e: return {"ok": False, "error": str(e)}
+    conn.publish("umcnet/v1/enrol/grant/" + dev, ENR.make_grant(dev, code).encode(), retain=True)
+    with LOCK:
+        ENROL["pending"].pop(dev, None)
+        ENROL["approved"][dev] = {"account": slug, "name": p.get("name", ""), "at": time.time(), "delivered": False}
+    enrol_save(); export_accounts_soon()
+    audit(who, "enrol approve", dev[:12], "account %s, remote control key included" % slug)
+    return {"ok": True, "account": slug}
+
+def enrol_decline(who, dev):
+    dev = str(dev).upper()
+    with LOCK:
+        p = ENROL["pending"].pop(dev, None)
+        if not p: return {"ok": False, "error": "that request is no longer waiting"}
+        ENROL["declined"][dev] = {"id": dev, "name": p.get("name", ""), "at": time.time(), "last": time.time()}
+        while len(ENROL["declined"]) > 200: ENROL["declined"].pop(next(iter(ENROL["declined"])))
+    enrol_save(); audit(who, "enrol decline", dev[:12], p.get("name", "")); return {"ok": True}
+
+def enrol_forget(who, dev):
+    dev = str(dev).upper()
+    with LOCK: gone = ENROL["declined"].pop(dev, None)
+    enrol_save(); audit(who, "enrol forget", dev[:12], "may ask again"); return {"ok": bool(gone)}
+
+def enrol_housekeeping():
+    """Drop requests nobody has seen for a day, and take a delivered grant off the broker."""
+    now = time.time(); conn = CTL.get("conn"); changed = False
+    with LOCK:
+        for dev in [d for d, p in ENROL["pending"].items() if now - p.get("last", 0) > 86400]: ENROL["pending"].pop(dev); changed = True
+        approved = list(ENROL["approved"].items())
+    for dev, a in approved:
+        with LOCK: online = any(c.get("user") == a["account"] and c.get("state") == "connected" for c in CLIENTS.values())
+        if not a.get("delivered") and (online or now - a["at"] > 7 * 86400):
+            if conn and conn.up:
+                try: conn.publish("umcnet/v1/enrol/grant/" + dev, b"", retain=True)       # an empty retained message clears it
+                except Exception: continue
+            with LOCK: a["delivered"] = bool(online); a["cleared"] = True
+            changed = True
+    if changed: enrol_save()
+
+def enrol_view():
+    now = time.time()
+    with LOCK:
+        pend = [dict(p) for p in ENROL["pending"].values()]; dec = [dict(d) for d in ENROL["declined"].values()]
+        app = [dict(a, id=d) for d, a in ENROL["approved"].items() if now - a["at"] < 7 * 86400][-10:]
+        ips = {c.get("client", ""): c.get("ip", "") for c in CLIENTS.values()}
+    accts = {a["device"]: a["name"] for a in accounts() if a["device"]}
+    for p in pend:
+        p["ip"] = ips.get("umc-enrol-" + p["id"][:12], ""); p["age"] = int(now - p["last"]); p["existing"] = accts.get(p["id"], "")
+    return {"enabled": bool(CONF.get("enrol_enabled", True)), "pending": sorted(pend, key=lambda x: x["first"]), "declined": sorted(dec, key=lambda x: -x["at"]), "approved": app}
+
 def on_control_reply(topic, payload, retained=False):
+    if topic == "umcnet/v1/enrol/hello": return enrol_hello(payload, retained)
     m = re.match(r"^umcnet/v1/[^/]+/dev/([0-9A-Fa-f]{64})/resp$", topic)
     if not m or retained: return
     try: j = json.loads(payload.decode("utf-8", "replace"))
@@ -886,6 +1003,7 @@ def overview():
                "latency": {"n": len(LATENCY), "avg": round(sum(LATENCY) / len(LATENCY), 2) if LATENCY else None, "max": round(max(LATENCY), 2) if LATENCY else None},
                "ev_hour": dict(collections.Counter(e["kind"] for e in EVENTS if now - e["t"] < 3600)), "host": CFG["host"], "config": CONF, "control": {"state": CTL_STATUS.get("state", "idle"), "error": CTL_STATUS.get("error", ""), "keys": sorted(KEYS)}}
     res["pending"] = pending_list()
+    res["enrol"] = enrol_view()
     res["diagnostics"] = diagnostics(sysinfo, accs, cert)
     return res
 
@@ -963,6 +1081,10 @@ class H(BaseHTTPRequestHandler):
                     try: out["join"] = make_join_code(name, r["password"], CONF["join_iata"], control_key(dev, create=True) if re.match(r"^[0-9A-F]{64}$", dev) else None, CONF["join_bridge"])
                     except ValueError as e: out["join_error"] = str(e)
                 return self.send(200, json.dumps(out))
+            if p == "/api/enrol/approve":
+                r = enrol_approve(who, body.get("id", ""), body.get("name"), body.get("bridge")); return self.send(200, json.dumps(r))
+            if p == "/api/enrol/decline": return self.send(200, json.dumps(enrol_decline(who, body.get("id", ""))))
+            if p == "/api/enrol/forget": return self.send(200, json.dumps(enrol_forget(who, body.get("id", ""))))
             if p == "/api/join":
                 name = str(body.get("name", "")); acc = next((a for a in accounts() if a["name"] == name), None)
                 if not acc or acc["role"] != "repeater" or acc.get("state") == "blocked": return self.send(200, json.dumps({"ok": False, "error": "that is not an active repeater account"}))
@@ -1024,7 +1146,7 @@ def export_accounts_soon():
     pass                                         # the account list is re-read from its copy on every request
 
 def main():
-    db_init(); conf_load(); keys_load(); nodes_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
+    db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
     for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)

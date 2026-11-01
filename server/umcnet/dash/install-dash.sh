@@ -16,15 +16,15 @@ getent group umcnet-dash >/dev/null || groupadd --system umcnet-dash
 id umcnet-dash >/dev/null 2>&1 || useradd --system --gid umcnet-dash --home-dir /nonexistent --shell /usr/sbin/nologin umcnet-dash
 install -d -o root -g root -m 755 /opt/umcnet-dash
 install -d -o umcnet-dash -g umcnet-dash -m 750 /var/lib/umcnet-dash
-for f in umcnet_dash.py dash.html public.html umcnet-dash.service umcnet_admin.py umcnet-admin.service; do curl -fsSL "$RAW/dash/$f" -o "/opt/umcnet-dash/$f.new"; done
+for f in umcnet_dash.py umcnet_enrol.py dash.html public.html umcnet-dash.service umcnet_admin.py umcnet-admin.service; do curl -fsSL "$RAW/dash/$f" -o "/opt/umcnet-dash/$f.new"; done
 curl -fsSL "$RAW/umcnet-user" -o /opt/umcnet/umcnet-user.new && chmod 755 /opt/umcnet/umcnet-user.new && mv /opt/umcnet/umcnet-user.new /opt/umcnet/umcnet-user
-python3 -m py_compile /opt/umcnet-dash/umcnet_dash.py.new
-mv /opt/umcnet-dash/umcnet_dash.py.new /opt/umcnet-dash/umcnet_dash.py; mv /opt/umcnet-dash/dash.html.new /opt/umcnet-dash/dash.html; mv /opt/umcnet-dash/public.html.new /opt/umcnet-dash/public.html
+python3 -m py_compile /opt/umcnet-dash/umcnet_dash.py.new /opt/umcnet-dash/umcnet_enrol.py.new
+mv /opt/umcnet-dash/umcnet_enrol.py.new /opt/umcnet-dash/umcnet_enrol.py; mv /opt/umcnet-dash/umcnet_dash.py.new /opt/umcnet-dash/umcnet_dash.py; mv /opt/umcnet-dash/dash.html.new /opt/umcnet-dash/dash.html; mv /opt/umcnet-dash/public.html.new /opt/umcnet-dash/public.html
 mv /opt/umcnet-dash/umcnet-dash.service.new /etc/systemd/system/umcnet-dash.service
 python3 -m py_compile /opt/umcnet-dash/umcnet_admin.py.new && mv /opt/umcnet-dash/umcnet_admin.py.new /opt/umcnet-dash/umcnet_admin.py
 mv /opt/umcnet-dash/umcnet-admin.service.new /etc/systemd/system/umcnet-admin.service
 chmod 644 /opt/umcnet-dash/umcnet_admin.py
-chmod 644 /opt/umcnet-dash/umcnet_dash.py /opt/umcnet-dash/dash.html /opt/umcnet-dash/public.html
+chmod 644 /opt/umcnet-dash/umcnet_dash.py /opt/umcnet-dash/umcnet_enrol.py /opt/umcnet-dash/dash.html /opt/umcnet-dash/public.html
 /opt/umcnet/umcnet-user export          # the dashboard keeps its own copy of the account list (no passwords)
 
 # the broker account the dashboard listens with
@@ -42,6 +42,10 @@ if [ ! -s /opt/umcnet-dash/ctl.pass ]; then
   install -m 640 -o root -g umcnet-dash /dev/null /opt/umcnet-dash/ctl.pass; printf '%s' "$cpw" > /opt/umcnet-dash/ctl.pass
 else
   /opt/umcnet/umcnet-user add controller controller --password "$(cat /opt/umcnet-dash/ctl.pass)" >/dev/null
+# the public enrol account: a repeater with no account knocks with it. The password is not a secret (it is in the
+# firmware); the account can only send a signed request and read answers that are encrypted to the repeater they are for.
+ENROL_PASSWORD="${ENROL_PASSWORD:-enrol-open-door-v1}"
+/opt/umcnet/umcnet-user add enrol enrol --password "$ENROL_PASSWORD" >/dev/null 2>&1 && NEWACCOUNT=1
 fi
 
 # the dashboard login (user "admin"), kept with the other credentials

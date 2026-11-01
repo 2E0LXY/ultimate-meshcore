@@ -11,7 +11,8 @@
 
 Roles: admin (everything), repeater (publishes what it hears, takes commands), client (listens),
 viewer (listens only), monitor (the dashboard: reads the broker's statistics and everything under meshcore/),
-controller (the dashboard's control channel: sends commands to repeaters and reads their answers).
+controller (the dashboard's control channel: sends commands to repeaters and reads their answers),
+enrol (the public account a repeater with no account of its own knocks with: it can only send a request and read encrypted answers).
 
 A repeater account is pending until its device id is set (it may listen to statuses, but publish and obey nothing),
 approved once bound to a device id, or blocked (everything refused). The topics are the standard MeshCore MQTT layout the firmware already
@@ -31,7 +32,7 @@ HOME = "/opt/umcnet"
 USERS = os.path.join(HOME, "users.json")
 PASSWD = os.path.join(HOME, "passwd")
 ACL = os.path.join(HOME, "acl")
-ROLES = ("admin", "repeater", "client", "viewer", "monitor", "controller")
+ROLES = ("admin", "repeater", "client", "viewer", "monitor", "controller", "enrol")
 STATES = ("approved", "pending", "blocked")
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,23}$")
 DEVICE = re.compile(r"^[0-9A-F]{64}$")
@@ -95,7 +96,12 @@ def acl_for(name, info):
         if dev:                                          # commands for this device only, answers from it only
             out += [f"topic read umcnet/v1/+/dev/{dev}/cmd", f"topic write umcnet/v1/+/dev/{dev}/resp"]
     elif role == "controller":
-        out += ["topic write umcnet/v1/+/dev/+/cmd", "topic read umcnet/v1/+/dev/+/resp"]
+        out += ["topic write umcnet/v1/+/dev/+/cmd", "topic read umcnet/v1/+/dev/+/resp",
+                "topic read umcnet/v1/enrol/hello", "topic write umcnet/v1/enrol/grant/#"]      # zero-touch enrolment: hear requests, answer them
+    elif role == "enrol":
+        # the public doorbell a new repeater knocks with: it may send its signed request and read the answers,
+        # which are encrypted so that only the repeater they are for can open them
+        out += ["topic write umcnet/v1/enrol/hello", "topic read umcnet/v1/enrol/grant/#"]
     elif role == "monitor":
         out += ["topic read $SYS/#", "topic read meshcore/#"]
     else:   # client and viewer listen

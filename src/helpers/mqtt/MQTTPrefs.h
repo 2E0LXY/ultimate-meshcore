@@ -42,6 +42,7 @@ struct MQTTPrefs {
   uint8_t custom_rate;     // most packets a minute passed on from the broker (0 = the default, 20)
   uint8_t custom_control;  // 1: obey signed commands sent to this repeater through the custom broker (see ControlCmd.h)
   char control_key[65];    // the 64 hex characters those commands are signed with
+  uint8_t custom_enrol;    // 1: no account yet: connect as the public enrol account and ask to join (see Enrol.h)
 };
 
 class MQTTPrefsStore {

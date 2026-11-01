@@ -1,5 +1,5 @@
 """Tests for the dashboard service and its admin helper. Run: python3 -m unittest -v test_dash   (no broker needed)"""
-import importlib.util, json, os, sys, tempfile, time, unittest
+import importlib.util, json, os, re, sys, tempfile, time, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 def load(name, file):
@@ -249,6 +249,62 @@ class AlertRequest(unittest.TestCase):
     def test_an_open_ntfy_address_has_no_login_and_other_addresses_get_json(self):
         r = dash.build_alert_request("https://ntfy.sh/topic", "T", "x", "ok"); self.assertIsNone(r.get_header("Authorization")); self.assertEqual("white_check_mark", r.get_header("Tags"))
         j = dash.build_alert_request("https://hooks.example/x", "T", "x", "warn"); self.assertEqual("application/json", j.get_header("Content-type")); self.assertEqual("T", json.loads(j.data)["title"])
+
+
+class Enrol(unittest.TestCase):
+    """The server half of zero-touch enrolment (the full flow against a real broker is e2e_enrol.py)."""
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        sp = importlib.util.spec_from_file_location("umcnet_enrol", os.path.join(HERE, "umcnet_enrol.py"))
+        cls.E = importlib.util.module_from_spec(sp); sp.loader.exec_module(cls.E)
+
+    def test_curve25519_matches_rfc_7748(self):
+        k = bytes.fromhex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4")
+        u = bytes.fromhex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c")
+        self.assertEqual("c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552", self.E.x25519(k, u).hex())
+
+    def test_ed25519_matches_rfc_8032(self):
+        prv, pub = self.E.ed_keypair(bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"))
+        self.assertEqual("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", pub.hex())
+        sig = self.E.ed_sign(prv, pub, b"")
+        self.assertEqual("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b", sig.hex())
+        self.assertTrue(self.E.ed_verify(pub, b"", sig)); self.assertFalse(self.E.ed_verify(pub, b"x", sig))
+
+    def hello(self, prv, pub, ts=None, name="Hill", **over):
+        dev = pub.hex().upper(); ts = int(ts or time.time()); nc = "a1b2c3d4e5f60718"
+        j = {"v": 1, "id": dev, "name": name, "fw": "0.2.0", "bd": "Heltec V3", "ts": ts, "nc": nc, "sig": self.E.ed_sign(prv, pub, self.E.hello_message(dev, ts, nc)).hex()}
+        j.update(over); return json.dumps(j)
+
+    def test_a_signed_request_is_accepted_and_others_are_refused(self):
+        prv, pub = self.E.ed_keypair(os.urandom(32)); other = self.E.ed_keypair(os.urandom(32))
+        info, why = self.E.verify_hello(self.hello(prv, pub)); self.assertIsNone(why); self.assertEqual(pub.hex().upper(), info["id"])
+        self.assertIsNotNone(self.E.verify_hello(self.hello(prv, pub, id=other[1].hex().upper()))[1])      # someone else's id
+        self.assertIsNotNone(self.E.verify_hello(self.hello(prv, pub, ts=time.time() - 3 * 86400))[1])      # too old
+        self.assertIsNotNone(self.E.verify_hello(self.hello(prv, pub, name="Other"))[1] if False else self.E.verify_hello(self.hello(prv, pub, ts=1))[1])
+        for bad in ("", "nope", "[]", '{"v":2}', json.dumps({"v": 1, "id": "zz"}), self.hello(prv, pub, sig="00" * 64), self.hello(prv, pub, nc="xx")):
+            self.assertIsNone(self.E.verify_hello(bad)[0], bad[:40])
+
+    def test_a_grant_opens_only_for_its_repeater_and_any_damage_is_refused(self):
+        prv, pub = self.E.ed_keypair(os.urandom(32)); dev = pub.hex().upper(); other = self.E.ed_keypair(os.urandom(32))[0]
+        g = self.E.make_grant(dev, "UMC1.example")
+        self.assertEqual("UMC1.example", self.E.open_grant(prv, dev, g)); self.assertIsNone(self.E.open_grant(other, dev, g))
+        for i in range(0, len(g), 7):
+            bad = g[:i] + ("A" if g[i] != "A" else "B") + g[i + 1:]
+            try: self.assertIsNone(self.E.open_grant(prv, dev, bad))
+            except Exception: pass
+
+    def test_the_firmware_test_vector_opens(self):
+        cpp = open(os.path.join(HERE, "..", "..", "..", "test", "test_enrol", "test_enrol.cpp")).read()
+        pick = lambda n: re.search(r'k%s = "([^"]*)"' % n, cpp).group(1)
+        prv, dev, code, grant = bytes.fromhex(pick("Prv")), pick("Pub"), pick("Code"), pick("Grant")
+        self.assertEqual(code, self.E.open_grant(prv, dev, grant))
+        self.assertEqual(self.E.ed_keypair(bytes(range(1, 33)))[1].hex().upper(), dev)
+
+    def test_slugs_are_valid_account_names(self):
+        dash.ENROL["pending"].clear()
+        for raw, dev in (("Hill Top", "AB" * 32), ("  Ünïcode!! ", "CD" * 32), ("x", "EF" * 32), ("", "12" * 32), ("A" * 60, "34" * 32)):
+            slug = dash.enrol_slug(raw, dev); self.assertRegex(slug, r"^[a-z0-9][a-z0-9-]{1,23}$", raw)
 
 
 class AdminHelper(unittest.TestCase):
