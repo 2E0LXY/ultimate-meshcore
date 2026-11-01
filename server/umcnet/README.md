@@ -158,3 +158,14 @@ The code is `UMC1.` plus base64url of: version, flags (control key, bridge, own 
 password, optionally a host and port, optionally the 32-byte control key, and a 3-byte SHA-256 check, so a mistyped or cut-off code
 is refused rather than half applied. It contains the repeater's password: treat it like one. A new code gives the account a new
 password. The format is in `src/helpers/mqtt/JoinCode.h` and `make_join_code` in `umcnet_dash.py`, tested against each other.
+
+### Alerts to your phone with ntfy (dashboard 2.3.1)
+
+`server/umcnet/dash/install-ntfy.sh` installs a private [ntfy](https://ntfy.sh) server on the same machine: it is served by Caddy on
+`https://<your host>:8443` (the certificate you already have; no extra DNS record), everything is denied by default, and there are two
+logins on one secret topic: one for your phone (read and send) and one for the dashboard (send only). The script prints the phone
+settings and the dashboard address. In the dashboard open **Settings → Alerts**, tick *enabled* and paste the address
+`https://umc-dash:<password>@<host>:8443/<topic>`: the dashboard sends it with that login. It alerts when a repeater has been silent
+for too long (and when it is back), when an account is waiting for approval, on refused logins, when the certificate is close to
+expiry, when the disk is nearly full and when the control link is down. Open port 8443 in any firewall in front of the server.
+Alerts cannot reach you if the whole server is down, so keep an outside check for that.
