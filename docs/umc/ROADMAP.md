@@ -2,6 +2,8 @@
 
 Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, MeshCore-EastMesh, LocalMesh region configuration, agessaman/MeshCore (observer-firmware, abstract-networking, map uploader, alerts, SNMP), OffbandMesh, meshcomod, MeshCore-Low-Power (docs), MeshCore-BitChat, jmead MQTT gateway, redengin (Rust), openHop modem/flasher, mesh-loader, meshcore_py, meshcore-open, ZephCore, pyMC_Repeater, CubeCellMeshCore, awesome-meshcore, LitBomb FAQ, meshcore.co.uk guide, meshcore-regions catalogue.
 
+**Phased upgrade plan (audit of 2026-11-01): [UPGRADE-PLAN.md](UPGRADE-PLAN.md).**
+
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
 ## Done in 0.1.24

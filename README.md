@@ -422,6 +422,7 @@ pio run -e umc_lilygo_tdeck_client           # T-Deck / T-Deck Plus client
 |---|---|
 | [MANUAL.md](docs/umc/MANUAL.md) | Complete user guide: installation, every setting, troubleshooting, command reference and glossary |
 | [ROADMAP.md](docs/umc/ROADMAP.md) | What's coming next |
+| [UPGRADE-PLAN.md](docs/umc/UPGRADE-PLAN.md) | Feature gaps against upstream and the apps, and the phased plan to close them |
 | [SPEC.md](docs/umc/SPEC.md) | Design specification |
 | [server/umcnet/README.md](server/umcnet/README.md) | UMC Net: broker, dashboard, remote control and approvals |
 | [android/README.md](android/README.md) | The Ultimate MeshCore App for Android |
