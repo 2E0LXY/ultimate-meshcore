@@ -6,6 +6,13 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done after 0.1.29 (server and app)
+
+- ✅ **Dashboard 2.6: a login for each person.** Administrator, owner (controls only their own repeaters, sees everything) and viewer; Users tab; each user changes their own password; users send messages under their own name
+- ✅ **Messages: Reply and live.** A Reply button on each message, new messages highlighted and counted on the tab
+- ✅ **One dot per station.** A reflashed or replaced station no longer appears twice on the map
+- ✅ **App 0.1.14: finds radios on WiFi by itself.** The Connect screen asks every address on the phone's WiFi network for a UMC radio's info page and lists what answers, with a Connect button
+
 ## Done in 0.1.29
 
 - ✅ **Help on every setting.** Each setting on the repeater and client web page has a ? with what it is, how to use it and why it matters; the UMC Net settings also say how they work. The eleven WiFi and network settings that had none now have it

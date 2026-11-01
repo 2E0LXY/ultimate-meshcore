@@ -201,10 +201,17 @@ class Network(unittest.TestCase):
         dash.note_network("AA" * 32, dash.parse_packet(self.advert(self.KEY_A, "Hill", 53.7, -1.5, hops=[0x44])), 6.0, -97, time.time())
         v = dash.network_view()
         self.assertEqual((2, 1, 1), (len(v["nodes"]), len(v["links"]), len(v["journeys"])))                      # the repeater, the node it heard, their link
+        self.assertEqual(1, v["links"][0]["hops"]); self.assertEqual("44", v["journeys"][0]["path"][0]["h"])
         rep = next(n for n in v["nodes"] if n["key"] == "AA" * 32); self.assertTrue(rep["online"] and rep["info"]["name"] == "Rep")
         self.assertEqual(1, len(dash.network_view(hours=1)["nodes"][:1])); d["last"] = 0; dash.NODES[self.KEY_A.upper()]["last"] = time.time() - 3 * 86400
         self.assertEqual(0, len(dash.network_view(hours=24)["nodes"]))                                           # not on the network and not heard lately: not on the map
-        self.assertEqual(1, v["links"][0]["hops"]); self.assertEqual("44", v["journeys"][0]["path"][0]["h"])
+
+    def test_a_reflashed_station_shows_once_under_its_newest_key(self):
+        now = time.time(); d = dash.device("CC" * 32, "LBA"); d["last"] = now; d["name"] = "Hill"
+        for k, nm, last in (("CC" * 32, "Hill", now), ("DD" * 32, "Hill", now - 7200), ("EE" * 32, "Mast", now - 600), ("FF" * 32, "Mast", now - 60), ("11" * 32, "", now)):
+            dash.NODES[k] = {"key": k, "name": nm, "type": 2, "lat": None, "lon": None, "first": 0, "last": last, "adverts": 1}
+        v = dash.network_view(hours=24); keys = sorted(n["key"][:2] for n in v["nodes"])
+        self.assertEqual(["11", "CC", "FF"], keys)
 
 
 class History(unittest.TestCase):

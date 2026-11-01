@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.5"
+VERSION = "2.6"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -165,6 +165,15 @@ def network_view(hours=24):
         for n in nodes:                                       # a connected repeater's position may come from the control channel
             d = DEV.get(n["key"])
             if d and n["lat"] is None and d.get("lat") is not None: n["lat"], n["lon"] = d["lat"], d["lon"]
+        # one station, one dot: a reflashed or replaced station comes back with a new key under the same name; show the newest
+        # (and always the repeater that is on this network), not every identity it ever had
+        out, names = [], set()
+        for n in sorted(nodes, key=lambda x: (not x.get("info"), -(x["last"] or 0))):
+            nm = (n["name"] or "").strip().lower()
+            if nm and nm in names and not n.get("info"): continue
+            if nm and n["name"] != n["key"][:8]: names.add(nm)
+            out.append(n)
+        nodes = out
         keep = {n["key"] for n in nodes}
         links = [{"recv": a, "node": b, "hops": l["hops_min"], "hops_last": l["hops_last"], "n": l["n"], "snr": l["snr"], "rssi": l["rssi"], "first": l["first"], "last": l["last"], "types": dict(l["types"])} for (a, b), l in LINKS.items() if a in keep and b in keep]
         journeys = [dict(j) for j in list(JOURNEYS)[-80:]][::-1]
@@ -540,7 +549,7 @@ DASH_ID = "DA" * 32                          # the id the dashboard publishes it
 MSG_DEFAULTS = {"tx_enabled": True, "sender": "UMC-DASH", "keep_days": 30,
                 "channels": [{"name": "Public", "psk": MSG.PUBLIC_PSK}, {"name": "#yorkshire"}, {"name": "#northwest"}, {"name": "#northeast"}, {"name": "#derbyshire"}, {"name": "#lincolnshire"}, {"name": "#sheffield"}, {"name": "#wakefield"}],
                 "regions": ["yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire", "sheffield", "wakefield"]}
-DEFAULTS = {"messages": MSG_DEFAULTS, "map_hours": 24, "enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
+DEFAULTS = {"web_users": {}, "messages": MSG_DEFAULTS, "map_hours": 24, "enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
             "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14, "confirm_risky": True, "control_enabled": True,
             "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True},
             "labels": {}}
@@ -557,6 +566,7 @@ def conf_load():
     for k, v in raw.items():
         if k == "alerts" and isinstance(v, dict): merged["alerts"].update({a: b for a, b in v.items() if a in merged["alerts"]})
         elif k == "messages" and isinstance(v, dict): merged["messages"].update(v)
+        elif k == "web_users" and isinstance(v, dict): merged["web_users"] = v
         elif k in merged: merged[k] = v
     CONF.clear(); CONF.update(merged)
 
@@ -709,6 +719,52 @@ def control_key(dev, create=False, new=False):
         if (new or create and dev not in KEYS):
             KEYS[dev] = {"key": secrets.token_hex(32), "created": int(time.time())}; keys_save()
         return KEYS.get(dev, {}).get("key")
+
+# ----------------------------------------------------------------------------- dashboard users
+# Caddy checks the password and passes the signed-in name in X-UMC-User (the public pages strip it). "admin" can do
+# everything. Any other user sees the whole network but controls only the repeaters listed for them, and can send messages.
+WEBNAME = re.compile(r"^[a-z0-9][a-z0-9_.-]{1,30}$")
+OWNER_POSTS = ("/api/control", "/api/control/batch", "/api/control/preload", "/api/control/setup", "/api/messages/send", "/api/password")
+
+def role_of(who):
+    if who == "admin": return "admin"
+    u = CONF["web_users"].get(who)
+    return (u.get("role") if u and u.get("role") in ("admin", "owner", "viewer") else "viewer") if u else "viewer"
+
+def devices_of(who):
+    return [d.upper() for d in (CONF["web_users"].get(who) or {}).get("devices", [])]
+
+def may_control(who, dev):
+    r = role_of(who)
+    return r == "admin" or (r == "owner" and str(dev or "").upper() in devices_of(who))
+
+def me_view(who):
+    r = role_of(who); u = CONF["web_users"].get(who) or {}
+    return {"name": who, "role": r, "devices": None if r == "admin" else devices_of(who), "sender": u.get("sender") or ""}
+
+def users_save(body):
+    name = str(body.get("name", "")).strip().lower()
+    if not WEBNAME.match(name) or name == "admin": return {"ok": False, "error": "user names are 2 to 31 lowercase letters, digits, dots, dashes or underscores (not admin)"}
+    role = str(body.get("role", "owner"))
+    if role not in ("admin", "owner", "viewer"): return {"ok": False, "error": "role: admin, owner or viewer"}
+    devs = [str(d).upper() for d in body.get("devices", []) if re.match(r"^[0-9A-Fa-f]{64}$", str(d))]
+    sender = str(body.get("sender", "")).strip()
+    if sender and not re.match(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,23}$", sender): return {"ok": False, "error": "the sender name is 1 to 24 letters, digits, spaces, dots, dashes or underscores"}
+    pw = str(body.get("password", ""))
+    if name not in CONF["web_users"] and not pw: return {"ok": False, "error": "a new user needs a password"}
+    if pw:
+        r = admin_call(op="web_user_set", name=name, password=pw)
+        if not r.get("ok"): return r
+    CONF["web_users"][name] = {"role": role, "devices": devs, "sender": sender}; conf_save()
+    return {"ok": True}
+
+def users_remove(name):
+    name = str(name or "")
+    if name not in CONF["web_users"]: return {"ok": False, "error": "no such user"}
+    r = admin_call(op="web_user_remove", name=name)
+    if not r.get("ok"): return r
+    CONF["web_users"].pop(name, None); conf_save()
+    return {"ok": True}
 
 # ----------------------------------------------------------------------------- messages (channels and regions)
 MSGSTAT = {}                                # channel hash -> {"n", "last", "regions"}: messages we cannot read (no key for that channel)
@@ -1172,7 +1228,9 @@ def overview():
         types = collections.Counter()
         for d in DEV.values(): types.update(d["types"])
         sysd = {k: v[0] for k, v in SYS.items()}
-        res = {"version": VERSION, "now": now, "started": START, "mqtt": dict(MQTT), "sys": sysd, "system": sysinfo, "cert": cert, "devices": devs, "clients": clients, "accounts": accs,
+        try: msg_last = (DB.execute("SELECT MAX(id) FROM messages").fetchone() or [0])[0] or 0
+        except Exception: msg_last = 0
+        res = {"msg_last": msg_last, "version": VERSION, "now": now, "started": START, "mqtt": dict(MQTT), "sys": sysd, "system": sysinfo, "cert": cert, "devices": devs, "clients": clients, "accounts": accs,
                "packets": [dict(p) for p in list(PKTS)[-60:]][::-1], "events": [dict(e) for e in list(EVENTS)[-80:]][::-1], "log": [dict(l) for l in list(LOG)[-60:]][::-1], "count": dict(COUNT),
                "rates": {"messages": rate_per_min("messages"), "packets": rate_per_min("packets"), "unique": rate_per_min("unique")},
                "overlap": {"ids": ids, "names": [DEV[i]["name"] or i[:8] for i in ids], "m": overlap}, "heard_by": dict(sorted(multi.items())), "types": dict(types),
@@ -1220,7 +1278,15 @@ class H(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length", "0") or 0)
             if n > 20000: return self.send(413, '{"error":"too big"}')
             body = json.loads(self.rfile.read(n).decode() or "{}")
-            who = "admin"; p = u.path
+            who = (self.headers.get("X-UMC-User") or "admin").strip() or "admin"; p = u.path; role = role_of(who)
+            if role != "admin":
+                if p not in OWNER_POSTS: return self.send(403, json.dumps({"ok": False, "error": "only the administrator can do that"}))
+                if role == "viewer" and p != "/api/password": return self.send(403, json.dumps({"ok": False, "error": "this login can only look"}))
+                if p.startswith("/api/control") and not may_control(who, body.get("device")): return self.send(403, json.dumps({"ok": False, "error": "you can only control your own repeater"}))
+            if p == "/api/users/save":
+                r = users_save(body); audit(who, "user saved", str(body.get("name", "")), r.get("error") or "ok", bool(r.get("ok"))); return self.send(200, json.dumps(r))
+            if p == "/api/users/remove":
+                r = users_remove(body.get("name")); audit(who, "user removed", str(body.get("name", "")), r.get("error") or "ok", bool(r.get("ok"))); return self.send(200, json.dumps(r))
             if p == "/api/control":
                 return self.send(200, json.dumps(send_command(body.get("device"), str(body.get("cmd", "")), who, bool(body.get("confirm")))))
             if p == "/api/control/preload":
@@ -1261,7 +1327,10 @@ class H(BaseHTTPRequestHandler):
                     try: out["join"] = make_join_code(name, r["password"], CONF["join_iata"], control_key(dev, create=True) if re.match(r"^[0-9A-F]{64}$", dev) else None, CONF["join_bridge"])
                     except ValueError as e: out["join_error"] = str(e)
                 return self.send(200, json.dumps(out))
-            if p == "/api/messages/send": return self.send(200, json.dumps(send_message(who, str(body.get("channel", "")), str(body.get("region", "")), str(body.get("text", "")), body.get("sender"))))
+            if p == "/api/messages/send":
+                own = me_view(who)["sender"] or re.sub(r"[^A-Za-z0-9._-]", "", who.upper())[:24] or "USER"
+                sender = (body.get("sender") or None) if role == "admin" else own        # users send under their own name only
+                return self.send(200, json.dumps(send_message(who, str(body.get("channel", "")), str(body.get("region", "")), str(body.get("text", "")), sender)))
             if p == "/api/enrol/approve":
                 r = enrol_approve(who, body.get("id", ""), body.get("name"), body.get("bridge")); return self.send(200, json.dumps(r))
             if p == "/api/enrol/decline": return self.send(200, json.dumps(enrol_decline(who, body.get("id", ""))))
@@ -1276,7 +1345,7 @@ class H(BaseHTTPRequestHandler):
                 audit(who, "join code", name, "new password; remote control key %s" % ("included" if acc["device"] else "not yet (not approved)"))
                 return self.send(200, json.dumps({"ok": True, "join": code, "has_key": bool(acc["device"])}))
             if p == "/api/password":
-                r = admin_call(op="dash_password", current=str(body.get("current", "")), new=str(body.get("new", ""))); audit(who, "dashboard password", "admin", r.get("error") or "changed", bool(r.get("ok")))
+                r = admin_call(op="dash_password", user=who, current=str(body.get("current", "")), new=str(body.get("new", ""))); audit(who, "dashboard password", who, r.get("error") or "changed", bool(r.get("ok")))
                 return self.send(200, json.dumps(r))
             if p == "/api/service":
                 r = admin_call(op="service", name=str(body.get("name", "")), action="restart"); audit(who, "service restart", str(body.get("name")), r.get("error") or "ok", bool(r.get("ok")))
@@ -1303,6 +1372,8 @@ class H(BaseHTTPRequestHandler):
                 secs = max(60, min(90 * 86400, int(q.get("range", ["604800"])[0])))
                 rows = DB.execute("SELECT ts,who,action,target,detail,ok FROM audit WHERE ts>=? ORDER BY ts DESC LIMIT 500", (int(time.time()) - secs,)).fetchall()
                 return self.send(200, json.dumps([dict(zip(("ts", "who", "action", "target", "detail", "ok"), r)) for r in rows]))
+            who = (self.headers.get("X-UMC-User") or "admin").strip() or "admin"; role = role_of(who)
+            if u.path.startswith("/api/export/") and role != "admin": return self.send(403, '{"error":"only the administrator can export"}')
             if u.path == "/api/export/events.csv":
                 rows = DB.execute("SELECT datetime(ts,'unixepoch'),kind,client,user,ip,text FROM events ORDER BY ts DESC LIMIT 20000").fetchall()
                 return self.send(200, csv_text(("time (UTC)", "kind", "client", "user", "ip", "text"), rows), "text/csv")
@@ -1314,7 +1385,12 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, csv_text(("device id", "name", "area", "model", "firmware", "radio", "status", "received", "sent", "last data (epoch)", "label"), rows), "text/csv")
             if u.path == "/api/export/config.json": return self.send(200, json.dumps(CONF, indent=1))
             if u.path in ("/", "/index.html"): return self.send(200, open(CFG["static"], "rb").read(), "text/html")
-            if u.path == "/api/overview": return self.send(200, json.dumps(overview(), default=str))
+            if u.path == "/api/overview":
+                o = overview(); o["me"] = me_view(who)
+                if role == "admin": o["web_users"] = CONF["web_users"]
+                else:                                           # nothing secret leaves for other users
+                    c = json.loads(json.dumps(o["config"])); c.get("alerts", {})["url"] = "(set by the administrator)" if c.get("alerts", {}).get("url") else ""; c.pop("web_users", None); o["config"] = c
+                return self.send(200, json.dumps(o, default=str))
             if u.path == "/api/history":
                 keys = [k for k in (q.get("k", [""])[0]).split(",") if k][:60]; secs = max(60, min(14 * 86400, int(q.get("range", ["3600"])[0])))
                 return self.send(200, json.dumps(history(keys, secs)))

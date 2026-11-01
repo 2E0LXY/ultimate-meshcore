@@ -189,3 +189,22 @@ precision). Exit status 0 means everything passed.
 * **Data flow.** Arrows both ways: what each repeater hears and publishes, and what the broker hands back for its radio to send (the bridge), measured once a minute with `get mqtt.custom.bridge`.
 * **Control tab.** Neighbours (with names from any repeater's adverts) are read when the tab opens and each minute; settings are re-read if older than ten minutes.
 * `e2e_messages.py [--ui]` tests all of this against a real broker.
+
+### Logins for each person (dashboard 2.6)
+
+Every person gets their own login (**Users** tab, administrator only). Caddy checks the password (several logins in the
+`basic_auth` block of `umcnet.caddy`) and tells the dashboard who signed in (`X-UMC-User`; the public pages never carry it).
+
+| Role | Sees | Can do |
+|---|---|---|
+| Administrator (`admin`, or a user given that role) | everything | everything: settings, accounts, users, every repeater |
+| Owner | the whole network, every message, every repeater's data | control, update and restart **only the repeaters ticked for them**; send and reply to messages, under their own name |
+| Viewer | the whole network and every message | nothing |
+
+A user changes their own password on their Settings tab. Secrets (the alert address with its password, the user list, exports)
+are only given to the administrator. Re-running `install-dash.sh` keeps every login. The root helper adds, resets and removes logins
+(`web_user_set`, `web_user_remove`) and rolls the Caddy file back if Caddy refuses it.
+
+**Messages** refresh every five seconds while the tab is open; new ones are highlighted and counted on the tab when you are
+elsewhere. **Reply** fills in the channel, the region and `@[sender]`. Room servers' messages are encrypted for their members
+only, so they cannot be shown. On the map a station that was reflashed or replaced (new key, same name) is shown once, newest first.

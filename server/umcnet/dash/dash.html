@@ -77,6 +77,7 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 .dash2 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .dash2 .tr{color:var(--mu)}.dash2 .conn b{white-space:nowrap}
 .umcpop .leaflet-popup-content-wrapper{background:#0d2219;color:#e9f7ef;border:1px solid #1f4a37;border-radius:12px}.umcpop .leaflet-popup-tip{background:#0d2219}.umcpop .leaflet-popup-content{margin:12px 14px;max-height:430px;overflow:auto}.pop h3{margin:0 0 6px;font-size:15px}.pop h4{margin:10px 0 3px;font-size:12px;color:#9fd8b6}.pp{border-collapse:collapse;width:100%}.pp td{padding:2px 10px 2px 0;font-size:12px;vertical-align:top;border:0}.pp td:first-child{white-space:nowrap}
+@keyframes newmsg{from{background:#2fe27a33}to{background:transparent}}tr.newmsg td{animation:newmsg 4s ease-out}
 </style></head>
 <body><div class="wrap"><div class="dash2">
 <svg width="0" height="0" style="position:absolute"><defs><filter id="dglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -89,7 +90,7 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 const D = {uid: 0};
 const $ = s => document.querySelector(s), esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const S = {o: null, hist: {}, range: 3600, tab: "overview", ev: [], evKind: "", logq: "", pq: "", t: 0, err: "", sel: "", vals: {}, log: [], audit: [], setup: "", created: null, msg: "", busy: false};
-const TABS = [["overview", "Overview"], ["network", "Network"], ["messages", "Messages"], ["repeaters", "Repeaters"], ["control", "Control"], ["clients", "Clients"], ["accounts", "Accounts"], ["traffic", "Traffic"], ["diagnostics", "Diagnostics"], ["broker", "Broker"], ["system", "System"], ["log", "Log"], ["settings", "Settings"]];
+const TABS = [["overview", "Overview"], ["network", "Network"], ["messages", "Messages"], ["repeaters", "Repeaters"], ["control", "Control"], ["clients", "Clients"], ["accounts", "Accounts"], ["traffic", "Traffic"], ["diagnostics", "Diagnostics"], ["broker", "Broker"], ["system", "System"], ["log", "Log"], ["users", "Users"], ["settings", "Settings"]];
 const bytes = n => n == null ? "—" : n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? (n / 1e3).toFixed(1) + " kB" : Math.round(n) + " B";
 const dur = s => { s = Math.round(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d}d ${h}h ${m}m` : h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; };
 const ago = t => !t ? "never" : dur(Math.max(0, Date.now() / 1000 - t)) + " ago";
@@ -166,6 +167,8 @@ D.flow = (f) => {
 
 
 const HELP = {
+  users: ["The people who can sign in to this dashboard. The administrator can do everything; an owner sees the whole network and every message and controls only the repeaters ticked for them; a viewer only looks.", "Add a user with a login name and password, tick their repeater(s), and give them the address of this page. Edit to change their repeaters or reset their password; Remove to take the login away.", "Each person signs in as themselves, so they can look after their own repeater without being able to change anyone else's, and the audit log shows who did what."],
+  useradd: ["The form for adding a user or changing one.", "Pick a login name (lowercase), a password of 12 or more characters with a capital and a number, the role, the repeaters they control and the name their messages go out under. When editing, leave the password empty to keep it.", "The password is checked by the secure web front (Caddy), never stored in plain text."],
   messages: ["Every group message your repeaters hear in the channels you have set up, and the messages you send from here. Each row shows the channel, the region it was sent into, who sent it and which of your repeaters heard it and how far it had travelled.", "Pick a channel or region to narrow the list, or search. To send, choose a channel and optionally a region, type up to 130 characters and press Send: your repeaters transmit it. Channels and regions are managed in Settings.", "It shows what people are saying across your coverage, and lets you reach the area without a radio in your hand. Messages in channels the dashboard has no key for cannot be read; they are only counted."],
   msgcfg: ["The channels (name, and key for non-hashtag channels) and regions the Messages tab uses, who sends as, and whether sending is allowed.", "List one channel per line and the regions your repeaters use, then press Save messaging. Hashtag channels such as #yorkshire need no key.", "The dashboard can only read a channel whose key it has, and can only name a region it knows; everything else shows as unreadable or other region."],
   neigh: ["The repeaters this one can hear directly over the radio, with how recently and how strongly (SNR, higher is better).", "It reads itself when you open the tab and each minute after. Press Refresh to read again or Discover neighbours to ask for new adverts.", "A missing or weak neighbour shows a link problem long before users notice; a name appears once any repeater here has heard that node's advert."],
@@ -384,6 +387,7 @@ function devSel(o) {
   return o.devices.map(d => `<button data-sel="${d.id}" class="${S.sel === d.id ? "on" : ""}">${dot(d.age < 900 ? "ok" : "warn")} ${esc((d.label && d.label.label) || d.name || d.id.slice(0, 8))}${d.has_key ? "" : " 🔑?"}</button>`).join(" ");
 }
 function vControl(o) {
+  if (o.me && o.me.role !== "admin") { o = Object.assign({}, o, {devices: o.devices.filter(d => (o.me.devices || []).includes(d.id))}); if (!o.devices.length) return `<div class="panels">${panel("Control", "", `<div class="empty">${o.me.role === "viewer" ? "This login can look but not control." : "No repeater is assigned to your login yet. Ask the administrator to add yours on the Users tab."}</div>`, "control")}</div>`; }
   if (!o.devices.length) return `<div class="panels">${panel("Control", "", `<div class="empty">No repeater has reported yet. Approve one on the Accounts tab first.</div>`, "control")}</div>`;
   devSel(o); const d = o.devices.find(x => x.id === S.sel) || o.devices[0]; S.sel = d.id;
   const vals = Object.assign(S.vals[d.id] || {}, d.settings || {}); S.vals[d.id] = vals;
@@ -437,7 +441,21 @@ function vAccounts(o) {
     ${panel("Roles", "", `<table><tbody><tr><td><b>repeater</b></td><td>publishes what it hears under its own device id, reads everyone's raw packets and status, obeys signed commands. Waits for approval until bound to a device id.</td></tr><tr><td><b>client / viewer</b></td><td>listens only</td></tr><tr><td><b>monitor</b> (dash)</td><td>this dashboard's read-only account</td></tr><tr><td><b>controller</b></td><td>this dashboard's control channel: may send commands and read the answers, nothing else</td></tr><tr><td><b>admin</b></td><td>everything: keep it for yourself</td></tr></tbody></table>`, "", "s12")}</div>`;
 }
 
+function vUsers(o) {
+  const users = Object.entries(o.web_users || {}), devs = o.devices, dn = id => { const d = devs.find(x => x.id === id); return d ? (d.name || id.slice(0, 8)) : id.slice(0, 8); };
+  const e = S.uedit || {name: "", role: "owner", devices: [], sender: ""};
+  const rows = users.map(([n, u]) => `<tr><td><b>${esc(n)}</b></td><td>${esc(u.role)}</td><td style="white-space:normal">${(u.devices || []).map(dn).map(esc).join(", ") || '<span class="tr">none</span>'}</td><td>${esc(u.sender || "")}</td><td><button class="tool" data-uedit="${esc(n)}">Edit</button> <button class="tool danger" data-uremove="${esc(n)}">Remove</button></td></tr>`);
+  return `<div class="panels">${panel("Users", "who can sign in to this dashboard", table(["Login", "Role", "Repeaters they control", "Sends as", ""], [`<tr><td><b>admin</b></td><td>administrator</td><td class="tr">all</td><td></td><td></td></tr>`].concat(rows)), "users", "s7")}
+    ${panel(e.name && (o.web_users || {})[e.name] ? "Edit " + e.name : "Add a user", "each person gets their own login", `<div style="display:grid;gap:8px">
+      <label>Login name <input id="uName" value="${esc(e.name)}" placeholder="e.g. g4abc" ${e.name && (o.web_users || {})[e.name] ? "readonly" : ""}></label>
+      <label>Password <input id="uPw" type="password" placeholder="${e.name && (o.web_users || {})[e.name] ? "leave empty to keep it" : "12+ characters, a capital and a number"}" autocomplete="new-password"></label>
+      <label>Role <select id="uRole">${[["owner", "Owner: sees everything, controls their repeaters"], ["viewer", "Viewer: sees everything, controls nothing"], ["admin", "Administrator: everything"]].map(([v, l]) => `<option value="${v}" ${e.role === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <div><b>Repeaters they control</b><div>${devs.map(d => `<label style="display:block"><input type="checkbox" class="uDev" value="${d.id}" ${(e.devices || []).includes(d.id) ? "checked" : ""}> ${esc(d.name || d.id.slice(0, 8))} <span class="tr">${d.id.slice(0, 8)}</span></label>`).join("") || '<span class="tr">no repeater has reported yet</span>'}</div></div>
+      <label>Sends messages as <input id="uSender" value="${esc(e.sender || "")}" placeholder="their callsign"></label>
+      <div class="row"><button class="tool" data-act="usave">Save</button> <button class="tool" data-act="unew">New</button><span class="tr" id="uMsg"></span></div></div>`, "useradd", "s5")}</div>`;
+}
 function vSettings(o) {
+  if (o.me && o.me.role !== "admin") return `<div class="panels">${panel("Your password", "the login for this page: " + esc(o.me.name), `<div class="row"><input id="pwCur" type="password" placeholder="current password" autocomplete="current-password"><input id="pwNew" type="password" placeholder="new password (12+ characters)" autocomplete="new-password"><input id="pwNew2" type="password" placeholder="repeat it" autocomplete="new-password"><button class="tool" data-act="pw">Change</button></div><div class="tr" id="pwMsg" style="margin-top:6px"></div>`, "password", "s6")}${panel("What this login can do", "", `<div class="tr">${o.me.role === "owner" ? "See the whole network and every message; control and update your own repeater(s); send messages." : "See the whole network and every message."} The administrator manages logins.</div>`, "", "s6")}</div>`;
   const c = o.config, a = c.alerts, num = (k, label, hint) => `<tr><td><b>${label}</b><div class="tr" style="font-size:11px">${hint || ""}</div></td><td><input data-cfg="${k}" value="${esc(c[k])}" style="width:100px;background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 8px"></td></tr>`;
   const chk = (k, label, obj = c) => `<label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="${k}"${obj === a ? ' data-al="1"' : ""} ${obj[k] ? "checked" : ""}> ${label}</label>`;
   return `<div class="panels">
@@ -477,6 +495,12 @@ document.addEventListener("click", async e => {
     (r.results || []).forEach(x => { if (x.ok) { v[x.cmd.slice(4)] = x.reply; ok++; } }); S.msg = ok ? `Read ${ok} of ${cmds.length} settings` : ((r.results && r.results[0] && r.results[0].error) || "No answer"); draw(); return;
   }
   if (act === "neighrefresh") { ctlNeighLoad(); return; }
+  if (act === "unew") { S.uedit = null; draw(); return; }
+  if (act === "usave") {
+    const body = {name: $("#uName").value.trim().toLowerCase(), password: $("#uPw").value, role: $("#uRole").value, devices: [...document.querySelectorAll(".uDev:checked")].map(x => x.value), sender: $("#uSender").value.trim()};
+    const r = await post("/api/users/save", body); const m = $("#uMsg"); if (m) m.textContent = r.ok ? "Saved. They sign in at this address with that login." : r.error;
+    if (r.ok) { S.uedit = null; await tick(); } return;
+  }
   if (act === "savemsgcfg") {
     const channels = $("#mcChans").value.split("\n").map(l => l.trim()).filter(Boolean).map(l => { const i = l.indexOf(" "); return i < 0 ? {name: l} : {name: l.slice(0, i).trim(), psk: l.slice(i + 1).trim()}; });
     const regions = $("#mcRegs").value.split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
@@ -603,15 +627,25 @@ function msgUpdate() {
     const opt = (list, cur, first) => (first ? [`<option value="">${first}</option>`] : []).concat(list.map(x => `<option value="${esc(x.v)}" ${x.v === cur ? "selected" : ""}>${esc(x.l)}</option>`)).join("");
     const chans = d.channels.map(c => ({v: c.name, l: c.name})), regs = d.regions.map(r => ({v: r, l: r}));
     bar.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><select id="mfChan" data-mf="channel">${opt(chans, m.channel, "all channels")}</select><select id="mfReg" data-mf="region">${opt([{v: "-", l: "no region (heard everywhere)"}].concat(regs), m.region, "all regions")}</select><select id="mfDir" data-mf="dir"><option value="">heard and sent</option><option value="rx" ${m.dir === "rx" ? "selected" : ""}>heard only</option><option value="tx" ${m.dir === "tx" ? "selected" : ""}>sent only</option></select><input id="mfQ" data-mf="q" placeholder="search" value="${esc(m.q)}" style="min-width:160px"></div>` +
-      (d.tx_enabled ? `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;padding:10px;border:1px solid #1f4a37;border-radius:10px;background:#0d2219"><b>Send</b><select id="msgChan">${opt(chans, keep.chan)}</select><select id="msgReg">${opt(regs, keep.reg, "no region")}</select><input id="msgSender" value="${esc(keep.sender != null && keep.sender !== undefined ? keep.sender : d.sender)}" style="width:130px" title="the name shown before your message"><input id="msgText" maxlength="130" placeholder="type a message" value="${esc(keep.text)}" style="flex:1;min-width:220px"><span class="tr" id="msgCount">0/130</span><button class="tool" id="msgSend">Send</button></div><div class="tr" id="msgRes" style="margin:4px 2px 8px">${esc(m.sent)}</div>` : `<div class="tr">Sending is switched off in Settings.</div>`);
+      (d.tx_enabled ? `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;padding:10px;border:1px solid #1f4a37;border-radius:10px;background:#0d2219"><b>Send</b><select id="msgChan">${opt(chans, keep.chan)}</select><select id="msgReg">${opt(regs, keep.reg, "no region")}</select>${(() => { const me = S.o && S.o.me, adm = !me || me.role === "admin", own = me && (me.sender || me.name.toUpperCase()); return `<input id="msgSender" value="${esc(adm ? (keep.sender != null && keep.sender !== undefined ? keep.sender : d.sender) : own)}" ${adm ? "" : "readonly"} style="width:130px" title="${adm ? "the name shown before your message" : "your messages go out under your own name"}">`; })()}<input id="msgText" maxlength="130" placeholder="type a message" value="${esc(keep.text)}" style="flex:1;min-width:220px"><span class="tr" id="msgCount">0/130</span><button class="tool" id="msgSend">Send</button></div><div class="tr" id="msgRes" style="margin:4px 2px 8px">${esc(m.sent)}</div>` : `<div class="tr">Sending is switched off in Settings.</div>`);
     bar.dataset.sig = sig;
   }
   const bychan = {}; d.counts.forEach(c => bychan[c.chan] = (bychan[c.chan] || 0) + c.n);
   const unread = Object.entries(d.unreadable || {}).map(([h, v]) => `channel ${h}: ${v.n}`).join(" · ");
   $("#msgChips").innerHTML = `<span class="tr">last 24 hours:</span>` + (Object.keys(bychan).length ? Object.entries(bychan).map(([c, n]) => `<span class="tag" style="cursor:pointer" data-mfset="${esc(c)}">${esc(c)} ${n}</span>`).join("") : `<span class="tr">nothing yet</span>`) + (unread ? `<span class="tr" title="the dashboard has no key for these channels: add them in Settings">· cannot read: ${esc(unread)}</span>` : "");
-  const rows = d.messages.map(x => `<tr><td style="white-space:nowrap">${clock(x.seen).split(", ").pop()}</td><td><span class="tag ${x.dir === "tx" ? "tx" : ""}">${x.dir === "tx" ? "TX" : "RX"}</span></td><td>${esc(x.chan)}</td><td>${x.region ? (x.region === "?" ? '<span class="tr">other region</span>' : esc(x.region)) : '<span class="tr">none</span>'}</td><td><b>${esc(x.sender || "?")}</b></td><td style="white-space:normal;word-break:break-word">${esc(x.text)}</td><td style="white-space:normal">${x.heard.length ? x.heard.map(h => `${esc(h.name)} <span class="tr">${HOPN(h.hops)}${h.snr != null ? " · " + h.snr + " dB" : ""}</span>`).join("<br>") : '<span class="tr">waiting to be heard</span>'}</td></tr>`);
-  $("#msgFeed").innerHTML = table(["Time", "", "Channel", "Region", "From", "Message", "Heard by"], rows, "No messages match yet. Messages appear as your repeaters hear them in the channels set up in Settings.");
+  const seen = m.lastId || 0; m.lastId = Math.max(seen, ...d.messages.map(x => x.id), 0);
+  const rows = d.messages.map(x => `<tr class="${seen && x.id > seen ? "newmsg" : ""}"><td style="white-space:nowrap">${clock(x.seen).split(", ").pop()}</td><td><span class="tag ${x.dir === "tx" ? "tx" : ""}">${x.dir === "tx" ? "TX" : "RX"}</span></td><td>${esc(x.chan)}</td><td>${x.region ? (x.region === "?" ? '<span class="tr">other region</span>' : esc(x.region)) : '<span class="tr">none</span>'}</td><td><b>${esc(x.sender || "?")}</b></td><td style="white-space:normal;word-break:break-word">${esc(x.text)}</td><td style="white-space:normal">${x.heard.length ? x.heard.map(h => `${esc(h.name)} <span class="tr">${HOPN(h.hops)}${h.snr != null ? " · " + h.snr + " dB" : ""}</span>`).join("<br>") : '<span class="tr">waiting to be heard</span>'}</td><td>${d.tx_enabled && x.dir === "rx" ? `<button class="tool" data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender}))}">Reply</button>` : ""}</td></tr>`);
+  $("#msgFeed").innerHTML = table(["Time", "", "Channel", "Region", "From", "Message", "Heard by", ""], rows, "No messages match yet. Messages appear as your repeaters hear them in the channels set up in Settings.");
 }
+document.addEventListener("click", async e => {
+  const ed = e.target.closest("[data-uedit]"); if (ed) { const n = ed.dataset.uedit, u = (S.o.web_users || {})[n] || {}; S.uedit = {name: n, role: u.role, devices: u.devices || [], sender: u.sender || ""}; draw(); return; }
+  const rm = e.target.closest("[data-uremove]"); if (rm) { if (!confirm("Remove the login " + rm.dataset.uremove + "? They will no longer be able to sign in.")) return; const r = await post("/api/users/remove", {name: rm.dataset.uremove}); if (!r.ok) alert(r.error); await tick(); return; }
+  const rp = e.target.closest("[data-reply]"); if (rp) {
+    const x = JSON.parse(rp.dataset.reply), c = $("#msgChan"), g = $("#msgReg"), t = $("#msgText"); if (!c || !t) return;
+    c.value = x.chan; if (g) g.value = x.region && x.region !== "?" ? x.region : ""; t.value = x.sender ? "@[" + x.sender + "] " : ""; t.focus(); t.setSelectionRange(t.value.length, t.value.length);
+    const n = $("#msgCount"); if (n) n.textContent = new TextEncoder().encode(t.value).length + "/130"; window.scrollTo({top: 0, behavior: "smooth"}); return;
+  }
+});
 document.addEventListener("input", e => {
   const el = e.target; if (el.id === "msgText") { const c = $("#msgCount"); if (c) c.textContent = new TextEncoder().encode(el.value).length + "/130"; }
   if (el.dataset && el.dataset.mf === "q") { S.msg.q = el.value; clearTimeout(S.msgT); S.msgT = setTimeout(msgLoad, 350); }
@@ -712,14 +746,16 @@ document.addEventListener("click", async e => {
 });
 document.addEventListener("click", e => { if (e.target.closest('[data-act="fit"]') && S.net && S.map) { const p = S.net.nodes.filter(x => x.lat != null); if (p.length) S.map.fitBounds(p.map(x => [x.lat, x.lon]), {padding: [40, 40], maxZoom: 12}); } });
 
-const VIEWS = {network: vNetwork, messages: vMessages, overview: (o) => pendBanner(o) + vOverview(o), repeaters: vRepeaters, control: vControl, clients: vClients, accounts: vAccounts, settings: vSettings, traffic: vTraffic, diagnostics: vDiag, broker: vBroker, system: vSystem, log: vLog};
+const VIEWS = {users: vUsers, network: vNetwork, messages: vMessages, overview: (o) => pendBanner(o) + vOverview(o), repeaters: vRepeaters, control: vControl, clients: vClients, accounts: vAccounts, settings: vSettings, traffic: vTraffic, diagnostics: vDiag, broker: vBroker, system: vSystem, log: vLog};
 function draw() {
   const o = S.o; if (!o) return;
   const active = document.activeElement && document.activeElement.id;
   const nEnrol = o.enrol && o.enrol.pending ? o.enrol.pending.length : 0;
-  $("#tabs").innerHTML = TABS.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? "on" : ""}">${l}${k === "accounts" && nEnrol ? ` <span class="tag" style="background:#2fe27a;color:#06130d">${nEnrol}</span>` : ""}</button>`).join("");
+  const isAdmin = !o.me || o.me.role === "admin", hideTabs = isAdmin ? [] : ["accounts", "users"]; if (hideTabs.includes(S.tab)) S.tab = "overview";
+  const newMsgs = Math.max(0, (o.msg_last || 0) - (S.msgSeen || 0)); if (S.tab === "messages") S.msgSeen = o.msg_last || 0; else if (S.msgSeen == null) S.msgSeen = o.msg_last || 0;
+  $("#tabs").innerHTML = TABS.filter(([k]) => !hideTabs.includes(k)).map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? "on" : ""}">${l}${k === "messages" && newMsgs && S.tab !== "messages" ? ` <span class="tag" style="background:#4aa8ff;color:#06130d">${newMsgs}</span>` : ""}${k === "accounts" && nEnrol ? ` <span class="tag" style="background:#2fe27a;color:#06130d">${nEnrol}</span>` : ""}</button>`).join("");
   $("#enrolBar").innerHTML = nEnrol ? `<div class="enrolbar"><span style="font-size:20px">🔔</span><div><b>${nEnrol} repeater${nEnrol > 1 ? "s" : ""} asking to join</b><div class="tr">${o.enrol.pending.slice(0, 3).map(p => esc(p.name || "unnamed") + " (" + p.id.slice(0, 8) + "…)").join(", ")}${nEnrol > 3 ? " and more" : ""}</div></div><span class="sp"></span><button class="tool" data-t="accounts">Review and approve</button></div>` : "";
-  document.title = (o.config && o.config.title || "UMC Net") + " dashboard"; $("#sub").textContent = `${o.host} · broker ${o.sys["$SYS/broker/version"] || ""} · dashboard ${o.version}`;
+  document.title = (o.config && o.config.title || "UMC Net") + " dashboard"; $("#sub").textContent = `${o.host} · broker ${o.sys["$SYS/broker/version"] || ""} · dashboard ${o.version}${o.me ? " · signed in as " + o.me.name + (o.me.role === "admin" ? " (administrator)" : o.me.role === "owner" ? " (controls " + ((o.me.devices || []).length) + " repeater" + ((o.me.devices || []).length === 1 ? "" : "s") + ")" : " (view only)") : ""}`;
   const bad = o.diagnostics.filter(d => d.level === "bad").length, warn = o.diagnostics.filter(d => d.level === "warn").length;
   $("#live").className = "pl " + (S.err ? "bad" : bad ? "bad" : warn ? "warn" : "ok"); $("#live").innerHTML = `${dot(S.err ? "bad" : bad ? "bad" : warn ? "warn" : "ok")} ${S.err ? "not answering" : bad ? bad + " problem(s)" : warn ? warn + " to look at" : "all fine"} · ${new Date().toLocaleTimeString()}`;
   if (S.tab === "messages" && S.msgUp && $("#msgFeed")) { msgUpdate(); }

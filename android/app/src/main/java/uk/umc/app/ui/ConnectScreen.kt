@@ -26,6 +26,8 @@ import uk.umc.app.link.BleLink
 import uk.umc.app.link.LinkKind
 import uk.umc.app.link.LinkState
 import uk.umc.app.link.LinkTarget
+import uk.umc.app.link.FoundRadio
+import uk.umc.app.link.WifiFinder
 
 @SuppressLint("MissingPermission")
 @Composable
@@ -37,6 +39,22 @@ fun ConnectScreen() {
     var scanning by remember { mutableStateOf(false) }
     var host by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("5000") }
+    // WiFi: look for radios on the phone's network as soon as this screen opens
+    var wifiSearching by remember { mutableStateOf(false) }
+    var wifiNote by remember { mutableStateOf("") }
+    val wifiFound = remember { mutableStateListOf<FoundRadio>() }
+    LaunchedEffect(Unit) { wifiSearching = true }
+    LaunchedEffect(wifiSearching) {
+        if (!wifiSearching) return@LaunchedEffect
+        wifiFound.clear(); wifiNote = "Looking for radios on this WiFi…"
+        val n = WifiFinder.search(context, { d, t -> wifiNote = "Looking… $d of $t addresses checked" }) { r -> if (wifiFound.none { it.ip == r.ip }) wifiFound.add(r) }
+        wifiNote = when {
+            n < 0 -> "The phone is not on WiFi, so there is nothing to search."
+            wifiFound.isEmpty() -> "No radio answered on this network. Check it is on the same WiFi, or type its address below."
+            else -> "Found ${wifiFound.size} radio${if (wifiFound.size == 1) "" else "s"} on this WiFi."
+        }
+        wifiSearching = false
+    }
 
     val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
         arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
@@ -127,7 +145,19 @@ fun ConnectScreen() {
             )
         }
         item {
-            SectionCard("WiFi", "An Ultimate MeshCore client or repeater on your network, port 5000.") {
+            SectionCard("WiFi", "Ultimate MeshCore clients and repeaters on the same WiFi are found by themselves.") {
+                Text(wifiNote, style = MaterialTheme.typography.bodySmall)
+                ShButton(onClick = { wifiSearching = true }, enabled = !wifiSearching) { Text(if (wifiSearching) "Searching…" else "Search this WiFi again") }
+                wifiFound.forEach { r ->
+                    ListItem(
+                        headlineContent = { Text(r.name) },
+                        supportingContent = { Text(listOf(r.role, r.board, r.firmware, r.ip).filter { it.isNotBlank() }.joinToString(" · ")) },
+                        trailingContent = {
+                            ShButton(variant = ShVariant.Ghost, onClick = { AppState.connect(LinkTarget(LinkKind.WIFI, "${r.ip}:5000", r.name)) }) { Text("Connect") }
+                        },
+                    )
+                }
+                Text("Or type an address:", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(host, { host = it }, label = { Text("Address, e.g. 192.168.1.50 or umc-node.local") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(port, { port = it }, label = { Text("Port") }, singleLine = true,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number))

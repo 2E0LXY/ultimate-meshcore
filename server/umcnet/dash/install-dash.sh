@@ -57,7 +57,9 @@ have enrol || { /opt/umcnet/umcnet-user add enrol enrol --password "$ENROL_PASSW
 # the dashboard login (user "admin"), kept with the other credentials
 CRED=/root/umcnet-credentials.txt; touch "$CRED"; chmod 600 "$CRED"
 # a login that already exists is never touched by a re-run (it may have been changed from the Settings tab)
-hash=$(sed -n 's/^[[:space:]]*admin[[:space:]]\{1,\}\(\$2[a-z]\$[^[:space:]]*\).*/\1/p' /etc/caddy/conf.d/umcnet.caddy 2>/dev/null | head -1)
+# every login already in the site file (admin and any users added from the Users tab) is kept
+users=$(awk '/basic_auth[[:space:]]*\{/{f=1;next} f&&/^[[:space:]]*\}/{f=0} f{sub(/^[[:space:]]+/,""); print}' /etc/caddy/conf.d/umcnet.caddy 2>/dev/null | grep -E '^[a-z0-9][a-z0-9_.-]* [$]2' || true)
+hash=$(printf '%s\n' "$users" | sed -n 's/^admin \([$]2[^ ]*\).*/\1/p' | head -1)
 if [ -n "$hash" ]; then
   webpw="(unchanged: the login you already have)"
 else
@@ -74,7 +76,14 @@ case "$webpw" in "("*) ;; *) [ -s /etc/umcnet-dash/admin.pbkdf2 ] || WEBPW="$web
 # publish through Caddy, keeping the old file if Caddy does not like the result
 CF=/etc/caddy/Caddyfile; mkdir -p /etc/caddy/conf.d
 cp -a /etc/caddy/conf.d/umcnet.caddy /etc/caddy/conf.d/umcnet.caddy.backup-before-dash 2>/dev/null || true
-curl -fsSL "$RAW/umcnet.caddy" | sed "s/net\.2e0lxy\.uk/$HOST/; s|__DASH_HASH__|$(printf '%s' "$hash" | sed 's/[&|\\]/\\&/g')|" > /etc/caddy/conf.d/umcnet.caddy.new
+printf '%s\n' "$users" | grep -q '^admin ' || users=$(printf 'admin %s\n%s' "$hash" "$users")
+curl -fsSL "$RAW/umcnet.caddy" | sed "s/net\.2e0lxy\.uk/$HOST/" > /etc/caddy/conf.d/umcnet.caddy.new
+DASH_USERS="$users" python3 - /etc/caddy/conf.d/umcnet.caddy.new <<'PYUSERS'
+import os, sys
+p = sys.argv[1]; t = open(p).read()
+lines = [l.strip() for l in os.environ["DASH_USERS"].splitlines() if l.strip()]
+open(p, "w").write(t.replace("__DASH_USERS__", "\n\t\t\t".join(lines)))
+PYUSERS
 mv /etc/caddy/conf.d/umcnet.caddy.new /etc/caddy/conf.d/umcnet.caddy
 if caddy validate --config "$CF" --adapter caddyfile >/tmp/caddy-validate.log 2>&1; then
   systemctl reload caddy

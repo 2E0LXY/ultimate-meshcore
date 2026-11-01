@@ -57,45 +57,129 @@ def check_password(password, stored):
         return False
 
 
-def change_dash_password(current, new):
+WEBNAME = re.compile(r"^[a-z0-9][a-z0-9_.-]{1,30}$")
+
+
+def user_hash_file(user):
+    return HASH_FILE if user == "admin" else os.path.join(os.path.dirname(HASH_FILE), "user-%s.pbkdf2" % user)
+
+
+def strong_enough(pw):
+    return 12 <= len(pw) <= 100 and pw.lower() != pw and re.search(r"\d", pw)
+
+
+def caddy_users(text):
+    """The (name, bcrypt) pairs in the dashboard's basic_auth block, and the block's span."""
+    m = re.search(r"basic_auth\s*\{\n(.*?)\n[ \t]*\}", text, re.S)
+    if not m:
+        return None, None
+    users = []
+    for line in m.group(1).splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1].startswith("$2"):
+            users.append((parts[0], parts[1]))
+    return users, m.span(1)
+
+
+def write_caddy_users(users):
+    """Rewrite the login list and reload Caddy; put the old file back if Caddy refuses it."""
+    text = open(CADDY_FILE).read()
+    old, span = caddy_users(text)
+    if span is None:
+        return {"ok": False, "error": "could not find the login list in the Caddy site file"}
+    new_text = text[:span[0]] + "\n".join("\t\t\t%s %s" % u for u in users) + text[span[1]:]
+    open(CADDY_FILE + ".backup-before-users", "w").write(text)
+    open(CADDY_FILE, "w").write(new_text)
+    rc, out = run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile")
+    if rc != 0:
+        open(CADDY_FILE, "w").write(text)
+        return {"ok": False, "error": "Caddy refused the change, the old logins are back: " + out[-120:]}
+    run("systemctl", "reload", "caddy")
+    return {"ok": True}
+
+
+def make_bcrypt(pw):
+    p = subprocess.run(["caddy", "hash-password", "--plaintext", pw], capture_output=True, text=True, timeout=60)
+    bc = bcrypt_from(p.stdout)
+    return bc if p.returncode == 0 and bc else None
+
+
+def save_pbkdf2(user, pw):
+    f = user_hash_file(user)
+    os.makedirs(os.path.dirname(f), exist_ok=True)
+    open(f, "w").write(pbkdf2(pw)); os.chmod(f, 0o600)
+
+
+def web_user_set(name, pw):
+    """Add a dashboard login, or give an existing one a new password (the admin's own login is changed with dash_password)."""
+    if not WEBNAME.match(name) or name == "admin":
+        return {"ok": False, "error": "user names are 2 to 31 lowercase letters, digits, dots, dashes or underscores (not admin)"}
+    if not strong_enough(pw):
+        return {"ok": False, "error": "the password needs 12 or more characters, with a capital letter and a number"}
+    bc = make_bcrypt(pw)
+    if not bc:
+        return {"ok": False, "error": "could not make the login hash"}
+    with LOCK:
+        users, span = caddy_users(open(CADDY_FILE).read())
+        if users is None:
+            return {"ok": False, "error": "could not find the login list in the Caddy site file"}
+        users = [u for u in users if u[0] != name] + [(name, bc)]
+        r = write_caddy_users(users)
+    if r["ok"]:
+        save_pbkdf2(name, pw)
+    return r
+
+
+def web_user_remove(name):
+    if not WEBNAME.match(name) or name == "admin":
+        return {"ok": False, "error": "that login cannot be removed"}
+    with LOCK:
+        users, span = caddy_users(open(CADDY_FILE).read())
+        if users is None:
+            return {"ok": False, "error": "could not find the login list in the Caddy site file"}
+        r = write_caddy_users([u for u in users if u[0] != name])
+    try:
+        os.unlink(user_hash_file(name))
+    except OSError:
+        pass
+    return r
+
+
+def change_dash_password(current, new, user="admin"):
     now = time.time()
     with LOCK:
         _fails[:] = [t for t in _fails if now - t < 300]
         if len(_fails) >= 5:
             return {"ok": False, "error": "too many wrong attempts; wait five minutes"}
-    if len(new) < 12 or len(new) > 100 or new.lower() == new or not re.search(r"\d", new):
+    if user != "admin" and not WEBNAME.match(user):
+        return {"ok": False, "error": "unknown user"}
+    if not strong_enough(new):
         return {"ok": False, "error": "the new password needs 12 or more characters, with a capital letter and a number"}
     try:
-        stored = open(HASH_FILE).read()
+        stored = open(user_hash_file(user)).read()
     except FileNotFoundError:
         stored = ""
     if not stored or not check_password(current, stored):
         with LOCK: _fails.append(now)
         return {"ok": False, "error": "the current password is not right"}
-    p = subprocess.run(["caddy", "hash-password", "--plaintext", new], capture_output=True, text=True, timeout=60)
-    bc = bcrypt_from(p.stdout)
-    if p.returncode != 0 or not bc:
-        return {"ok": False, "error": "could not make the login hash: " + (p.stdout + p.stderr).replace(new, "***")[:120]}
-    text = open(CADDY_FILE).read()
-    new_text, n = re.subn(r"(^\s*admin\s+)\$2[^\s]+", lambda m: m.group(1) + bc, text, count=1, flags=re.M)
-    if n != 1:
-        return {"ok": False, "error": "could not find the login in the Caddy site file"}
-    backup = CADDY_FILE + ".backup-before-password"
-    open(backup, "w").write(text)
-    open(CADDY_FILE, "w").write(new_text)
-    rc, out = run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile")
-    if rc != 0:
-        open(CADDY_FILE, "w").write(text)
-        return {"ok": False, "error": "Caddy refused the change, the old login is back: " + out[-120:]}
-    run("systemctl", "reload", "caddy")
-    os.makedirs(os.path.dirname(HASH_FILE), exist_ok=True)
-    open(HASH_FILE, "w").write(pbkdf2(new)); os.chmod(HASH_FILE, 0o600)
-    try:                                                    # the old password must not stay on disk in plain text
-        lines = open(CRED_FILE).read().splitlines()
-        lines = [("dashboard-login admin (changed %s; the password is not stored)" % time.strftime("%Y-%m-%d %H:%M")) if l.startswith("dashboard-login ") else l for l in lines]
-        open(CRED_FILE, "w").write("\n".join(lines) + "\n")
-    except OSError:
-        pass
+    bc = make_bcrypt(new)
+    if not bc:
+        return {"ok": False, "error": "could not make the login hash"}
+    with LOCK:
+        users, span = caddy_users(open(CADDY_FILE).read())
+        if not users or not any(u[0] == user for u in users):
+            return {"ok": False, "error": "could not find the login in the Caddy site file"}
+        r = write_caddy_users([(u[0], bc if u[0] == user else u[1]) for u in users])
+    if not r["ok"]:
+        return r
+    save_pbkdf2(user, new)
+    if user == "admin":
+        try:                                                    # the old password must not stay on disk in plain text
+            lines = open(CRED_FILE).read().splitlines()
+            lines = [("dashboard-login admin (changed %s; the password is not stored)" % time.strftime("%Y-%m-%d %H:%M")) if l.startswith("dashboard-login ") else l for l in lines]
+            open(CRED_FILE, "w").write("\n".join(lines) + "\n")
+        except OSError:
+            pass
     return {"ok": True}
 
 
@@ -132,7 +216,11 @@ def handle(req):
         if st not in STATES: return {"ok": False, "error": "state must be approved, pending or blocked"}
         return tool("state", name, st)
     if op == "dash_password":
-        return change_dash_password(str(req.get("current", "")), str(req.get("new", "")))
+        return change_dash_password(str(req.get("current", "")), str(req.get("new", "")), str(req.get("user", "admin")))
+    if op == "web_user_set":
+        return web_user_set(str(req.get("name", "")), str(req.get("password", "")))
+    if op == "web_user_remove":
+        return web_user_remove(str(req.get("name", "")))
     if op == "service":
         name, act = str(req.get("name", "")), str(req.get("action", ""))
         if name not in SERVICES or act not in ("restart", "reload"):

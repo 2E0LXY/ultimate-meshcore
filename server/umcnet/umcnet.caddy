@@ -7,12 +7,16 @@ net.2e0lxy.uk {
 	}
 	@public path /public /public/*
 	handle @public {
-		reverse_proxy 127.0.0.1:9102
+		reverse_proxy 127.0.0.1:9102 {
+			header_up -X-UMC-User
+		}
 	}
 	handle {
 		basic_auth {
-			admin __DASH_HASH__
+			__DASH_USERS__
 		}
-		reverse_proxy 127.0.0.1:9102
+		reverse_proxy 127.0.0.1:9102 {
+			header_up X-UMC-User {http.auth.user.id}
+		}
 	}
 }

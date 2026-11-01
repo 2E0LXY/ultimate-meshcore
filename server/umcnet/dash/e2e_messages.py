@@ -151,6 +151,28 @@ try:
     A.pub("meshcore/LBA/%s/raw" % IDA, json.dumps({"origin": "Hill Top", "data": advert(os.urandom(32), "Old Mast", 53.50, -1.30), "SNR": "-3"}, separators=(",", ":"))); time.sleep(2)
     net = api("/api/network?hours=24"); check("the map has both repeaters with positions and the other nodes", sum(1 for x in net["nodes"] if x.get("online") and x["lat"] is not None) == 2 and len(net["nodes"]) == 4, [(x["name"], x["online"]) for x in net["nodes"]])
     check("a node last heard long ago is left off the map", len(api("/api/network?hours=1")["nodes"]) >= 2)
+    # ---- users: each person their own login, controlling only their own repeater
+    def api_as(user, path, body=None):
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (HTTP, path), data=json.dumps(body).encode() if body is not None else None, headers={"X-UMC-Dash": "1", "Content-Type": "application/json", "X-UMC-User": user})
+        try: return json.loads(urllib.request.urlopen(req, timeout=30).read())
+        except urllib.error.HTTPError as e: return dict(json.loads(e.read() or b"{}"), status=e.code)
+    import urllib.error
+    r = api("/api/users/save", {"name": "g4abc", "password": "Correct-Horse-9", "role": "owner", "devices": [IDA], "sender": "G4ABC"}); check("the admin can add a user who controls one repeater", r.get("ok"), r)
+    check("the helper was asked to make the login", any(x.get("op") == "web_user_set" and x.get("name") == "g4abc" for x in made))
+    api("/api/users/save", {"name": "watcher", "password": "Correct-Horse-9", "role": "viewer"})
+    check("a weak or clashing name is refused", not api("/api/users/save", {"name": "admin", "password": "Correct-Horse-9"})["ok"] and not api("/api/users/save", {"name": "Bad Name", "password": "x"})["ok"])
+    ov = api_as("g4abc", "/api/overview"); check("the user sees the whole network and who they are", len(ov["devices"]) == 2 and ov["me"] == {"name": "g4abc", "role": "owner", "devices": [IDA], "sender": "G4ABC"}, ov["me"])
+    check("the user does not get the user list or secrets", "web_users" not in ov and "web_users" not in ov["config"])
+    a = api_as("g4abc", "/api/control", {"device": IDB, "cmd": "get name"}); check("the user cannot control someone else's repeater", a.get("status") == 403 and "own repeater" in a.get("error", ""), a)
+    b = api_as("g4abc", "/api/control", {"device": IDA, "cmd": "get name"}); check("the user can control their own (it gets past the permission check)", b.get("status") is None and "own repeater" not in str(b.get("error")), b)
+    for path, body in (("/api/config", {"title": "x"}), ("/api/users/save", {"name": "x1", "password": "Correct-Horse-9"}), ("/api/service", {"name": "umcnet-dash"}), ("/api/enrol/approve", {"id": IDA})):
+        check("the user cannot use " + path, api_as("g4abc", path, body).get("status") == 403)
+    check("the user cannot export", api_as("g4abc", "/api/export/config.json").get("status") == 403)
+    s1 = api_as("g4abc", "/api/messages/send", {"channel": "#yorkshire", "region": "", "text": "hello from g4abc", "sender": "2E0LXY"}); check("the user can send messages, under their own name", s1.get("ok") and api("/api/messages?q=g4abc")["messages"][0]["sender"] == "G4ABC", s1)
+    check("a viewer can only look", api_as("watcher", "/api/messages/send", {"channel": "#yorkshire", "text": "x"}).get("status") == 403 and api_as("watcher", "/api/control", {"device": IDA, "cmd": "get name"}).get("status") == 403 and api_as("watcher", "/api/overview")["me"]["role"] == "viewer")
+    check("an unknown login is only a viewer", api_as("stranger", "/api/overview")["me"]["role"] == "viewer" and api_as("stranger", "/api/control", {"device": IDA, "cmd": "get name"}).get("status") == 403)
+    check("the admin sees the users", set(api("/api/overview")["web_users"]) == {"g4abc", "watcher"})
+    check("removing a user works", api("/api/users/remove", {"name": "watcher"}).get("ok") and "watcher" not in api("/api/overview")["web_users"])
     if UI:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
@@ -171,6 +193,18 @@ try:
             pg.click('[data-t="settings"]'); pg.wait_for_timeout(1200); check("Settings has the Messaging panel", pg.locator("#mcChans").count() == 1 and "#yorkshire" in pg.input_value("#mcChans"))
             pg.fill("#mcRegs", "yorkshire\nsheffield"); pg.click('[data-act="savemsgcfg"]'); pg.wait_for_timeout(1500); check("saving the channels and regions works", pg.inner_text("#mcMsg") == "Saved", pg.inner_text("#mcMsg"))
             pg.click('[data-t="overview"]'); pg.wait_for_timeout(2000); check("the data flow draws both directions", pg.locator(".flow svg path.fe.tx").count() >= 2 and "sends" in pg.inner_text(".flow"))
+            pg.click('[data-t="users"]'); pg.wait_for_timeout(1200); check("the admin has a Users tab listing the logins", "g4abc" in pg.inner_text("#body") and "Add a user" in pg.inner_text("#body"))
+            pg.screenshot(path="/tmp/users_ui.png")
+            ctx = br.new_context(viewport={"width": 1400, "height": 1000}, extra_http_headers={"X-UMC-User": "g4abc"}); up = ctx.new_page(); up.on("pageerror", lambda e: errs.append(str(e)))
+            up.goto("http://127.0.0.1:%d/" % HTTP); up.wait_for_timeout(2500); tabs = up.inner_text("#tabs")
+            check("a user does not see Accounts or Users", "Accounts" not in tabs and "Users" not in tabs and "Messages" in tabs, tabs.replace(chr(10), " "))
+            check("the page says who is signed in", "signed in as g4abc" in up.inner_text("#sub"))
+            up.click('[data-t="control"]'); up.wait_for_timeout(1500); cb = up.inner_text("#body"); check("their Control tab offers only their repeater", "Hill Top" in cb and "Valley" not in cb.split("Neighbours")[0])
+            up.click('[data-t="settings"]'); up.wait_for_timeout(800); check("their Settings is just their password", "Your password" in up.inner_text("#body") and up.locator("#mcChans").count() == 0)
+            up.click('[data-t="messages"]'); up.wait_for_timeout(2000); check("messages have a Reply button", up.locator("[data-reply]").count() >= 1)
+            up.locator("[data-reply]").first.click(); up.wait_for_timeout(500); check("Reply fills in the channel and the sender", up.input_value("#msgText").startswith("@[") and up.input_value("#msgChan") != "", up.input_value("#msgText"))
+            check("a user's sender name is their own and fixed", up.input_value("#msgSender") == "G4ABC" and up.get_attribute("#msgSender", "readonly") is not None)
+            up.screenshot(path="/tmp/owner_ui.png"); ctx.close()
             check("no script errors", not errs, errs); br.close()
     A.close(); B.close()
 finally:
