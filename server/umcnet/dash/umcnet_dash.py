@@ -218,6 +218,7 @@ def on_publish(topic, payload, retained=False):
     if not m:
         COUNT["other_topics"] += 1; return
     area, did, kind = m.group(1), m.group(2).upper(), m.group(3)
+    if did == DASH_ID: return                       # the dashboard's own messages on their way to the repeaters: not a repeater
     try: j = json.loads(payload.decode("utf-8", "replace"))
     except Exception: COUNT["bad_json"] += 1; return
     with LOCK:
@@ -1222,6 +1223,10 @@ class H(BaseHTTPRequestHandler):
             who = "admin"; p = u.path
             if p == "/api/control":
                 return self.send(200, json.dumps(send_command(body.get("device"), str(body.get("cmd", "")), who, bool(body.get("confirm")))))
+            if p == "/api/control/preload":
+                dev = str(body.get("device", "")).upper()
+                if dev in DEV: threading.Thread(target=preload_settings, args=(dev, True), daemon=True).start()
+                return self.send(200, '{"ok":true}')
             if p == "/api/control/batch":
                 cmds = [str(c) for c in (body.get("cmds") or [])][:30]; res = []
                 for c in cmds:
