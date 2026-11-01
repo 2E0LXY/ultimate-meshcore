@@ -60,6 +60,8 @@ By **Daren Loxley 2E0LXY**
 
 ## Installation and updates
 
+![The web flasher: pick the board and the firmware type, then Install](docs/images/web-flasher.png)
+
 - **USB web flasher** (Chrome/Edge). It always installs the newest build. It can **update** (keeping identity and settings) or do a **fresh install**, then securely provision WiFi, the complete MeshCore radio-preset list, UK region scopes, name, passwords, location, timezone, PIN, hostname, TX and airtime limits over the same USB cable.
 - **USB Web Client** on the same page connects to any installed UMC repeater or client. It identifies the device, completes setup without reconnecting, provides common actions and exposes every firmware function through the full CLI, with command history, secret redaction and confirmation for disruptive commands.
 - **Update through the browser**: your browser fetches the latest build for this exact board and firmware type and sends it to the device. The device itself needs no internet access.
@@ -93,6 +95,8 @@ Every setting is available from the browser. The pages work on phones and suppor
 
 **Help everywhere:** a **?** beside every setting, card, dial and panel explains what it is, how to use it and why it matters, and every page has a short description under its title.
 
+<img src="docs/images/repeater-help.png" width="520" alt="The help for one setting: what it is, how to use it, why it matters and how it works">
+
 ### Dashboard
 A live control-room view (screenshot above), refreshed every 15 seconds:
 
@@ -122,6 +126,8 @@ A live control-room view (screenshot above), refreshed every 15 seconds:
 ![Mesh and routing settings](docs/images/repeater-mesh.png)
 
 ### Identity & access
+
+<img src="docs/images/repeater-identity.png" width="640" alt="Identity & access page">
 - Name, location (map picker) and owner info.
 - Admin and guest passwords.
 - Public key, and private key export/import.
@@ -144,6 +150,8 @@ A live control-room view (screenshot above), refreshed every 15 seconds:
 ![Network settings](docs/images/repeater-network.png)
 
 ### MQTT, bridge, power
+
+<img src="docs/images/repeater-bridge.png" width="640" alt="Bridge page">
 - **MQTT observer**: location code, identity and what to publish. Choose a preset broker or a custom TCP/WSS broker (JWT supported), with two broker slots and a status view.
 - **UMC Net**: join your repeaters over the internet through your own broker. The bridge hands packets other repeaters heard to the local mesh (rate limited, off by default), and **remote control** lets the [UMC Net dashboard](#umc-net-network-dashboard-remote-control-and-approvals) run the complete signed administrator CLI on the repeater (off by default).
 - **ESP-NOW bridge** between nearby LoRa segments (channel, secret, delay, source), and RS-232 settings.
@@ -168,6 +176,10 @@ Every node that shares a location, on an OpenStreetMap map, with a **line from t
 ![Map](docs/images/repeater-map.png)
 
 ### Console, maintenance, backup
+
+| Console | Backup & restore |
+|---|---|
+| <img src="docs/images/repeater-console.png" width="420"> | <img src="docs/images/repeater-backup.png" width="420"> |
 - **Console**: the full command line, with history.
 - **Firmware & maintenance**: browser update, internet update, file update, clock sync, reboot, stats/log controls, legacy OTA, re-run setup, power off and factory reset.
 - **Backup & restore**: JSON backup with a preview before restoring. Passwords are excluded, and the private key is optional.

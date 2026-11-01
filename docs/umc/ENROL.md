@@ -11,6 +11,10 @@ remote control and the bridge, and connects.
    **Accounts**, check the name and device id, edit the name if you like, and press **Approve** (or **Decline**).
 3. The repeater connects within a minute. `get mqtt.umcnet` reads `on, joined as <account>, area LBA, broker custom:wss:up, bridge on, control on`.
 
+| 1. On the repeater: switch UMC Net on | 2. On the dashboard: approve it |
+|---|---|
+| <img src="../images/repeater-umcnet-join.png" width="420" alt="The repeater's MQTT page with the UMC Net switch"> | <img src="../images/umcnet-enrol.png" width="420" alt="The dashboard's Accounts tab with a repeater asking to join"> |
+
 A repeater that was joined by a join code or by typing the settings is unaffected. The old manual settings and the join code
 remain on the repeater's page under **Advanced**. **Remove** (Accounts tab) takes a repeater off the network at any time. A repeater
 you **Decline** is ignored until you press **Forget**. Requests can be switched off in **Settings**.

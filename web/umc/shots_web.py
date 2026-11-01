@@ -23,6 +23,12 @@ try:
             (card if card.count() else pg.locator("text=How it works").first.locator("xpath=../..")).screenshot(path=os.path.join(OUT, "repeater-help.png")); print("saved repeater-help.png")
         pg.close()
         pg = page("mock", "net"); save(pg, "repeater-network.png"); pg.close()
+        for sec, name in (("id", "repeater-identity.png"), ("bridge", "repeater-bridge.png"), ("console", "repeater-console.png"), ("backup", "repeater-backup.png"), ("neigh", "repeater-neighbours.png")):
+            pg = page("mock", sec)
+            if sec == "console":                                # a command and its answer, as it looks in use
+                box = pg.locator("input[type=text], textarea").first
+                if box.count(): box.fill("get radio"); box.press("Enter"); pg.wait_for_timeout(1200)
+            save(pg, name, clip={"x": 0, "y": 0, "width": 1440, "height": 900}); pg.close()
         pg = b.new_page(viewport={"width": 1280, "height": 900}); pg.goto("https://2e0lxy.github.io/ultimate-meshcore/"); pg.wait_for_timeout(4000); save(pg, "web-flasher.png"); pg.close()
         b.close()
 finally:

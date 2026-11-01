@@ -280,6 +280,8 @@ Actions: `advert` (flood advert now), `advert.zerohop`, `discover.neighbors`.
 
 ## 10. Identity & access
 
+![Identity & access: the node's name, position, owner details and public key, and the admin and guest passwords](../images/repeater-identity.png)
+
 | Setting | Command | Explanation |
 |---|---|---|
 | Node name | `set name <name>` | Up to 23 bytes when a location is included, 31 without. |
@@ -412,6 +414,8 @@ Status: `get mqtt.status` shows WiFi, time sync, location code and each broker (
 
 ## 14. Bridge
 
+![The Bridge page: type, on or off, which packets, delay, and the ESP-NOW channel and secret](../images/repeater-bridge.png)
+
 A bridge links two LoRa areas through another medium. The Heltec V3 build includes **ESP-NOW** (2.4 GHz, directly between two nearby devices).
 
 | Command | Explanation |
@@ -439,6 +443,8 @@ A bridge links two LoRa areas through another medium. The Heltec V3 build includ
 ---
 
 ## 16. Neighbours, routes, trace and live traffic
+
+![Neighbours: the repeaters this one hears directly, with how recently and how strongly; Discover asks nearby repeaters to announce themselves](../images/repeater-neighbours.png)
 
 | Routes and trace | Live traffic |
 |---|---|
@@ -499,6 +505,8 @@ Packet types: ADVERT (node announcements), CHAN (channel message), MSG (direct m
 ---
 
 ## 17. Console
+
+![The Console page: a command and its answer](../images/repeater-console.png)
 
 The **Console** page runs any command, exactly like the USB serial console. ↑ and ↓ recall previous commands.
 
@@ -576,6 +584,8 @@ esptool --chip esp32s3 --port COMx -b 921600 write-flash 0x0 firmware-merged.bin
 ---
 
 ## 19. Backup, restore and factory reset
+
+![Backup & restore: download every setting to a file, or restore one (each command is shown before it runs)](../images/repeater-backup.png)
 
 - **Backup** downloads a JSON file with every readable setting, the region tree and saved WiFi network names. WiFi, MQTT and admin passwords are never included. Tick **Include private key** to be able to restore the same identity.
 - **Restore** shows every command before applying it. Regions are listed for you to re-enter on the Regions page.
@@ -866,6 +876,9 @@ The V3 has no PSRAM, so the client uses the lightweight **NimBLE** Bluetooth sta
 - The first-time **setup hotspot is open**. Anyone in range can configure a device that is in setup mode, so finish setup promptly.
 - The rescue hotspot is protected by the device PIN or `ap.password`.
 - The web page and telnet use **plain HTTP/telnet on your local network**. Don't forward them to the internet.
+- The **UMC Net dashboard** gives each person their own login. An owner controls only their own repeaters; the administrator manages logins on the **Users** tab.
+
+![The dashboard's Users tab: one login per person, with the repeaters each controls](../images/umcnet-users.png)
 - Sign-in locks for 1 minute after 5 wrong passwords.
 - Keep the **private key** secret. Backups only include it if you tick the box.
 - Internet updates are downloaded only over HTTPS, verified against trusted certificate authorities.

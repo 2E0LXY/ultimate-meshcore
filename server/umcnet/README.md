@@ -59,6 +59,8 @@ bridge is off by default, and a repeater drops network packets rather than excee
 
 ## The dashboard (admin page)
 
+![The dashboard overview: repeaters, packets, the server's dials and the data flow](../../docs/images/umcnet-overview.png)
+
 The broker itself has no web admin. Accounts are managed with `umcnet-user` on the server, and everything else
 you can see is in the **dashboard**: `https://net.<your domain>/`, behind a login (user `admin`; the password is
 printed by the installer and kept in `/root/umcnet-credentials.txt`).
@@ -95,6 +97,10 @@ history starts when the dashboard is installed.
 
 
 ## Controlling repeaters, approvals and settings (dashboard 2.3)
+
+| Control | Accounts and approvals |
+|---|---|
+| <img src="../../docs/images/umcnet-control.png" width="420"> | <img src="../../docs/images/umcnet-accounts.png" width="420"> |
 
 **Control tab.** Pick a repeater: its settings and firmware state are preloaded automatically. Press *Refresh settings*
 only when you need a new copy, change a value and press *Apply*, or use a quick action, the firmware panel or the
@@ -184,6 +190,12 @@ precision). Exit status 0 means everything passed.
 
 ### Messages, map and data flow (dashboard 2.5)
 
+![The Messages tab: every channel message the repeaters hear, with region, sender and who heard it; send or reply](../../docs/images/umcnet-messages.png)
+
+| Map (click a repeater for its details) | Data flow, both ways |
+|---|---|
+| <img src="../../docs/images/umcnet-network.png" width="420"> | <img src="../../docs/images/umcnet-flow.png" width="420"> |
+
 * **Messages tab.** Each repeater publishes every packet it hears; a group (channel) message is encrypted with its channel's key, so the dashboard reads the channels listed in Settings (a `#hashtag` channel needs only its name; any other needs its key). A message sent into a region carries a code only that region's name produces, so the dashboard names the region by trying the regions in Settings. Filter by channel, region, direction or text. **Send** builds the same packet a radio would and publishes it on `meshcore/<area>/<dashboard id>/raw`; every repeater with the bridge on transmits it (region-scoped if you chose one). Limits: 130 characters, 6 a minute, a confirmation before sending. Messages in channels without a key are only counted. Kept for 30 days (Settings). Needs the controller account's new permission: re-run `install-dash.sh`.
 * **Map.** A repeater that is connected and online is a green dot with a yellow edge; one that is not on the network is not drawn. Other nodes appear if heard within the chosen time (1 hour to 30 days). Click any node for its details: for your repeaters board, firmware, uptime, battery, noise floor, airtime, packet mix, bridge traffic, settings and who it hears.
 * **Data flow.** Arrows both ways: what each repeater hears and publishes, and what the broker hands back for its radio to send (the bridge), measured once a minute with `get mqtt.custom.bridge`.
@@ -191,6 +203,10 @@ precision). Exit status 0 means everything passed.
 * `e2e_messages.py [--ui]` tests all of this against a real broker.
 
 ### Logins for each person (dashboard 2.6)
+
+| The administrator's Users tab | What an owner sees |
+|---|---|
+| <img src="../../docs/images/umcnet-users.png" width="420"> | <img src="../../docs/images/umcnet-owner.png" width="420"> |
 
 Every person gets their own login (**Users** tab, administrator only). Caddy checks the password (several logins in the
 `basic_auth` block of `umcnet.caddy`) and tells the dashboard who signed in (`X-UMC-User`; the public pages never carry it).
