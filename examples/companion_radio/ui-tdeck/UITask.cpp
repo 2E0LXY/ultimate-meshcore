@@ -648,6 +648,17 @@ void UITask::showAlert(const char* t, int duration_millis) {
 
 void UITask::msgRead(int) { _dirty = true; }
 
+void UITask::onMessageRecv(mesh::Packet*, const ContactInfo& from, uint8_t txt_type, uint32_t, const char* text) {
+  if (!(txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_SIGNED_PLAIN)) return;   // not remote-CLI data
+  newMsg(0, from.name, text, 0);
+}
+
+void UITask::onChannelMessageRecv(mesh::Packet*, ChannelDetails& channel_details, const char* text) {
+  newMsg(0, channel_details.name, text, 0);
+}
+
+void UITask::onQueueSizeChanged(int msgcount) { msgRead(msgcount); }
+
 // The T-Deck's speaker amplifier sits on I2S: word select 5, bit clock 7, data 6. The
 // driver is only installed the first time a beep is wanted, so a quiet device pays nothing.
 #ifndef TDECK_I2S_WS

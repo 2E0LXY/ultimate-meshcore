@@ -172,7 +172,7 @@ void UITask::repCli(const char* cmd) {
   if (live == NULL) return;
   uint32_t est = 0;
   const uint32_t ts = rtc_clock.getCurrentTimeUnique();
-  const int r = the_mesh.sendCommandData(*live, ts, 0, cmd, est);
+  const int r = the_mesh.sendCommandData(*live, ts, 0, TXT_TYPE_CLI_DATA, cmd, est);
   if (r == MSG_SEND_FAILED) { showAlert("Could not send - try again", 1500); return; }
   _rep.commandSent(cmd, est);
   _rep_page = 2;

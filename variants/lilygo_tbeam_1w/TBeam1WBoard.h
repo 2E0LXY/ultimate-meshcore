@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <helpers/ESP32Board.h>
 #include "variant.h"
 
@@ -29,24 +31,41 @@
 
 class TBeam1WBoard : public ESP32Board {
 public:
-  enum class FanMode : uint8_t {
-    Auto = 0,
-    On,
-    Off
-  };
+  enum FanMode { FAN_ON, FAN_OFF, FAN_AUTO };
 
 private:
   bool radio_powered = false;
-  bool fan_enabled = true;
-  uint32_t fan_force_on_until = 0;
-  uint32_t next_fan_control_check_at = 0;
-  uint32_t fan_post_tx_hold_ms = 30000;
-  FanMode fan_mode = FanMode::Auto;
-  float last_board_temperature_c = NAN;
-  float readBoardTemperatureC() const;
+  bool _stopped = false;
+  KeyValueStore* _prefs = nullptr;
+  FanMode _mode = FAN_AUTO;
+  int _lo_c = FAN_DEFAULT_LO_C;
+  int _hi_c = FAN_DEFAULT_HI_C;
+  bool _thermal_on = false;  // onoff hysteresis; TX boost must not latch this
+  bool _fan_on = true;
+  float _temp_c = NAN;
+  bool _tx_active = false;
+  bool _tx_cooldown_active = false;
+  uint32_t _tx_until_ms = 0;
+  TaskHandle_t _fan_task = nullptr;
+  mutable portMUX_TYPE _fan_mux = portMUX_INITIALIZER_UNLOCKED;
+
+  void startFanTask();
+  void updateFan();
+  void setFanOutputLocked(bool enabled);
+  float readNtcTempC();
+  int cooldownSecsLocked();
+  bool isTxCoolingLocked(uint32_t now);
+  bool ntcImplausible(float temp_c) const;
+  bool persistKey(const char* key, const char* value);
+  static bool parseIntArg(const char* text, int& value);
+  void loadFanPrefs();
+  const char* modeNameLocked() const;
+  static void fanTaskThunk(void* arg);
 
 public:
   void begin();
+  void attachDynamicPrefs(KeyValueStore* prefs);
+  bool handleCommand(const char* command, uint32_t sender_timestamp, char* reply) override;
   void onBeforeTransmit() override;
   void onAfterTransmit() override;
   uint16_t getBattMilliVolts() override;
@@ -55,7 +74,6 @@ public:
   const char* getManufacturerName() const override;
   void powerOff() override;
 
-  // Fan control methods
   void setFanEnabled(bool enabled);
   bool isFanEnabled() const;
   void setFanMode(FanMode mode);

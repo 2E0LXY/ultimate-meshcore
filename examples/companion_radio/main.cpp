@@ -106,11 +106,7 @@ MultiSerialInterface interface_manager;
 
 StdRNG fast_rng;
 SimpleMeshTables tables;
-MyMesh the_mesh(radio_driver, fast_rng, rtc_clock, tables, store
-   #ifdef DISPLAY_CLASS
-      , &ui_task
-   #endif
-);
+MyMesh the_mesh(radio_driver, fast_rng, rtc_clock, tables, store);
 
 /* END GLOBAL OBJECTS */
 
@@ -219,33 +215,36 @@ void setup() {
   #endif
   #endif
   store.begin();
-  the_mesh.begin(
+  the_mesh.setHasDisplay(
     #ifdef DISPLAY_CLASS
         disp != NULL
     #else
         false
     #endif
   );
+  the_mesh.begin();
 #elif defined(RP2040_PLATFORM)
   LittleFS.begin();
   store.begin();
-  the_mesh.begin(
+  the_mesh.setHasDisplay(
     #ifdef DISPLAY_CLASS
         disp != NULL
     #else
         false
     #endif
   );
+  the_mesh.begin();
 #elif defined(ESP32)
   SPIFFS.begin(true);
   store.begin();
-  the_mesh.begin(
+  the_mesh.setHasDisplay(
     #ifdef DISPLAY_CLASS
         disp != NULL
     #else
         false
     #endif
   );
+  the_mesh.begin();
 #else
   #error "need to define filesystem"
 #endif
@@ -335,6 +334,8 @@ void setup() {
 #ifdef DISPLAY_CLASS
   UMC_BOOT_STAGE("screen");
   ui_task.begin(disp, &sensors, the_mesh.getNodePrefs());  // still want to pass this in as dependency, as prefs might be moved
+  the_mesh.setListener(&ui_task);   // upstream 1.18: the screen follows the mesh through a listener
+  the_mesh.setUmcUi(&ui_task);      // UMC code that still pokes the screen directly
 #endif
 
   UMC_BOOT_STAGE("done");
