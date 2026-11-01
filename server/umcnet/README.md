@@ -169,3 +169,15 @@ settings and the dashboard address. In the dashboard open **Settings → Alerts*
 for too long (and when it is back), when an account is waiting for approval, on refused logins, when the certificate is close to
 expiry, when the disk is nearly full and when the control link is down. Open port 8443 in any firewall in front of the server.
 Alerts cannot reach you if the whole server is down, so keep an outside check for that.
+
+### Checking that remote control works (`check_remote.py`)
+
+```
+UMC_DASH_PASS=... python3 server/umcnet/dash/check_remote.py https://net.example.org admin [--reboot] [--reboot-only] [--ui]
+```
+
+For every repeater the dashboard knows it reads each setting the Control tab shows, runs the quick actions, writes each editable
+setting back with its own value (nothing changes), checks the confirmation and refusal rules, reads all settings in one batch and asks
+for a firmware check. `--reboot` also restarts each repeater and checks it returns with its settings; `--ui` opens the Control tab in a
+browser and checks that no drop-down or box is blank. It does not rewrite latitude and longitude (the repeater keeps them with limited
+precision). Exit status 0 means everything passed.
