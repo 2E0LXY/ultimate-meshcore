@@ -30,19 +30,38 @@ MultiSerialInterface interface_manager;
     // include nrf52 bluetooth interface
     #include <helpers/nrf52/SerialBLEInterface.h>
     SerialBLEInterface bluetooth_interface;
+  #elif defined(RP2040_PLATFORM)
+    // include rp2040 (Pico W / CYW43) bluetooth interface
+    #include <helpers/rp2040/SerialBLEInterface.h>
+    SerialBLEInterface bluetooth_interface;
   #else
     #error "SerialBLEInterface is not defined for this platform"
   #endif
 #endif
 
 // include wifi interface
-#ifdef WIFI_SSID
+#ifdef ENABLE_WIFI_INTERFACE
+  #ifndef WIFI_SSID
+    #define WIFI_SSID ""
+  #endif
+  #ifndef WIFI_PWD
+    #define WIFI_PWD ""
+  #endif
   #ifndef TCP_PORT
     #define TCP_PORT 5000
   #endif
-  #ifdef ESP32
-    // include esp32 wifi interface
-    #include <helpers/esp32/SerialWifiInterface.h>
+  #ifndef WIFI_RETRY_INTERVAL
+    #if defined(RP2040_PLATFORM)
+      #define WIFI_RETRY_INTERVAL 30000   // each attempt blocks loop(), so retry less often
+    #else
+      #define WIFI_RETRY_INTERVAL 10000   // millis between reconnect attempts
+    #endif
+  #endif
+  #ifndef WIFI_RETRY_TIMEOUT
+    #define WIFI_RETRY_TIMEOUT 5000     // RP2040: cap on how long one join may block loop()
+  #endif
+  #if defined(ESP32) || defined(RP2040_PLATFORM)
+    #include <helpers/wifi/SerialWifiInterface.h>
     SerialWifiInterface wifi_interface;
   #else
     #error "SerialWifiInterface is not defined for this platform"
@@ -106,11 +125,7 @@ MultiSerialInterface interface_manager;
 
 StdRNG fast_rng;
 SimpleMeshTables tables;
-MyMesh the_mesh(radio_driver, fast_rng, rtc_clock, tables, store
-   #ifdef DISPLAY_CLASS
-      , &ui_task
-   #endif
-);
+MyMesh the_mesh(radio_driver, fast_rng, rtc_clock, tables, store);
 
 /* END GLOBAL OBJECTS */
 
@@ -122,7 +137,7 @@ void halt() {
 }
 
 /* WIFI RECONNECT TRACKERS */
-#if defined(ESP32) && defined(WIFI_SSID)
+#ifdef ENABLE_WIFI_INTERFACE
   bool wifi_needs_reconnect = false;
   unsigned long last_wifi_reconnect_attempt = 0;
   unsigned long last_wifi_connected = 0;
@@ -219,35 +234,36 @@ void setup() {
   #endif
   #endif
   store.begin();
-  the_mesh.begin(
-    #ifdef DISPLAY_CLASS
-        disp != NULL
-    #else
-        false
-    #endif
-  );
+  the_mesh.begin();
 #elif defined(RP2040_PLATFORM)
   LittleFS.begin();
   store.begin();
-  the_mesh.begin(
-    #ifdef DISPLAY_CLASS
-        disp != NULL
-    #else
-        false
-    #endif
-  );
+  the_mesh.begin();
 #elif defined(ESP32)
   SPIFFS.begin(true);
   store.begin();
-  the_mesh.begin(
-    #ifdef DISPLAY_CLASS
-        disp != NULL
-    #else
-        false
-    #endif
-  );
+  the_mesh.begin();
 #else
   #error "need to define filesystem"
+#endif
+
+#ifdef BLE_PIN_CODE // 123456 by default
+  if (the_mesh.getNodePrefs()->ble_pin == 0) {
+#ifdef DISPLAY_CLASS
+    if (disp != NULL && BLE_PIN_CODE == 123456) {
+      StdRNG rng;
+      the_mesh.setBLEPin(rng.nextInt(100000, 999999)); // random pin each session
+    } else {
+      the_mesh.setBLEPin(BLE_PIN_CODE); // otherwise static pin
+    }
+#else
+    the_mesh.setBLEPin(BLE_PIN_CODE); // otherwise static pin
+#endif
+  } else {
+    the_mesh.setBLEPin(the_mesh.getNodePrefs()->ble_pin);
+  }
+#else
+  the_mesh.setBLEPin(0);
 #endif
 
 // add bluetooth interface
@@ -271,15 +287,17 @@ void setup() {
   WiFi.setSleep(static_cast<wifi_ps_type_t>(the_mesh.getWifiPowerSaveMode()));
   WiFi.setAutoReconnect(true);
 
-  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info){
-      if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-          WIFI_DEBUG_PRINTLN("WiFi disconnected. Flagging for reconnect...");
-          wifi_needs_reconnect = true;
-      } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
-          WIFI_DEBUG_PRINTLN("WiFi connected successfully!");
-          wifi_needs_reconnect = false;
-      }
-  });
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info){
+        if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+            WIFI_DEBUG_PRINTLN("WiFi disconnected (reason=%s). Flagging for reconnect...",
+              WiFi.disconnectReasonName((wifi_err_reason_t)info.wifi_sta_disconnected.reason));
+            wifi_needs_reconnect = true;
+        } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+            WIFI_DEBUG_PRINTLN("WiFi connected successfully!");
+            wifi_needs_reconnect = false;
+        }
+    });
+#endif
 
   if (the_mesh.getWifiSSID()[0]) {
     WiFi.begin(the_mesh.getWifiSSID(), the_mesh.getWifiPassword());
@@ -335,6 +353,7 @@ void setup() {
 #ifdef DISPLAY_CLASS
   UMC_BOOT_STAGE("screen");
   ui_task.begin(disp, &sensors, the_mesh.getNodePrefs());  // still want to pass this in as dependency, as prefs might be moved
+  the_mesh.setListener(&ui_task);
 #endif
 
   UMC_BOOT_STAGE("done");
@@ -403,6 +422,7 @@ void loop() {
 #endif
 #endif
   rtc_clock.tick();
+  board.loop();
 #ifdef HAS_EXTERNAL_WATCHDOG
   external_watchdog.loop();
 #endif
