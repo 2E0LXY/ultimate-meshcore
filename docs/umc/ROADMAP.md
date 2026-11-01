@@ -6,6 +6,10 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.28
+
+- ✅ **Remote firmware install works on the Heltec V4.** The V4 ran out of memory checking the download server's certificate while its UMC Net connection also held a secure session ("download failed to start": RSA public-key operation, memory allocation failed). The repeater now pauses its broker connection for the download (and resumes it if the download fails, or after four minutes at most), so `update install` from the dashboard completes in about a minute. Found with `check_remote.py` and the V4's serial log
+
 ## Done in 0.1.27
 
 - ✅ **Zero-touch join.** One *UMC Net* switch on the repeater (MQTT page, or `set mqtt.umcnet on`): it fills in the broker, port, secure connection and area itself, knocks on the broker with a public `enrol` account and sends a request signed with its own identity key. The dashboard shows a notification (bell bar, Accounts count, optional alert) with **Approve** and **Decline**; on approval it makes the repeater's account, switches remote control and the bridge on, and sends the details back encrypted to that repeater's key. The manual settings and the join code are under *Advanced*. Crypto tested against RFC 7748 and 8032 vectors and between C++ and Python; the full flow against a real broker (`e2e_enrol.py`). Dashboard 2.4. See `docs/umc/ENROL.md`

@@ -31,6 +31,10 @@ public:
   // without PSRAM can release memory here (the companion pauses Bluetooth). Loop task.
   virtual void umcTlsBegin() {}
   virtual void umcTlsEnd() {}
+  // A firmware download (not a mere check) is about to start / is over. A repeater pauses its UMC Net connection here:
+  // two secure sessions at once leave too little memory for the download's certificate check on boards like the V4.
+  // Called from the loop task or the updater's task, so it should only set a flag.
+  virtual void umcNetPause(bool /*pause*/) {}
   // True when a secure download can't fit alongside what the host is running (Bluetooth on
   // boards without PSRAM): the updater then restarts into a short update mode without it.
   virtual bool umcNeedsUpdateBoot() const { return false; }

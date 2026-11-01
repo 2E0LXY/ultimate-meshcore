@@ -368,6 +368,9 @@ public:
   const char* umcBoardName() const override { return board.getManufacturerName(); }
   uint32_t umcEpoch() override { return getRTCClock()->getCurrentTime(); }
   void umcPrepareForOta() override;
+#ifdef WITH_MQTT_UPLINK
+  void umcNetPause(bool pause) override { mqtt.pauseForUpdate(pause); }
+#endif
   UmcService& getUmc() { return umc; }
   void onTraceRecv(mesh::Packet* packet, uint32_t tag, uint32_t auth_code, uint8_t flags, const uint8_t* path_snrs,
                    const uint8_t* path_hashes, uint8_t path_len) override;

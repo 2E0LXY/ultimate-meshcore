@@ -939,9 +939,22 @@ void MQTTUplink::handleMqttEvent(void* handler_args, esp_event_base_t, int32_t e
   }
 }
 
+void MQTTUplink::pauseForUpdate(bool pause) {
+  _ota_pause_since = millis();
+  _ota_pause = pause;
+}
+
 void MQTTUplink::ensureBroker(BrokerState& broker, bool allow_new_connect) {
   if (broker.spec == nullptr) {
     return;
+  }
+  if (_ota_pause) {
+    if (millis() - _ota_pause_since > 240000UL) {
+      _ota_pause = false;                          // never stay away: a stuck update must not leave the repeater off the network
+    } else {
+      if (broker.client != nullptr || broker.connected) destroyBroker(broker);
+      return;
+    }
   }
   bool enabled = (_prefs.enabled_mask & broker.spec->bit) != 0;
   // a repeater that is only knocking has no area yet: the approval brings it
@@ -1989,6 +2002,7 @@ bool MQTTUplink::setCustomRate(const char*) { return false; }
 bool MQTTUplink::setControl(const char*) { return false; }
 bool MQTTUplink::applyJoin(const char*, char* reply, size_t n) { snprintf(reply, n, "Err - unsupported"); return false; }
 bool MQTTUplink::setUmcNet(const char*) { return false; }
+void MQTTUplink::pauseForUpdate(bool) {}
 bool MQTTUplink::isEnrolling() const { return false; }
 void MQTTUplink::formatUmcNetReply(char* reply, size_t n) const { snprintf(reply, n, "> unsupported"); }
 bool MQTTUplink::setControlKey(const char*) { return false; }

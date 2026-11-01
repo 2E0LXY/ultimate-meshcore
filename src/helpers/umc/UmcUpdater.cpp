@@ -193,6 +193,12 @@ void UmcUpdater::setError(const char* msg) {
   UMC_LOGF("[UMC] update: %s\n", msg);
 }
 
+void UmcUpdater::pauseNet(bool pause) {
+  if (_net_paused == pause || _umc.host() == nullptr) return;
+  _net_paused = pause;
+  _umc.host()->umcNetPause(pause);
+}
+
 void UmcUpdater::tlsBegin() {
   if (!_tls_held && _umc.host() != nullptr) {
     _umc.setQuietServers(true);
@@ -214,6 +220,7 @@ void UmcUpdater::loop(bool network_up) {
   if (_tls_release && !_task_running) {
     _tls_release = false;
     saveResult();
+    if (_state != State::Done) pauseNet(false);                         // a failed download must not leave the repeater off the network
     if (_tls_held && _state != State::Done && _umc.host() != nullptr) {  // Done = rebooting
       _umc.host()->umcTlsEnd();
       _umc.setQuietServers(false);
@@ -286,6 +293,7 @@ bool UmcUpdater::startInstall() {
   _progress = 0;
   _umc.notifyOtaStarting();
   tlsBegin();
+  pauseNet(true);
   if (xTaskCreate(installTask, "umc-upd-ota", 8192, this, 1, nullptr) != pdPASS) {
     _task_running = false;
     _tls_release = true;
@@ -308,6 +316,7 @@ void UmcUpdater::checkTask(void* arg) {
     self->_state = State::Downloading;
     self->_progress = 0;
     self->_umc.notifyOtaStarting();
+    self->pauseNet(true);
     self->doInstall();
   }
   self->_tls_release = true;
@@ -401,6 +410,7 @@ bool UmcUpdater::doCheck() {
 }
 
 bool UmcUpdater::doInstall() {
+  if (_net_paused) vTaskDelay(pdMS_TO_TICKS(3000));      // let the main loop close the broker connection and free its memory
   char full[192];
   snprintf(full, sizeof(full), "%sfirmware/%s/firmware.bin", _url, buildEnv());
   UMC_LOGF("[UMC] update: downloading %s\n", full);

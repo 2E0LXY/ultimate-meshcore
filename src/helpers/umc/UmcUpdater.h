@@ -53,6 +53,8 @@ private:
   void save();
 
   UmcService& _umc;
+  bool _net_paused = false;        // the host's broker connection is paused for a download
+  void pauseNet(bool pause);
   volatile State _state;
   volatile bool _install_after_check;
   volatile int _progress;          // percent, -1 unknown

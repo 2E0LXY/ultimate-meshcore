@@ -103,6 +103,7 @@ public:
   bool applyJoin(const char* code, char* reply, size_t reply_size);
   bool setUmcNet(const char* value);         // on | off: with no account yet, on asks the dashboard to let this repeater join
   bool isEnrolling() const;
+  void pauseForUpdate(bool pause);           // close the broker connections while a firmware download runs (it needs the memory); resumes by itself
   void formatUmcNetReply(char* reply, size_t reply_size) const;
   bool hasCustomPassword() const { return _prefs.custom_password[0] != 0; }
   bool sendStatusNow();
@@ -190,6 +191,8 @@ private:
   uint32_t _ctl_boot_epoch = 0;
   void drainControl();
   // zero-touch enrolment (docs/umc/ENROL.md)
+  volatile bool _ota_pause = false;
+  volatile unsigned long _ota_pause_since = 0;
   unsigned long _enrol_next_hello = 0;
   uint8_t _enrol_hellos = 0;
   char _grant_in[400];
