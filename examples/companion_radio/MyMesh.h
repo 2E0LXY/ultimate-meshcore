@@ -103,6 +103,8 @@ struct AdvertPath {
 #include <helpers/umc/UmcRepeaterTap.h>
 #endif
 
+class AbstractUITask;
+
 class MyMesh : public BaseChatMesh, public DataStoreHost
 #ifdef UMC_BUILD
              , public UmcHost
@@ -150,6 +152,9 @@ public:
 #endif
 #endif
   void setBLEPin(uint32_t active_pin);
+  // UMC: a few of our features still talk to the screen and the display flag directly (upstream 1.18 uses a listener)
+  void setUmcUi(AbstractUITask* ui) { _ui = ui; }
+  void setHasDisplay(bool v) { has_display = v; }
 
   void loop();
   void handleCmdFrame(size_t len);
@@ -363,6 +368,8 @@ private:
   unsigned long _next_sta_retry = 0;
 #endif
   char reply_buf[166];
+  AbstractUITask* _ui = NULL;
+  bool has_display = false;
   uint8_t app_target_ver;
   uint8_t *sign_data;
   uint32_t sign_data_len;

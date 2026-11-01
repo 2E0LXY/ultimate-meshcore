@@ -963,8 +963,19 @@ bool EnvironmentSensorManager::begin() {
       if (_active_sensors[j].query == def.query) { already_active = true; break; }
     }
     if (already_active) continue;
-    if (!detected[def.address]) {
-      MESH_DEBUG_PRINTLN("%s not detected at I2C address %02X", def.name, def.address);
+    uint8_t address = def.address;
+    const uint8_t board_detected_address = boardDetectedI2CSensorAddress(def.name);
+    const bool board_detected = board_detected_address != 0;
+    if (board_detected) {
+      address = board_detected_address;
+      if (address == def.address) {
+        MESH_DEBUG_PRINTLN("%s already detected by board scan at I2C address %02X", def.name, address);
+      } else {
+        MESH_DEBUG_PRINTLN("%s already detected by board scan at I2C address %02X (configured %02X)", def.name, address, def.address);
+      }
+    }
+    if (!board_detected && !probeI2CAddress(TELEM_WIRE, address)) {
+      MESH_DEBUG_PRINTLN("%s not detected at I2C address %02X", def.name, address);
       continue;
     }
     uint8_t n = def.init(TELEM_WIRE, address);
@@ -972,8 +983,7 @@ bool EnvironmentSensorManager::begin() {
       MESH_DEBUG_PRINTLN("%s found at %02X but failed to initialize", def.name, address);
       continue;
     }
-    MESH_DEBUG_PRINTLN("Found %s at address: %02X", def.name, def.address);
-    detected[def.address] = false;  // consumed; later entries must not re-claim this device
+    MESH_DEBUG_PRINTLN("Found %s at address: %02X", def.name, address);
     for (uint8_t sub = 0; sub < n && _active_sensor_count < MAX_ACTIVE_SENSORS; sub++) {
       _active_sensors[_active_sensor_count++] = { def.query, sub };
     }

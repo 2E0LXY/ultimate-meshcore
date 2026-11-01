@@ -1,4 +1,5 @@
 #include "MyMesh.h"
+#include "AbstractUITask.h"
 #include <helpers/umc/UmcGpsSky.h>
 #include <helpers/umc/UmcMapSink.h>
 #include <helpers/umc/UmcScreenShot.h>

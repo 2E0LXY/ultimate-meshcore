@@ -28,11 +28,14 @@ protected:
   mesh::MainBoard* _board;
   MultiSerialInterface* _interfaceManager;
 
+  bool _umc_connected = false;
   AbstractUITask(mesh::MainBoard* board, MultiSerialInterface* interfaceManager) : _board(board), _interfaceManager(interfaceManager) {
   }
 
 public:
-  bool hasConnection() const { return _interfaceManager->isConnected(); }
+  // UMC: Bluetooth (NimBLE) and the app link are not in the interface manager, so they report here
+  void setHasConnection(bool connected) { _umc_connected = connected; }
+  bool hasConnection() const { return _umc_connected || _interfaceManager->isConnected(); }
   uint16_t getBattMilliVolts() const { return _board->getBattMilliVolts(); }
   bool isBluetoothEnabled() const { return _interfaceManager->isBluetoothEnabled(); }
   void enableBluetooth() { _interfaceManager->enableBluetooth(); }
