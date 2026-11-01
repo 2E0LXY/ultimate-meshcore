@@ -6,6 +6,10 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.30
+
+- ✅ **No more waiting for the time behind some access points.** UMC Net connects only once a time server has answered. Behind one of the home access points none answered after a restart, so the repeater sat on `ntp:wait` and stayed off the network. It now asks again after a minute, and after three tries reconnects WiFi (which may join a better access point). Found on the V4: a reconnect fixed it within 15 seconds
+
 ## Done after 0.1.29 (server and app)
 
 - ✅ **Dashboard 2.6: a login for each person.** Administrator, owner (controls only their own repeaters, sees everything) and viewer; Users tab; each user changes their own password; users send messages under their own name

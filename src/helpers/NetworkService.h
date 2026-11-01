@@ -115,6 +115,8 @@ private:
   bool _wifi_started;
   bool _sntp_started;
   bool _have_time_sync;
+  unsigned long _sntp_started_ms = 0;   // when the current request for the time began
+  uint8_t _sntp_retries = 0;            // requests in a row that no time server answered
   int _last_wifi_status;
   unsigned long _last_wifi_attempt;
   const char* _node_name;

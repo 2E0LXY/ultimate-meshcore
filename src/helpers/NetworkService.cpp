@@ -1029,6 +1029,7 @@ void NetworkService::updateTimeSync() {
   if (!_sntp_started) {
     configTzTime("UTC0", _prefs.ntp_server1, _prefs.ntp_server2, _prefs.ntp_server3);
     _sntp_started = true;
+    _sntp_started_ms = millis();
   }
 
   sntp_sync_status_t sync_status = sntp_get_sync_status();
@@ -1036,6 +1037,21 @@ void NetworkService::updateTimeSync() {
   bool sane_time = now >= kMinSaneEpoch;
   bool sync_ready = sync_status == SNTP_SYNC_STATUS_COMPLETED || sync_status == SNTP_SYNC_STATUS_IN_PROGRESS;
   _have_time_sync = sane_time && (sync_ready || prev_have_time_sync);
+  if (_have_time_sync) {
+    _sntp_retries = 0;
+  } else if (millis() - _sntp_started_ms > 60000UL) {
+    // No time server has answered for a minute (seen behind some access points): ask again with a fresh lookup, and after
+    // three tries reconnect WiFi, which may join a better access point. UMC Net waits for the time, so this must not stall.
+    _sntp_retries++;
+    UMC_LOGF("[NTP] no answer for 60 s (try %u)%s\n", _sntp_retries, _sntp_retries >= 3 ? ", reconnecting wifi" : ", asking again");
+    if (_sntp_retries >= 3) {
+      _sntp_retries = 0;
+      forceReconnect();
+    } else {
+      esp_sntp_stop();
+      _sntp_started = false;
+    }
+  }
 }
 
 // Runs in the lwIP tcpip thread (posted via tcpip_callback), where raw etharp
