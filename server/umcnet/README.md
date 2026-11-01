@@ -181,3 +181,11 @@ setting back with its own value (nothing changes), checks the confirmation and r
 for a firmware check. `--reboot` also restarts each repeater and checks it returns with its settings; `--ui` opens the Control tab in a
 browser and checks that no drop-down or box is blank. It does not rewrite latitude and longitude (the repeater keeps them with limited
 precision). Exit status 0 means everything passed.
+
+### Messages, map and data flow (dashboard 2.5)
+
+* **Messages tab.** Each repeater publishes every packet it hears; a group (channel) message is encrypted with its channel's key, so the dashboard reads the channels listed in Settings (a `#hashtag` channel needs only its name; any other needs its key). A message sent into a region carries a code only that region's name produces, so the dashboard names the region by trying the regions in Settings. Filter by channel, region, direction or text. **Send** builds the same packet a radio would and publishes it on `meshcore/<area>/<dashboard id>/raw`; every repeater with the bridge on transmits it (region-scoped if you chose one). Limits: 130 characters, 6 a minute, a confirmation before sending. Messages in channels without a key are only counted. Kept for 30 days (Settings). Needs the controller account's new permission: re-run `install-dash.sh`.
+* **Map.** A repeater that is connected and online is a green dot with a yellow edge; one that is not on the network is not drawn. Other nodes appear if heard within the chosen time (1 hour to 30 days). Click any node for its details: for your repeaters board, firmware, uptime, battery, noise floor, airtime, packet mix, bridge traffic, settings and who it hears.
+* **Data flow.** Arrows both ways: what each repeater hears and publishes, and what the broker hands back for its radio to send (the bridge), measured once a minute with `get mqtt.custom.bridge`.
+* **Control tab.** Neighbours (with names from any repeater's adverts) are read when the tab opens and each minute; settings are re-read if older than ten minutes.
+* `e2e_messages.py [--ui]` tests all of this against a real broker.

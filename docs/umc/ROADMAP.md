@@ -6,6 +6,12 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.29
+
+- ✅ **Help on every setting.** Each setting on the repeater and client web page has a ? with what it is, how to use it and why it matters; the UMC Net settings also say how they work. The eleven WiFi and network settings that had none now have it
+- ✅ **Airtime shows at once.** The page used to wait to collect its own history (0 or "collecting history"); it now shows the share of time on air since the radio started until it has an hour of its own
+- ✅ **Dashboard 2.5** (server): **Messages** tab (every channel message the repeaters hear, with channel, region, sender and who heard it; send into a channel or a region), map (online repeaters green with a yellow edge, offline ones hidden, recency filter, a detailed popup per repeater), data flow in both directions with each repeater's bridge traffic, swap dial, Control-tab neighbours with names read on opening. Messages are read with channel keys (a #hashtag channel's key is its name) and sent as ordinary packets through the repeaters' bridges. See `server/umcnet/README.md`
+
 ## Done in 0.1.28
 
 - ✅ **Remote firmware install works on the Heltec V4.** The V4 ran out of memory checking the download server's certificate while its UMC Net connection also held a secure session ("download failed to start": RSA public-key operation, memory allocation failed). The repeater now pauses its broker connection for the download (and resumes it if the download fails, or after four minutes at most), so `update install` from the dashboard completes in about a minute. Found with `check_remote.py` and the V4's serial log
