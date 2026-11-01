@@ -7,7 +7,7 @@ broker's log for who connects and who is refused, samples the machine, and serve
 """
 import base64, collections, csv, hashlib, hmac, io, json, os, re, secrets, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 CFG = {
     "mqtt_host": os.environ.get("DASH_MQTT_HOST", "127.0.0.1"), "mqtt_port": int(os.environ.get("DASH_MQTT_PORT", "1884")),
@@ -24,7 +24,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.3"
+VERSION = "2.3.1"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -743,6 +743,20 @@ def setup_commands(name, password, dev, area):
 
 # ----------------------------------------------------------------------------- alerts
 ALERT_STATE = {}
+def build_alert_request(url, title, text, level="warn"):
+    """The HTTP request for one alert. A ntfy address (the word 'ntfy' in it) gets ntfy's headers; an address of the form
+    https://user:password@host/topic is sent with that login (HTTP basic), so a private ntfy server can be used."""
+    u = urlparse(url); headers = {}
+    if u.username is not None:
+        import base64 as _b64
+        headers["Authorization"] = "Basic " + _b64.b64encode(("%s:%s" % (unquote(u.username), unquote(u.password or ""))).encode()).decode()
+        url = u._replace(netloc=(u.hostname or "") + (":%d" % u.port if u.port else "")).geturl()
+    if "ntfy" in url:
+        headers.update({"Title": title.encode("ascii", "replace").decode(), "Priority": "high" if level == "bad" else "default", "Tags": "warning" if level != "ok" else "white_check_mark"})
+        return urllib.request.Request(url, data=text.encode(), headers=headers)
+    headers["Content-Type"] = "application/json"
+    return urllib.request.Request(url, data=json.dumps({"title": title, "message": text, "level": level, "host": CFG["host"], "time": int(time.time())}).encode(), headers=headers)
+
 def send_alert(title, text, level="warn", kind="x"):
     a = CONF["alerts"]
     event("alert", "%s: %s" % (title, text))
@@ -751,10 +765,7 @@ def send_alert(title, text, level="warn", kind="x"):
     if not a["enabled"] or not a["url"]: return "alerts are switched off or no address is set"
     def go():
         try:
-            if "ntfy" in a["url"]:
-                req = urllib.request.Request(a["url"], data=text.encode(), headers={"Title": title.encode("ascii", "replace").decode(), "Priority": "high" if level == "bad" else "default", "Tags": "warning" if level != "ok" else "white_check_mark"})
-            else:
-                req = urllib.request.Request(a["url"], data=json.dumps({"title": title, "message": text, "level": level, "host": CFG["host"], "time": int(time.time())}).encode(), headers={"Content-Type": "application/json"})
+            req = build_alert_request(a["url"], title, text, level)
             urllib.request.urlopen(req, timeout=8).read()
         except Exception as e:
             event("warn", "could not send an alert: %s" % e)

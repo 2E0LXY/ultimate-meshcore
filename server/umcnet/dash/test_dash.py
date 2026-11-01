@@ -1,5 +1,5 @@
 """Tests for the dashboard service and its admin helper. Run: python3 -m unittest -v test_dash   (no broker needed)"""
-import importlib.util, os, sys, tempfile, time, unittest
+import importlib.util, json, os, sys, tempfile, time, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 def load(name, file):
@@ -236,6 +236,19 @@ class JoinCode(unittest.TestCase):
         dash.conf_load(); self.assertIsNone(dash.conf_update({"join_iata": "lba", "join_bridge": False})); self.assertEqual("LBA", dash.CONF["join_iata"])
         self.assertIsNotNone(dash.conf_update({"join_iata": "TOOLONG"})); dash.conf_update({"join_bridge": True})
 
+
+
+class AlertRequest(unittest.TestCase):
+    def test_a_ntfy_address_with_a_login_is_sent_with_basic_auth_and_without_the_login_in_the_url(self):
+        r = dash.build_alert_request("https://umc-dash:p%40ss@net.example:8443/umc-ntfy-abc", "Repeater offline", "V3 has been silent", "bad")
+        self.assertEqual("https://net.example:8443/umc-ntfy-abc", r.full_url)
+        import base64
+        self.assertEqual("Basic " + base64.b64encode(b"umc-dash:p@ss").decode(), r.get_header("Authorization"))
+        self.assertEqual("high", r.get_header("Priority")); self.assertEqual(b"V3 has been silent", r.data)
+
+    def test_an_open_ntfy_address_has_no_login_and_other_addresses_get_json(self):
+        r = dash.build_alert_request("https://ntfy.sh/topic", "T", "x", "ok"); self.assertIsNone(r.get_header("Authorization")); self.assertEqual("white_check_mark", r.get_header("Tags"))
+        j = dash.build_alert_request("https://hooks.example/x", "T", "x", "warn"); self.assertEqual("application/json", j.get_header("Content-type")); self.assertEqual("T", json.loads(j.data)["title"])
 
 
 class AdminHelper(unittest.TestCase):
