@@ -26,7 +26,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.4"
+VERSION = "2.4.1"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -620,6 +620,7 @@ def command_allowed(cmd):
 
 def command_risky(cmd):
     low = cmd.lower()
+    if low.startswith("get ") and low[4:] in DEVICE_SETTING_KEYS + STATUS_SETTING_KEYS: return False     # the settings the page itself reads (some names, like lat or mqtt.custom.rate, contain words used to hide secrets)
     if any(s in low for s in SECRET_WORDS): return True
     return not (low.startswith("get ") or low in READ_ONLY_EXACT or low.startswith("stats-") or low.startswith("safety log"))
 

@@ -27,26 +27,32 @@ chmod 644 /opt/umcnet-dash/umcnet_admin.py
 chmod 644 /opt/umcnet-dash/umcnet_dash.py /opt/umcnet-dash/umcnet_enrol.py /opt/umcnet-dash/dash.html /opt/umcnet-dash/public.html
 /opt/umcnet/umcnet-user export          # the dashboard keeps its own copy of the account list (no passwords)
 
+# The broker accounts are only touched when they are missing or their permissions are out of date: changing an account reloads
+# the broker, which drops every repeater for about 20 seconds, so a re-run that changes nothing must not do it.
+acl_has() { awk -v u="$1" '$1=="user"{cur=$2} cur==u' /opt/umcnet/acl 2>/dev/null | grep -qF "$2"; }
+have() { /opt/umcnet/umcnet-user list | awk '{print $1}' | grep -qx "$1"; }
+
 # the broker account the dashboard listens with
 if [ ! -s /opt/umcnet-dash/mqtt.pass ]; then
   NEWACCOUNT=1; pw=$(/opt/umcnet/umcnet-user add dash monitor | sed -n 's/.*password: //p')
   install -m 640 -o root -g umcnet-dash /dev/null /opt/umcnet-dash/mqtt.pass; printf '%s' "$pw" > /opt/umcnet-dash/mqtt.pass
 else
-  /opt/umcnet/umcnet-user list | grep -q '^dash ' || { echo "the dash account is missing; remove /opt/umcnet-dash/mqtt.pass and run again"; exit 3; }
-  /opt/umcnet/umcnet-user add dash monitor --password "$(cat /opt/umcnet-dash/mqtt.pass)" >/dev/null     # refresh its permissions
+  have dash || { echo "the dash account is missing; remove /opt/umcnet-dash/mqtt.pass and run again"; exit 3; }
+  acl_has dash 'topic read meshcore/#' || /opt/umcnet/umcnet-user add dash monitor --password "$(cat /opt/umcnet-dash/mqtt.pass)" >/dev/null     # refresh its permissions
 fi
 
-# the control channel's own broker account: it may send commands and read answers, nothing else
+# the control channel's own broker account: it may send commands and read answers (and answer enrolment requests), nothing else
 if [ ! -s /opt/umcnet-dash/ctl.pass ]; then
   NEWACCOUNT=1; cpw=$(/opt/umcnet/umcnet-user add controller controller | sed -n 's/.*password: //p')
   install -m 640 -o root -g umcnet-dash /dev/null /opt/umcnet-dash/ctl.pass; printf '%s' "$cpw" > /opt/umcnet-dash/ctl.pass
 else
-  /opt/umcnet/umcnet-user add controller controller --password "$(cat /opt/umcnet-dash/ctl.pass)" >/dev/null
+  acl_has controller 'umcnet/v1/enrol/grant/#' || /opt/umcnet/umcnet-user add controller controller --password "$(cat /opt/umcnet-dash/ctl.pass)" >/dev/null
+fi
+
 # the public enrol account: a repeater with no account knocks with it. The password is not a secret (it is in the
 # firmware); the account can only send a signed request and read answers that are encrypted to the repeater they are for.
 ENROL_PASSWORD="${ENROL_PASSWORD:-enrol-open-door-v1}"
-/opt/umcnet/umcnet-user add enrol enrol --password "$ENROL_PASSWORD" >/dev/null 2>&1 && NEWACCOUNT=1
-fi
+have enrol || { /opt/umcnet/umcnet-user add enrol enrol --password "$ENROL_PASSWORD" >/dev/null && NEWACCOUNT=1; }
 
 # the dashboard login (user "admin"), kept with the other credentials
 CRED=/root/umcnet-credentials.txt; touch "$CRED"; chmod 600 "$CRED"

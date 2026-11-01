@@ -307,6 +307,19 @@ class Enrol(unittest.TestCase):
             slug = dash.enrol_slug(raw, dev); self.assertRegex(slug, r"^[a-z0-9][a-z0-9-]{1,23}$", raw)
 
 
+class RiskyCommands(unittest.TestCase):
+    def test_the_settings_the_page_reads_are_not_risky_but_secrets_still_are(self):
+        for k in dash.DEVICE_SETTING_KEYS + dash.STATUS_SETTING_KEYS: self.assertFalse(dash.command_risky("get " + k), k)   # preload and Read settings must not be refused
+        for c in ("get mqtt.custom.password", "get mqtt.custom.username", "get wifi.pwd", "get mqtt.control.key", "get guest.password", "get pin"):
+            self.assertTrue(dash.command_risky(c), c)
+        for c in ("set lat 53.1", "set mqtt.custom.rate 20", "set mqtt.custom.bridge on", "reboot", "update install"):
+            self.assertTrue(dash.command_risky(c), c)                      # changing anything still asks
+
+    def test_the_secret_words_still_redact_the_audit_log(self):
+        self.assertIn("[secret redacted]", dash.audit_command("set wifi.pwd hunter2"))
+        self.assertIn("[secret redacted]", dash.audit_command("get lat", "53.1"))
+
+
 class AdminHelper(unittest.TestCase):
     def test_password_hash_round_trip(self):
         h = adm.pbkdf2("Correct-horse-9"); self.assertTrue(adm.check_password("Correct-horse-9", h)); self.assertFalse(adm.check_password("Correct-horse-8", h)); self.assertFalse(adm.check_password("x", "garbage"))
