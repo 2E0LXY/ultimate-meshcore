@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.9"
+VERSION = "2.9.1"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -1094,6 +1094,24 @@ def send_command(dev, cmd, who="dashboard", confirm=False, timeout=14, quiet=Fal
     CTL["last"][dev] = {"cmd": "[secret command]" if command_secret(cmd) else cmd, "reply": "[redacted]" if command_secret(cmd) else text, "ok": ok, "t": time.time()}
     return {"ok": ok, "reply": text, "error": None if ok else text}
 
+def settings_path(): return os.path.join(CFG["data"], "settings_cache.json")
+
+def settings_save():
+    """What was last read from each repeater, so a restarted dashboard shows it at once instead of 'loading'."""
+    try:
+        with LOCK: snap = {d: {"values": dict(s["values"]), "updated": s["updated"]} for d, s in SETTINGS.items() if s.get("values")}
+        tmp = settings_path() + ".tmp"
+        with open(tmp, "w") as f: json.dump(snap, f)
+        os.replace(tmp, settings_path())
+    except Exception as e: sys.stderr.write("settings save: %s\n" % e)
+
+def settings_load():
+    try:
+        for d, s in json.load(open(settings_path())).items():
+            SETTINGS[d] = {"values": dict(s.get("values", {})), "updated": float(s.get("updated", 0)), "loading": False, "error": ""}
+    except FileNotFoundError: pass
+    except Exception as e: sys.stderr.write("settings load: %s\n" % e)
+
 def preload_settings(dev, force=False):
     now = time.time()
     with LOCK:
@@ -1102,8 +1120,8 @@ def preload_settings(dev, force=False):
         state["loading"] = True; state["error"] = ""
     good = 0; error = ""
     try:
-        for key in DEVICE_SETTING_KEYS + STATUS_SETTING_KEYS:
-            r = send_command(dev, "get " + key, "settings-preload", timeout=10)
+        for key in STATUS_SETTING_KEYS + DEVICE_SETTING_KEYS:              # firmware status first: the Control tab shows it at the top
+            r = send_command(dev, "get " + key, "settings-preload", timeout=10, quiet=True)
             if r.get("ok"): good += 1
             elif not error: error = r.get("error", "could not read settings")
             if "no answer" in str(r.get("error", "")): break
@@ -1113,6 +1131,7 @@ def preload_settings(dev, force=False):
             state = SETTINGS.setdefault(dev, {"values": {}, "updated": 0, "loading": False, "error": ""})
             state["loading"] = False; state["error"] = "" if good else error
             if good: state["updated"] = time.time()
+        if good: settings_save()
 
 def settings_loop():
     """Keep every online controlled repeater's editable settings warm for the dashboard."""
@@ -1474,7 +1493,7 @@ def export_accounts_soon():
     pass                                         # the account list is re-read from its copy on every request
 
 def main():
-    db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
+    db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); settings_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
     for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)

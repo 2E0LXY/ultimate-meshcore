@@ -226,6 +226,9 @@ try:
             check("a user does not see Accounts or Users", "Accounts" not in tabs and "Users" not in tabs and "Messages" in tabs, tabs.replace(chr(10), " "))
             check("the page says who is signed in", "signed in as g4abc" in up.inner_text("#sub"))
             up.click('[data-t="control"]'); up.wait_for_timeout(1500); cb = up.inner_text("#body"); check("their Control tab offers only their repeater", "Hill Top" in cb and "Valley" not in cb.split("Neighbours")[0])
+            samples = []
+            for _ in range(6): up.wait_for_timeout(2500); samples.append(up.inner_text("#ctlNeigh"))
+            check("the neighbours panel does not flicker back to Reading between refreshes", all(x == samples[0] for x in samples[1:]) and "Reading" not in samples[-1], [x[:30] for x in samples])
             up.click('[data-t="settings"]'); up.wait_for_timeout(800); check("their Settings is just their password", "Your password" in up.inner_text("#body") and up.locator("#mcChans").count() == 0)
             up.click('[data-t="messages"]'); up.wait_for_timeout(2000); check("messages have a Reply button", up.locator("[data-reply]").count() >= 1)
             up.locator("[data-reply]").first.click(); up.wait_for_timeout(500); check("Reply fills in the channel and the sender", up.input_value("#msgText").startswith("@[") and up.input_value("#msgChan") != "", up.input_value("#msgText"))

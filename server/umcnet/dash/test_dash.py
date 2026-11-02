@@ -407,6 +407,13 @@ class Messages(unittest.TestCase):
         dash.CTL["conn"] = None
 
 
+class SettingsCache(unittest.TestCase):
+    def test_settings_read_from_a_repeater_survive_a_restart(self):
+        dash.SETTINGS.clear(); dash.SETTINGS["AB" * 32] = {"values": {"build": "> 0.1.33", "ota.state": "> running:app0"}, "updated": 1234.0, "loading": False, "error": ""}
+        dash.settings_save(); dash.SETTINGS.clear(); dash.settings_load()
+        self.assertEqual("> 0.1.33", dash.SETTINGS["AB" * 32]["values"]["build"]); self.assertEqual(1234.0, dash.SETTINGS["AB" * 32]["updated"]); self.assertFalse(dash.SETTINGS["AB" * 32]["loading"])
+
+
 class AdminHelper(unittest.TestCase):
     def test_password_hash_round_trip(self):
         h = adm.pbkdf2("Correct-horse-9"); self.assertTrue(adm.check_password("Correct-horse-9", h)); self.assertFalse(adm.check_password("Correct-horse-8", h)); self.assertFalse(adm.check_password("x", "garbage"))
