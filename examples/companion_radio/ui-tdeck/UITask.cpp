@@ -823,9 +823,12 @@ uint32_t UITask::screenSignature() {
     return h ^ (uint32_t)(g_theme * 7331 + _setup_page * 65537 + _setup_sel * 131 + _setup_scroll * 17 +
                           (_editing ? 7919 : 0) + _edit_len * 31 + (_setup_confirm + 2) * 13 +
                           _wifi_scan_state * 101 + _wifi_found * 7 + (uint32_t)strlen(_setup_status) +
-                          (uint32_t)strlen(_console_out) * 3);
+                          (uint32_t)strlen(_console_out) * 3 +
+                          (the_mesh.getNetwork().isWifiConnected() ? 977 : 0) + (uint32_t)WiFi.status() * 53 +
+                          (_setup_page == SP_WIFI ? (uint32_t)(WiFi.RSSI() / 3) * 7 : 0));
   }
   const uint32_t clock_now = rtc_clock.getCurrentTime();
+  h ^= the_mesh.getNetwork().isWifiConnected() ? 0x9E3779B9u : 0;   // the header's wifi / AP indicator
   h ^= clock_now / 60 * 2246822519u;                       // the clock shows minutes
   h ^= (uint32_t)(_board->getBattMilliVolts() / 100) * 3266489917u;   // coarse: it wanders
   h ^= (uint32_t)contactCount() * 668265263u;
@@ -2232,6 +2235,22 @@ void UITask::setupOpen(int page) {
   _dirty = true;
 }
 
+// What the WiFi is doing right now, in words (the WiFi page shows this instead of the last command's reply)
+static void liveWifiLine(char* out, size_t n) {
+  auto& net = the_mesh.getNetwork();
+  const char* ssid = net.getWifiSSIDSlot(1);
+  if (net.isWifiConnected()) {
+    snprintf(out, n, "Connected to %s  %s  %d dBm", WiFi.SSID().c_str(), net.getStaIp().c_str(), (int)WiFi.RSSI());
+    return;
+  }
+  if (ssid == nullptr || !ssid[0]) { snprintf(out, n, "No network set: Scan, pick one, then Connect"); return; }
+  switch (WiFi.status()) {
+    case WL_NO_SSID_AVAIL: snprintf(out, n, "%s not found (2.4 GHz networks only)", ssid); break;
+    case WL_CONNECT_FAILED: snprintf(out, n, "Could not join %s: check the password", ssid); break;
+    default: snprintf(out, n, "Connecting to %s...", ssid); break;
+  }
+}
+
 void UITask::wifiScanStart() {
   _wifi_scan_state = 1;
   _wifi_found = 0;
@@ -2612,6 +2631,7 @@ void UITask::drawSetup() {
       while (*p == '\n') p++;
     }
   }
+  if (_setup_page == SP_WIFI && _wifi_scan_state != 1) liveWifiLine(_setup_status, sizeof(_setup_status));
   if (_setup_status[0]) textFClip(6, SCR_H - TAB_H - 12, SCR_W - 50, _setup_status, C_OK, F_SMALL);
 }
 

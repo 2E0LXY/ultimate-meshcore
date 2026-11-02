@@ -6,6 +6,10 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.34 (T-Deck)
+
+- ✅ **The WiFi page shows what the WiFi is really doing**: connected (network, address, signal), connecting, network not found, or wrong password. It used to keep showing the reply to Connect ("OK - wifi reconnecting") even after it had joined, and the WiFi row and the header did not redraw when the connection came up
+
 ## Done in 0.1.33 (T-Deck)
 
 - ✅ **Each conversation shows only its own messages.** The message list showed every stored message whichever channel or person was selected, so Public and #yorkshire looked the same
