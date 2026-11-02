@@ -1,22 +1,279 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>UMC Net Public Viewer</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#06130c">
+<title>UMC Net Live Dashboard</title>
 <style>
-:root{color-scheme:dark;--bg:#07110c;--card:#0d1c14;--line:#1b3929;--green:#39df7c;--muted:#91a99a;--amber:#f3c45c;--red:#ff8585}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 75% -20%,#17482d 0,transparent 40%),var(--bg);color:#edf8f1;font:14px/1.45 Inter,system-ui,sans-serif}header,main{max-width:1280px;margin:auto;padding:20px}header{display:flex;align-items:center;justify-content:space-between;gap:16px}h1{font-size:clamp(24px,4vw,40px);margin:0;letter-spacing:-.04em}.brand{color:var(--green)}.pill,.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:4px 9px;color:var(--muted)}.pill{color:var(--green);background:#10271a}.tabs{display:flex;gap:8px;overflow:auto;margin:5px 0 18px}.tabs button{border:1px solid var(--line);background:#0a1710;color:var(--muted);padding:8px 14px;border-radius:999px;cursor:pointer}.tabs button.on{background:var(--green);color:#05210f;border-color:var(--green);font-weight:700}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}.card{grid-column:span 4;background:linear-gradient(150deg,#102319,#0a1710);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.wide{grid-column:span 12}.half{grid-column:span 6}.kpis .card{grid-column:span 3}.big{font-size:28px;font-weight:750}.muted{color:var(--muted)}.ok{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}.row{display:flex;align-items:center;justify-content:space-between;gap:10px}.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:14px}.stats div{background:#08130d;border-radius:9px;padding:9px}.stats b{display:block;font-size:16px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid #173023;vertical-align:top}th{color:var(--muted);font-weight:500}.scroll{overflow:auto}code{font-size:11px;color:#b8d7c3}.empty{padding:32px;text-align:center;color:var(--muted)}footer{padding:26px;text-align:center;color:var(--muted)}@media(max-width:800px){header{align-items:flex-start;flex-direction:column}.card,.half,.kpis .card{grid-column:span 12}.wide{grid-column:span 12}main,header{padding:14px}.hide-mobile{display:none}}
-</style></head><body>
-<header><div><div class="muted">LIVE MESH STATUS</div><h1><span class="brand">UMC Net</span> Public Viewer</h1></div><div><span class="pill">Read-only</span> <span id="stamp" class="muted">Connecting…</span></div></header>
-<main><nav class="tabs" aria-label="Views"><button class="on" data-tab="overview">Overview</button><button data-tab="repeaters">Repeaters</button><button data-tab="network">Network</button><button data-tab="traffic">Traffic</button></nav><div id="app"><div class="empty">Loading live network data…</div></div></main>
+:root{color-scheme:dark;--bg:#06110b;--panel:#0b1d13;--panel2:#08160f;--line:#1a432d;--green:#32e77c;--green2:#89ffb7;--muted:#91aa9a;--amber:#ffd466;--red:#ff7f8a}
+*{box-sizing:border-box}html{min-height:100%;background:var(--bg)}body{margin:0;min-height:100vh;overflow-x:hidden;color:#f2fff7;background:radial-gradient(circle at 72% -10%,#174a2c 0,transparent 38%),linear-gradient(180deg,#07150e,#040b07);font:14px/1.45 Inter,Segoe UI,system-ui,sans-serif}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.25;background-image:linear-gradient(rgba(50,231,124,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(50,231,124,.05) 1px,transparent 1px);background-size:48px 48px;animation:gridMove 18s linear infinite}
+header,main{position:relative;z-index:1;max-width:1320px;margin:auto;padding:22px}header{display:flex;align-items:center;justify-content:space-between;gap:20px}.eyebrow{color:#8bcda4;letter-spacing:.08em;font-size:12px}.brand{color:var(--green)}h1{margin:4px 0 0;font-size:clamp(28px,4vw,46px);line-height:1;letter-spacing:-.045em}.head-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}.pill,.admin{border:1px solid var(--line);border-radius:999px;padding:7px 11px}.pill{display:inline-flex;align-items:center;gap:8px;color:var(--green);background:#0a2115}.admin{color:#fff;text-decoration:none;border-color:#2a7348;background:#102b1c;font-weight:700;transition:.2s}.admin:hover{transform:translateY(-2px);box-shadow:0 0 22px rgba(50,231,124,.18)}.dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor;display:inline-block;animation:pulse 1.7s ease-out infinite}.muted{color:var(--muted)}.ok{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}
+.tabs{display:flex;gap:8px;overflow:auto;margin:4px 0 18px}.tabs button{border:1px solid var(--line);background:#08160f;color:#a9c3b1;border-radius:999px;padding:9px 16px;cursor:pointer}.tabs button.active{background:var(--green);color:#04200e;border-color:var(--green);font-weight:800}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}.card{grid-column:span 4;position:relative;overflow:hidden;background:linear-gradient(145deg,#0d2417,#07140d);border:1px solid var(--line);border-radius:16px;padding:17px;animation:cardIn .5s ease both}.wide{grid-column:span 12}.half{grid-column:span 6}.kpi{grid-column:span 3}.label{color:var(--muted)}.big{font-size:29px;font-weight:850;margin-top:5px}.row{display:flex;justify-content:space-between;align-items:center;gap:10px}.tag{border:1px solid var(--line);border-radius:999px;padding:4px 9px;color:#aed0b9}.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:14px}.stats div{background:#061009;border-radius:10px;padding:10px}.stats b{display:block;font-size:16px;margin-top:3px}code{display:block;color:#b9d9c4;font-size:10px;overflow:hidden;text-overflow:ellipsis}.scroll{overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #173522;vertical-align:top}th{color:var(--muted);font-weight:600}.empty{padding:38px;text-align:center;color:var(--muted)}
+.flow{padding:20px;margin-bottom:14px;background:radial-gradient(circle at 50% 54%,rgba(50,231,124,.11),transparent 35%),linear-gradient(145deg,#0c2417,#07140d)}.flow-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}.flow-title h2{margin:0;font-size:18px}.flow-track{grid-template-columns:minmax(330px,1.35fr) minmax(210px,.82fr) minmax(90px,.45fr) minmax(190px,.78fr)}
+.repeater-bank{padding:14px}.repeater-bank>small{display:block;color:var(--muted);margin-bottom:8px}.repeater-lanes{display:grid;gap:8px;margin-top:10px}
+.repeater-lane{display:grid;grid-template-columns:minmax(150px,auto) 1fr;align-items:center;min-width:0}
+.repeater-lane .source{justify-content:flex-start;min-width:0;border-radius:10px;padding:7px 9px;animation:none}.repeater-lane .source.active{animation:sourceGlow 1.5s ease-in-out infinite}.repeater-lane .source.idle{opacity:.64}.repeater-lane .source span{overflow:hidden;text-overflow:ellipsis}.flow-dir{margin-left:auto;border:1px solid rgba(50,231,124,.28);border-radius:999px;padding:1px 5px;color:var(--green2);font-size:9px;letter-spacing:.04em}
+.lane-route{position:relative;height:3px;background:rgba(50,231,124,.14);overflow:visible}.lane-route.active{background:linear-gradient(90deg,rgba(50,231,124,.12),var(--green),rgba(50,231,124,.12));box-shadow:0 0 10px rgba(50,231,124,.2)}.lane-route .packet{display:none}.lane-route.active .packet{display:block}.lane-route.reverse .packet{animation-direction:reverse}.lane-route.both .packet:nth-child(2){animation-direction:reverse}.lane-route.both .packet:nth-child(3){animation-delay:-.9s}
+.flow-track{display:grid;grid-template-columns:minmax(220px,1.1fr) minmax(90px,.55fr) minmax(210px,.9fr) minmax(90px,.55fr) minmax(190px,.8fr);align-items:center;gap:0;min-height:150px}.flow-box{position:relative;z-index:2;min-height:100px;border:1px solid #286e47;border-radius:15px;background:rgba(5,20,12,.95);padding:15px;text-align:center;box-shadow:0 0 25px rgba(50,231,124,.08)}.flow-box strong{display:block;font-size:16px}.flow-box small{color:var(--muted)}.source-list{display:flex;flex-wrap:wrap;justify-content:center;gap:7px;margin-top:11px}.source{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:5px 9px;border:1px solid rgba(50,231,124,.4);border-radius:999px;background:rgba(50,231,124,.08);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:sourceGlow 2.2s ease-in-out infinite}.source:nth-child(2){animation-delay:.35s}.source:nth-child(3){animation-delay:.7s}.source:nth-child(4){animation-delay:1.05s}.source i{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green)}
+.route{position:relative;height:3px;background:linear-gradient(90deg,rgba(50,231,124,.1),var(--green),rgba(50,231,124,.1));box-shadow:0 0 12px rgba(50,231,124,.2)}.packet{position:absolute;top:50%;left:0;width:10px;height:10px;border-radius:50%;background:#c8ffdc;box-shadow:0 0 15px 4px var(--green);transform:translate(-50%,-50%);animation:packet 1.8s linear infinite}.packet:nth-child(2){animation-delay:-.6s}.packet:nth-child(3){animation-delay:-1.2s}.broker:before,.broker:after{content:"";position:absolute;inset:-12px;border:1px solid rgba(50,231,124,.28);border-radius:20px;animation:ripple 2.2s ease-out infinite;pointer-events:none}.broker:after{animation-delay:-1.1s}.broker-icon{width:42px;height:42px;border:2px solid var(--green);border-radius:50%;margin:0 auto 9px;display:grid;place-items:center;font-size:21px;box-shadow:0 0 20px rgba(50,231,124,.26);animation:spinGlow 4s linear infinite}.screen{animation:screenGlow 2.4s ease-in-out infinite}.screen .mini-bars{display:flex;justify-content:center;align-items:end;gap:3px;height:28px;margin:8px 0}.mini-bars i{width:5px;background:var(--green);border-radius:3px;animation:bars 1.1s ease-in-out infinite}.mini-bars i:nth-child(1){height:8px}.mini-bars i:nth-child(2){height:18px;animation-delay:-.3s}.mini-bars i:nth-child(3){height:26px;animation-delay:-.6s}.mini-bars i:nth-child(4){height:13px;animation-delay:-.8s}
+footer{position:relative;z-index:1;text-align:center;color:var(--muted);padding:25px}
+@keyframes gridMove{to{background-position:48px 48px}}@keyframes pulse{0%{box-shadow:0 0 0 0 currentColor}75%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}@keyframes cardIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}@keyframes packet{from{left:0}to{left:100%}}@keyframes ripple{0%{opacity:.8;transform:scale(.92)}100%{opacity:0;transform:scale(1.18)}}@keyframes sourceGlow{0%,100%{box-shadow:none}50%{box-shadow:0 0 15px rgba(50,231,124,.3);border-color:var(--green)}}@keyframes spinGlow{0%{filter:hue-rotate(0deg);transform:rotate(0)}100%{filter:hue-rotate(20deg);transform:rotate(360deg)}}@keyframes screenGlow{50%{box-shadow:0 0 32px rgba(50,231,124,.19)}}@keyframes bars{50%{height:5px;opacity:.45}}
+@media(max-width:900px){header{align-items:flex-start;flex-direction:column}.head-actions{justify-content:flex-start}.kpi,.card,.half{grid-column:span 12}.flow-track{grid-template-columns:1fr;gap:10px}.route{height:38px;width:3px;margin:auto;background:linear-gradient(180deg,rgba(50,231,124,.1),var(--green),rgba(50,231,124,.1))}.route .packet{top:0;left:50%;animation-name:packetDown}.flow-box{text-align:left}.repeater-lane{grid-template-columns:minmax(140px,auto) 1fr}@keyframes packetDown{from{top:0}to{top:100%}}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important}}
+
+/* Neon chat-inspired visual layer */
+:root{
+  color-scheme:dark;
+  --bg:#070015;
+  --panel:rgba(15,5,38,.82);
+  --panel2:rgba(7,10,34,.9);
+  --line:rgba(255,41,214,.5);
+  --green:#23f6ff;
+  --green2:#aafcff;
+  --muted:#bcaed3;
+  --amber:#ffe56b;
+  --red:#ff5a8b;
+  --pink:#ff2bd6;
+  --cyan:#23f6ff;
+  --violet:#8a4dff
+}
+html{background:#070015}
+body{
+  color:#fff;
+  background-color:#070015;
+  background-image:url('https://2e0lxy.uk/images/umc-neon-chat-bg.png');
+  background-position:center top;
+  background-size:cover;
+  background-repeat:no-repeat;
+  background-attachment:fixed;
+  font-family:Inter,Segoe UI,system-ui,sans-serif
+}
+body:before{
+  opacity:.32;
+  background-image:linear-gradient(rgba(35,246,255,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(255,43,214,.065) 1px,transparent 1px);
+  background-size:52px 52px;
+  mix-blend-mode:screen
+}
+body:after{
+  content:"";
+  position:fixed;
+  inset:0;
+  z-index:0;
+  pointer-events:none;
+  background:rgba(5,0,18,.66);
+  backdrop-filter:saturate(1.18) contrast(1.08)
+}
+header,main,footer{position:relative;z-index:2}
+header{
+  max-width:1380px;
+  margin:18px auto 0;
+  border:1px solid rgba(255,43,214,.42);
+  border-radius:22px;
+  background:rgba(9,4,28,.72);
+  box-shadow:0 0 28px rgba(255,43,214,.22),inset 0 0 32px rgba(35,246,255,.04);
+  backdrop-filter:blur(16px)
+}
+.eyebrow{color:var(--cyan);letter-spacing:.18em;text-shadow:0 0 12px rgba(35,246,255,.85)}
+.brand{
+  color:#fff;
+  text-shadow:0 0 5px #fff,0 0 18px var(--cyan),0 0 34px var(--pink)
+}
+h1{letter-spacing:-.035em}
+.head-actions .muted{color:#e0d6ef}
+.pill,.admin{
+  border-color:rgba(35,246,255,.55);
+  background:rgba(8,6,33,.82);
+  box-shadow:0 0 18px rgba(35,246,255,.12)
+}
+.pill{color:var(--cyan)}
+.admin{
+  border-color:rgba(255,43,214,.72);
+  color:#fff;
+  text-shadow:0 0 9px rgba(255,43,214,.75)
+}
+.admin:hover{
+  border-color:var(--cyan);
+  box-shadow:0 0 24px rgba(35,246,255,.34),0 0 36px rgba(255,43,214,.22)
+}
+main{max-width:1380px}
+.tabs{
+  padding:7px;
+  width:max-content;
+  max-width:100%;
+  border:1px solid rgba(255,43,214,.34);
+  border-radius:999px;
+  background:rgba(7,3,25,.76);
+  box-shadow:0 0 20px rgba(255,43,214,.12);
+  backdrop-filter:blur(12px)
+}
+.tabs button{
+  border-color:transparent;
+  background:transparent;
+  color:#ded5ed
+}
+.tabs button:hover{color:#fff;text-shadow:0 0 10px var(--cyan)}
+.tabs button.active{
+  color:#fff;
+  border-color:rgba(255,255,255,.28);
+  background:var(--pink);
+  box-shadow:0 0 12px rgba(255,43,214,.9),0 0 28px rgba(255,43,214,.48);
+  text-shadow:0 0 7px #fff
+}
+.grid{gap:15px}
+.card{
+  color:#fff;
+  border:1px solid rgba(255,43,214,.44);
+  background:rgba(10,5,31,.78);
+  box-shadow:0 0 20px rgba(255,43,214,.11),inset 0 0 24px rgba(35,246,255,.025);
+  backdrop-filter:blur(15px)
+}
+.card:nth-child(even){
+  border-color:rgba(35,246,255,.42);
+  box-shadow:0 0 20px rgba(35,246,255,.1),inset 0 0 24px rgba(255,43,214,.025)
+}
+.kpi:after{
+  content:"";
+  position:absolute;
+  left:16px;
+  right:16px;
+  bottom:0;
+  height:2px;
+  background:var(--pink);
+  box-shadow:0 0 12px var(--pink)
+}
+.kpi:nth-child(even):after{
+  background:var(--cyan);
+  box-shadow:0 0 12px var(--cyan)
+}
+.label,.muted{color:var(--muted)}
+.big{color:#fff;text-shadow:0 0 13px rgba(35,246,255,.25)}
+.ok{color:#50ffcb}.warn{color:var(--amber)}.bad{color:var(--red)}
+.tag{
+  color:#f4eaff;
+  border-color:rgba(35,246,255,.42);
+  background:rgba(35,246,255,.07)
+}
+.stats div{
+  border:1px solid rgba(255,43,214,.16);
+  background:rgba(4,2,19,.68)
+}
+code{color:#c9faff}
+th,td{border-bottom-color:rgba(255,43,214,.18)}
+th{color:#e7d8f5}
+.flow{
+  position:relative;
+  border-color:rgba(255,43,214,.72);
+  background:rgba(7,2,25,.82);
+  box-shadow:0 0 35px rgba(255,43,214,.18),inset 0 0 45px rgba(35,246,255,.035)
+}
+.flow-title h2{
+  color:#fff;
+  text-shadow:0 0 14px rgba(255,43,214,.65)
+}
+.flow-box{
+  border:1px solid rgba(35,246,255,.58);
+  background:rgba(5,3,25,.9);
+  box-shadow:0 0 24px rgba(35,246,255,.16),inset 0 0 20px rgba(255,43,214,.045)
+}
+.repeater-bank{border-color:rgba(255,43,214,.62)}
+.source{
+  color:#fff;
+  border-color:rgba(255,43,214,.66);
+  background:rgba(255,43,214,.1);
+  box-shadow:0 0 14px rgba(255,43,214,.16)
+}
+.source i{
+  background:var(--cyan);
+  box-shadow:0 0 7px var(--cyan),0 0 17px var(--cyan)
+}
+.flow-dir{
+  color:#fff;
+  border-color:rgba(35,246,255,.46);
+  background:rgba(35,246,255,.08);
+  text-shadow:0 0 8px var(--cyan)
+}
+.lane-route{background:rgba(255,43,214,.16)}
+.lane-route.active,.route{
+  background:linear-gradient(90deg,rgba(255,43,214,.18),var(--pink),var(--cyan),rgba(35,246,255,.16));
+  box-shadow:0 0 12px rgba(255,43,214,.5),0 0 18px rgba(35,246,255,.25)
+}
+.packet{
+  background:#fff;
+  box-shadow:0 0 7px #fff,0 0 15px var(--cyan),0 0 26px var(--pink)
+}
+.packet:nth-child(2){
+  background:var(--pink);
+  box-shadow:0 0 8px #fff,0 0 18px var(--pink)
+}
+.broker{
+  border-color:var(--pink);
+  box-shadow:0 0 24px rgba(255,43,214,.25),inset 0 0 22px rgba(35,246,255,.06)
+}
+.broker:before,.broker:after{border-color:rgba(255,43,214,.42)}
+.broker-icon{
+  color:#fff;
+  border-color:var(--cyan);
+  box-shadow:0 0 9px var(--cyan),0 0 24px rgba(255,43,214,.55)
+}
+.screen{
+  border-color:var(--cyan);
+  box-shadow:0 0 24px rgba(35,246,255,.22)
+}
+.mini-bars i{background:var(--pink);box-shadow:0 0 8px var(--pink)}
+footer{
+  color:#d8cae6;
+  max-width:1320px;
+  margin:0 auto 24px;
+  border-top:1px solid rgba(35,246,255,.22)
+}
+@keyframes sourceGlow{
+  0%,100%{box-shadow:0 0 8px rgba(255,43,214,.13)}
+  50%{box-shadow:0 0 14px rgba(35,246,255,.5),0 0 24px rgba(255,43,214,.34);border-color:var(--cyan)}
+}
+@keyframes screenGlow{
+  0%,100%{box-shadow:0 0 18px rgba(35,246,255,.18)}
+  50%{box-shadow:0 0 28px rgba(35,246,255,.5),0 0 42px rgba(255,43,214,.22)}
+}
+@media(max-width:900px){
+  header{margin:10px 10px 0}
+  main{padding:12px}
+  .tabs{width:100%}
+  .flow-track{grid-template-columns:1fr}
+  .route{background:linear-gradient(180deg,rgba(255,43,214,.18),var(--pink),var(--cyan),rgba(35,246,255,.16))}
+}
+
+</style>
+</head>
+<body>
+<header><div><div class="eyebrow">LIVE MESH STATUS</div><h1><span class="brand">UMC Net</span> Live Dashboard</h1></div><div class="head-actions"><span class="pill"><i class="dot"></i> Public read-only</span><span id="updated" class="muted">Connecting...</span><a class="admin" href="/">Admin &rarr;</a></div></header>
+<main><nav class="tabs" aria-label="Dashboard views"><button class="active" data-view="overview">Overview</button><button data-view="repeaters">Repeaters</button><button data-view="network">Network</button><button data-view="traffic">Traffic</button></nav><div id="app" class="empty">Loading live network data...</div></main>
 <footer>No controls, credentials, private keys, account details or private locations are published here.</footer>
 <script>
-const S={o:null,n:null,tab:"overview"},$=s=>document.querySelector(s),esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])),ago=s=>{const n=Math.max(0,Date.now()/1000-s);return n<60?Math.floor(n)+"s ago":n<3600?Math.floor(n/60)+"m ago":n<86400?Math.floor(n/3600)+"h ago":Math.floor(n/86400)+"d ago"},fmt=n=>Number(n||0).toLocaleString(),dot=d=>d.age<900?'<span class="ok">● online</span>':d.age<3600?'<span class="warn">● quiet</span>':'<span class="bad">● offline</span>';
-function kpis(o){const online=o.devices.filter(d=>d.age<900).length;return `<div class="grid kpis"><section class="card"><div class="muted">Repeaters online</div><div class="big">${online} / ${o.devices.length}</div></section><section class="card"><div class="muted">Packets seen</div><div class="big">${fmt(o.totals?.packets)}</div></section><section class="card"><div class="muted">Known nodes</div><div class="big">${fmt(o.nodes)}</div></section><section class="card"><div class="muted">Broker link</div><div class="big ${o.mqtt?.state==='connected'?'ok':'warn'}">${esc(o.mqtt?.state||'unknown')}</div></section></div>`}
-function repeater(d){const s=d.settings||{};return `<section class="card"><div class="row"><div><b>${esc(d.label?.label||d.name||d.id.slice(0,12))}</b><div>${dot(d)}</div></div><span class="tag">${esc(d.area||'—')}</span></div><p class="muted">${esc(d.model||'Unknown board')} · ${esc(d.fw||'Unknown firmware')}<br><code>${esc(d.id)}</code></p><div class="stats"><div><span class="muted">Received</span><b>${fmt(d.n_rx)}</b></div><div><span class="muted">Sent</span><b>${fmt(d.n_tx)}</b></div><div><span class="muted">RSSI / SNR</span><b>${esc(d.rssi??'—')} / ${esc(d.snr??'—')}</b></div><div><span class="muted">Last data</span><b>${ago(d.last)}</b></div><div><span class="muted">Radio</span><b>${esc(s.radio||d.radio||'—')}</b></div><div><span class="muted">TX power</span><b>${esc(s.tx||'—')} dBm</b></div></div></section>`}
-function overview(o){return kpis(o)+`<div class="grid" style="margin-top:12px">${o.devices.map(repeater).join('')||'<div class="card wide empty">No repeaters have reported yet.</div>'}</div>`}
-function repeaters(o){return `<div class="grid">${o.devices.map(repeater).join('')||'<div class="card wide empty">No repeaters have reported yet.</div>'}</div>`}
-function network(){const n=S.n||{nodes:[],links:[],journeys:[]};const names=Object.fromEntries(n.nodes.map(x=>[x.key,x.name]));const rows=n.nodes.map(x=>`<tr><td><b>${esc(x.name||x.key?.slice(0,12))}</b><br><code>${esc(x.key||'')}</code></td><td>${esc(x.type??'—')}</td><td>${x.connected?'<span class="ok">connected</span>':'heard'}</td><td>${x.last?ago(x.last):'—'}</td></tr>`);const links=n.links.map(x=>`<tr><td>${esc(names[x.recv]||x.recv?.slice(0,12)||'—')}</td><td>heard</td><td>${esc(names[x.node]||x.node?.slice(0,12)||'—')}</td><td>${esc(x.n??'—')} · ${esc(x.hops??'—')} hop(s)</td></tr>`);return `<div class="grid"><section class="card half"><h2>Known nodes</h2><div class="scroll"><table><thead><tr><th>Node</th><th>Type</th><th>Status</th><th>Last seen</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>${rows.length?'':'<div class="empty">No node adverts yet.</div>'}</section><section class="card half"><h2>Observed links</h2><div class="scroll"><table><thead><tr><th>Repeater</th><th></th><th>Node</th><th>Evidence</th></tr></thead><tbody>${links.join('')}</tbody></table></div>${links.length?'':'<div class="empty">No links observed yet.</div>'}</section></div>`}
-function traffic(o){const p=o.packets||[];const rows=p.map(x=>`<tr><td>${x.t?new Date(x.t*1000).toLocaleTimeString():'—'}</td><td>${esc(x.type||'—')}</td><td>${esc(x.name||x.src||'—')}</td><td>${esc(x.dname||x.dev?.slice(0,12)||'—')}</td><td>${esc(x.hops??'—')}</td><td>${esc(x.rssi??'—')} / ${esc(x.snr??'—')}</td></tr>`);return `<section class="card wide"><h2>Recent mesh traffic</h2><div class="scroll"><table><thead><tr><th>Time</th><th>Type</th><th>From</th><th>Heard by</th><th>Hops</th><th>RSSI / SNR</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>${rows.length?'':'<div class="empty">No public traffic details available yet.</div>'}</section>`}
-function draw(){if(!S.o)return;$('#app').innerHTML=S.tab==='overview'?overview(S.o):S.tab==='repeaters'?repeaters(S.o):S.tab==='network'?network():traffic(S.o)}
-document.addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(!b)return;S.tab=b.dataset.tab;document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('on',x===b));draw()});
-async function load(){try{const [o,n]=await Promise.all([fetch('/public/api/overview').then(r=>r.json()),fetch('/public/api/network').then(r=>r.json())]);S.o=o;S.n=n;$('#stamp').textContent='Updated '+new Date().toLocaleTimeString();draw()}catch(e){$('#stamp').textContent='Temporarily unavailable';$('#app').innerHTML='<div class="empty">The live viewer could not reach the network service. It will retry automatically.</div>'}}
-load();setInterval(load,5000);
-</script></body></html>
+const state={overview:null,network:null,view:'overview'};
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=n=>Number(n||0).toLocaleString();
+const ago=t=>{const n=Math.max(0,Date.now()/1000-Number(t||0));return n<60?Math.floor(n)+'s ago':n<3600?Math.floor(n/60)+'m ago':n<86400?Math.floor(n/3600)+'h ago':Math.floor(n/86400)+'d ago'};
+const name=d=>d.label?.label||d.name||String(d.id||'').slice(0,12)||'Repeater';
+const online=d=>Number(d.age??(Date.now()/1000-Number(d.last||0)))<900;
+const status=d=>online(d)?'<span class="ok"><i class="dot"></i> online</span>':Number(d.age||99999)<3600?'<span class="warn"><i class="dot"></i> quiet</span>':'<span class="bad"><i class="dot"></i> offline</span>';
+function kpis(o){const on=o.devices.filter(online).length;return '<div class="grid"><section class="card kpi"><div class="label">Repeaters online</div><div class="big">'+on+' / '+o.devices.length+'</div></section><section class="card kpi"><div class="label">Packets seen</div><div class="big">'+fmt(o.totals?.packets)+'</div></section><section class="card kpi"><div class="label">Known nodes</div><div class="big">'+fmt(o.nodes)+'</div></section><section class="card kpi"><div class="label">Broker link</div><div class="big '+(o.mqtt?.state==='connected'?'ok':'warn')+'">'+esc(o.mqtt?.state||'unknown')+'</div></section></div>'}
+function trafficMode(packets){let up=false,down=false;for(const p of packets){const d=String(p.dir||'').toLowerCase();if(/rx|recv|receive|in|up/.test(d))up=true;if(/tx|send|out|down/.test(d))down=true;if(!d)up=true}return up&&down?'both':down?'reverse':up?'forward':'idle'}
+function repeaterTraffic(o,d){const cutoff=Date.now()/1000-30,dn=name(d);const packets=(o.packets||[]).filter(p=>Number(p.t||0)>=cutoff&&(p.dev===d.id||p.dname===dn));return {count:packets.length,mode:trafficMode(packets)}}
+function packetDots(){return '<i class="packet"></i><i class="packet"></i><i class="packet"></i>'}
+function flow(o){const connected=o.devices.filter(online),broker=o.mqtt?.state==='connected',cutoff=Date.now()/1000-30,recent=(o.packets||[]).filter(p=>Number(p.t||0)>=cutoff),allMode=trafficMode(recent),lanes=connected.length?connected.map(d=>{const a=repeaterTraffic(o,d),label=a.mode==='both'?'RX + TX':a.mode==='reverse'?'TX':a.mode==='forward'?'RX':'IDLE';return '<div class="repeater-lane"><div class="source '+(a.count?'active':'idle')+'"><i></i><span>'+esc(name(d))+'</span><b class="flow-dir">'+label+'</b></div><div class="lane-route '+(a.count?'active ':'')+a.mode+'">'+packetDots()+'</div></div>'}).join(''):'<span class="muted">Waiting for a repeater connection</span>';return '<section class="card wide flow"><div class="flow-title"><h2>Live bidirectional MQTT flow</h2><span class="'+(recent.length?'ok':'muted')+'"><i class="dot"></i> '+(recent.length?recent.length+' recent packet'+(recent.length===1?'':'s'):'Waiting for traffic')+'</span></div><div class="flow-track"><div class="flow-box repeater-bank"><strong>'+connected.length+' connected repeater'+(connected.length===1?'':'s')+'</strong><small>Each lane moves only when that repeater carries data</small><div class="repeater-lanes">'+lanes+'</div></div><div class="flow-box broker"><div class="broker-icon">&#8635;</div><strong>UMC MQTT broker</strong><small>'+esc(o.mqtt?.state||'unknown')+'</small></div><div class="route '+(recent.length?'active ':'')+allMode+'">'+packetDots()+'</div><div class="flow-box screen"><strong>Public dashboard</strong><div class="mini-bars"><i></i><i></i><i></i><i></i></div><small>Read-only live telemetry</small></div></div></section>'}
+function card(d){const s=d.settings||{};return '<section class="card"><div class="row"><div><b>'+esc(name(d))+'</b><div>'+status(d)+'</div></div><span class="tag">'+esc(d.area||'-')+'</span></div><p class="muted">'+esc(d.model||'Unknown board')+' &middot; '+esc(d.fw||'Unknown firmware')+'</p><code>'+esc(d.id)+'</code><div class="stats"><div><span class="label">Received</span><b>'+fmt(d.n_rx)+'</b></div><div><span class="label">Sent</span><b>'+fmt(d.n_tx)+'</b></div><div><span class="label">RSSI / SNR</span><b>'+esc(d.rssi??'-')+' / '+esc(d.snr??'-')+'</b></div><div><span class="label">Last data</span><b>'+ago(d.last)+'</b></div><div><span class="label">Radio</span><b>'+esc(s.radio||d.radio||'-')+'</b></div><div><span class="label">TX power</span><b>'+esc(s.tx||'-')+' dBm</b></div></div></section>'}
+function renderOverview(o){return kpis(o)+flow(o)+'<div class="grid">'+o.devices.map(card).join('')+'</div>'}
+function renderRepeaters(o){return '<div class="grid">'+(o.devices.length?o.devices.map(card).join(''):'<div class="card wide empty">No repeaters have reported yet.</div>')+'</div>'}
+function renderTraffic(o){const p=(o.packets||[]).slice().reverse().slice(0,100);return '<section class="card wide scroll"><h2>Recent public traffic</h2><table><thead><tr><th>When</th><th>Repeater</th><th>Direction</th><th>Type</th><th>Route</th><th>Signal</th></tr></thead><tbody>'+p.map(x=>'<tr><td>'+ago(x.t)+'</td><td>'+esc(x.dname||x.dev||'-')+'</td><td>'+esc(x.dir||'-')+'</td><td>'+esc(x.type||'-')+'</td><td>'+esc([x.src,x.dst].filter(Boolean).join(' to ')||'-')+'</td><td>'+esc(x.rssi??'-')+' / '+esc(x.snr??'-')+'</td></tr>').join('')+'</tbody></table></section>'}
+function renderNetwork(n){if(!n)return '<div class="empty">Loading network view...</div>';const nodes=(n.nodes||[]).slice(0,250),links=(n.links||[]).slice(0,250);return '<div class="grid"><section class="card half scroll"><h2>Known nodes</h2><table><thead><tr><th>Node</th><th>Type</th><th>Status</th><th>Last seen</th></tr></thead><tbody>'+nodes.map(x=>'<tr><td>'+esc(x.name||x.key||'-')+'</td><td>'+esc(x.type??'-')+'</td><td>'+esc(x.status||'heard')+'</td><td>'+ago(x.last)+'</td></tr>').join('')+'</tbody></table></section><section class="card half scroll"><h2>Observed links</h2><table><thead><tr><th>From</th><th>To</th><th>Packets</th><th>Signal</th></tr></thead><tbody>'+links.map(x=>'<tr><td>'+esc(x.a_name||x.a||x.from||'-')+'</td><td>'+esc(x.b_name||x.b||x.to||'-')+'</td><td>'+fmt(x.n||x.count)+'</td><td>'+esc(x.rssi??'-')+' / '+esc(x.snr??'-')+'</td></tr>').join('')+'</tbody></table></section></div>'}
+function draw(){const app=document.getElementById('app'),o=state.overview;if(!o){app.className='empty';app.textContent='Loading live network data...';return}app.className='';app.innerHTML=state.view==='overview'?renderOverview(o):state.view==='repeaters'?renderRepeaters(o):state.view==='traffic'?renderTraffic(o):renderNetwork(state.network)}
+async function load(){try{const [a,b]=await Promise.all([fetch('/public/api/overview',{cache:'no-store'}),fetch('/public/api/network',{cache:'no-store'})]);if(!a.ok)throw new Error('Overview '+a.status);state.overview=await a.json();state.network=b.ok?await b.json():null;document.getElementById('updated').textContent='Updated '+new Date().toLocaleTimeString();draw()}catch(e){document.getElementById('updated').textContent='Connection problem';document.getElementById('app').innerHTML='<div class="card wide bad">Live data could not be loaded: '+esc(e.message)+'</div>'}}
+document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-view]').forEach(x=>x.classList.toggle('active',x===b));state.view=b.dataset.view;draw()}));
+load();setInterval(load,10000);
+</script>
+</body>
+</html>
+
