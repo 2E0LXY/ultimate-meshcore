@@ -78,40 +78,60 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 .dash2 .tr{color:var(--mu)}.dash2 .conn b{white-space:nowrap}
 .umcpop .leaflet-popup-content-wrapper{background:#0d2219;color:#e9f7ef;border:1px solid #1f4a37;border-radius:12px}.umcpop .leaflet-popup-tip{background:#0d2219}.umcpop .leaflet-popup-content{margin:12px 14px;max-height:430px;overflow:auto}.pop h3{margin:0 0 6px;font-size:15px}.pop h4{margin:10px 0 3px;font-size:12px;color:#9fd8b6}.pp{border-collapse:collapse;width:100%}.pp td{padding:2px 10px 2px 0;font-size:12px;vertical-align:top;border:0;white-space:normal;overflow-wrap:anywhere}.pp td:first-child{white-space:nowrap}
 @keyframes newmsg{from{background:#2fe27a33}to{background:transparent}}tr.newmsg td{animation:newmsg 4s ease-out}
-/* ---- Messages: neon chat (matches the public dashboard) ---- */
-.neonchat .pn{background:linear-gradient(rgba(12,4,28,.62),rgba(12,4,28,.74)),url('https://2e0lxy.uk/images/umc-neon-chat-bg.png') center/cover;border:1px solid #ff4fd855;box-shadow:0 0 24px #ff4fd822,inset 0 0 40px #7a2cff22}
-.neonchat select,.neonchat input{background:#120626cc!important;color:#e9dcff!important;border:1px solid #ff4fd8aa!important;border-radius:10px!important;box-shadow:0 0 8px #ff4fd833}
-.neonchat input:focus,.neonchat select:focus{outline:none;border-color:#00e5ff!important;box-shadow:0 0 12px #00e5ff88}
-.neonchat #msgBar>div:nth-child(2){background:linear-gradient(90deg,#1a0838cc,#081a38cc)!important;border:1px solid #00e5ff88!important;box-shadow:0 0 14px #00e5ff33,inset 0 0 14px #ff4fd822}
-.neonchat #msgSend{background:linear-gradient(90deg,#ff4fd8,#7a2cff);color:#fff;border:0;border-radius:10px;padding:7px 18px;font-weight:700;letter-spacing:.04em;box-shadow:0 0 14px #ff4fd8aa;cursor:pointer}
-.neonchat #msgSend:hover{box-shadow:0 0 22px #ff4fd8}
-.neonchat .tag{background:#ff4fd822;color:#ffb3f0;border:1px solid #ff4fd877}
-.nc-stage{position:relative;border-radius:16px;overflow:hidden;border:1px solid #7a2cff66;background:radial-gradient(ellipse at 50% 120%,#7a2cff44,transparent 60%),rgba(10,3,24,.38)}
-.nc-rain{position:absolute;inset:0;pointer-events:none;opacity:.35;background:repeating-linear-gradient(90deg,transparent 0 46px,#ff4fd855 46px 47px,transparent 47px 93px,#00e5ff44 93px 94px);-webkit-mask-image:linear-gradient(transparent,#000 30%,#000 70%,transparent);mask-image:linear-gradient(transparent,#000 30%,#000 70%,transparent);animation:ncrain 9s linear infinite;background-size:100% 300%}
+/* ---- Messages: chat themes. One set of rules, coloured by the theme chosen above the list (kept in this browser) ---- */
+.neonchat{--a:#2fe27a;--a2:#89ffb7;--b:#00d6a3;--b2:#b6ffe0;--fill-rx:linear-gradient(135deg,#0f3d2699,#0a2a1c66 60%,#1d6b4433);--fill-tx:linear-gradient(135deg,#123a4a99,#0c2c3866 60%,#1a5a5a33);--tail-rx:#0f3324;--tail-tx:#12343f;
+  --txt-rx:#d9ffe9;--txt-tx:#d6fff6;--meta:#9ccfb2;--muted:#7fa392;--panel:linear-gradient(rgba(6,19,13,.94),rgba(6,19,13,.97));--stage:radial-gradient(ellipse at 50% 120%,#2fe27a22,transparent 60%),rgba(4,14,9,.55);
+  --rain1:#2fe27a44;--rain2:#00d6a333;--btn:linear-gradient(90deg,#2fe27a,#0fbf86);--btn-ink:#04140c;--font:"JetBrains Mono","Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;--glow:1}
+.neonchat[data-nc="neon"]{--a:#ff4fd8;--a2:#ff8ff0;--b:#00e5ff;--b2:#7ff6ff;--fill-rx:linear-gradient(135deg,#2a3cff4d,#00b8ff26 60%,#7a2cff33);--fill-tx:linear-gradient(135deg,#7a2cff4d,#ff4fd826 60%,#2a3cff33);--tail-rx:#1c2a6a;--tail-tx:#3a1a6a;
+  --txt-rx:#c8fff4;--txt-tx:#ffe1fb;--meta:#c9b8ff;--muted:#8f7fb8;--panel:linear-gradient(rgba(12,4,28,.62),rgba(12,4,28,.74)),url('https://2e0lxy.uk/images/umc-neon-chat-bg.png') center/cover;--stage:radial-gradient(ellipse at 50% 120%,#7a2cff44,transparent 60%),rgba(10,3,24,.38);
+  --rain1:#ff4fd855;--rain2:#00e5ff44;--btn:linear-gradient(90deg,#ff4fd8,#7a2cff);--btn-ink:#fff}
+.neonchat[data-nc="amber"]{--a:#ffb000;--a2:#ffd27a;--b:#ff7a1a;--b2:#ffc48f;--fill-rx:linear-gradient(135deg,#3a240099,#24160066 60%,#4a2e0033);--fill-tx:linear-gradient(135deg,#3a1a0099,#26100066 60%,#4a220033);--tail-rx:#2e1d00;--tail-tx:#2e1400;
+  --txt-rx:#ffd98a;--txt-tx:#ffc9a0;--meta:#d9b06a;--muted:#a3854f;--panel:linear-gradient(rgba(14,9,2,.95),rgba(10,6,1,.97));--stage:repeating-linear-gradient(0deg,#ffb00008 0 2px,transparent 2px 4px),rgba(12,8,2,.6);
+  --rain1:#ffb00033;--rain2:#ff7a1a2a;--btn:linear-gradient(90deg,#ffb000,#ff7a1a);--btn-ink:#1a0e00}
+.neonchat[data-nc="ocean"]{--a:#4fb3ff;--a2:#9fd4ff;--b:#2ee6d6;--b2:#a8fff6;--fill-rx:linear-gradient(135deg,#0d2c5299,#0a1f3c66 60%,#1b4c8033);--fill-tx:linear-gradient(135deg,#0b3b4499,#08283066 60%,#17636b33);--tail-rx:#0c2747;--tail-tx:#0a3036;
+  --txt-rx:#dcefff;--txt-tx:#d6fffb;--meta:#9fc3e6;--muted:#7393b3;--panel:linear-gradient(rgba(4,12,26,.94),rgba(3,9,20,.97));--stage:radial-gradient(ellipse at 50% 120%,#4fb3ff2a,transparent 60%),rgba(3,10,22,.55);
+  --rain1:#4fb3ff3a;--rain2:#2ee6d62e;--btn:linear-gradient(90deg,#4fb3ff,#2ee6d6);--btn-ink:#03101e}
+.neonchat[data-nc="sunset"]{--a:#ff6b6b;--a2:#ffa3a3;--b:#ffb347;--b2:#ffd9a0;--fill-rx:linear-gradient(135deg,#4a141e99,#2e0c1466 60%,#6b1e3a33);--fill-tx:linear-gradient(135deg,#4a2a0e99,#2e1a0866 60%,#6b4a1e33);--tail-rx:#3a1018;--tail-tx:#3a220c;
+  --txt-rx:#ffe1e1;--txt-tx:#fff0d9;--meta:#e6a9a9;--muted:#b07a7a;--panel:linear-gradient(rgba(22,6,12,.93),rgba(16,4,10,.97));--stage:radial-gradient(ellipse at 50% 120%,#ff6b6b33,transparent 60%),rgba(18,5,10,.55);
+  --rain1:#ff6b6b3a;--rain2:#ffb3472e;--btn:linear-gradient(90deg,#ff6b6b,#ffb347);--btn-ink:#1e0608}
+.neonchat[data-nc="calm"]{--a:#5d7a6b;--a2:#cfe3d8;--b:#4a6a8a;--b2:#d2e2f2;--fill-rx:#16241d;--fill-tx:#162230;--tail-rx:#16241d;--tail-tx:#162230;
+  --txt-rx:#e3efe8;--txt-tx:#e3ecf5;--meta:#9fb3a8;--muted:#7f9388;--panel:#0d1712;--stage:#0b1410;--rain1:transparent;--rain2:transparent;--btn:#2f8a5c;--btn-ink:#fff;--font:system-ui,-apple-system,"Segoe UI",sans-serif;--glow:0}
+.neonchat .pn{background:var(--panel);border:1px solid color-mix(in srgb,var(--a) 33%,transparent);box-shadow:0 0 calc(24px * var(--glow)) color-mix(in srgb,var(--a) 14%,transparent)}
+.neonchat select,.neonchat input{background:#0008!important;color:var(--txt-rx)!important;border:1px solid color-mix(in srgb,var(--a) 65%,transparent)!important;border-radius:10px!important;box-shadow:0 0 calc(8px * var(--glow)) color-mix(in srgb,var(--a) 20%,transparent)}
+.neonchat input:focus,.neonchat select:focus{outline:none;border-color:var(--b)!important;box-shadow:0 0 12px color-mix(in srgb,var(--b) 55%,transparent)}
+.neonchat #msgBar>div:nth-child(2){background:#0006!important;border:1px solid color-mix(in srgb,var(--b) 55%,transparent)!important;box-shadow:0 0 calc(14px * var(--glow)) color-mix(in srgb,var(--b) 20%,transparent)}
+.neonchat #msgSend{background:var(--btn);color:var(--btn-ink);border:0;border-radius:10px;padding:7px 18px;font-weight:700;letter-spacing:.04em;box-shadow:0 0 calc(14px * var(--glow)) color-mix(in srgb,var(--a) 65%,transparent);cursor:pointer}
+.neonchat .tag{background:color-mix(in srgb,var(--a) 14%,transparent);color:var(--a2);border:1px solid color-mix(in srgb,var(--a) 45%,transparent)}
+.nc-themes{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 10px;font-size:12px;color:var(--muted)}
+.nc-themes button{display:inline-flex;align-items:center;gap:6px;border:1px solid #ffffff22;background:#0005;color:#ddd;border-radius:999px;padding:3px 10px 3px 4px;font-size:12px;cursor:pointer}
+.nc-themes button i{width:16px;height:16px;border-radius:50%;display:inline-block}
+.nc-themes button.on{border-color:var(--a);color:var(--a2);box-shadow:0 0 10px color-mix(in srgb,var(--a) 45%,transparent)}
+.nc-stage{position:relative;border-radius:16px;overflow:hidden;border:1px solid color-mix(in srgb,var(--a) 30%,transparent);background:var(--stage)}
+.nc-rain{position:absolute;inset:0;pointer-events:none;opacity:.35;background:repeating-linear-gradient(90deg,transparent 0 46px,var(--rain1) 46px 47px,transparent 47px 93px,var(--rain2) 93px 94px);-webkit-mask-image:linear-gradient(transparent,#000 30%,#000 70%,transparent);mask-image:linear-gradient(transparent,#000 30%,#000 70%,transparent);animation:ncrain 9s linear infinite;background-size:100% 300%}
 @keyframes ncrain{from{background-position:0 0}to{background-position:0 300%}}
 #msgFeed{position:relative;height:62vh;min-height:320px;overflow-y:auto;padding:18px 16px 10px;scroll-behavior:smooth}
 .nc-msg{display:flex;flex-direction:column;max-width:72%;margin:0 0 16px;align-items:flex-start}
 .nc-msg.tx{margin-left:auto;align-items:flex-end}
-.nc-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:0 8px 5px;font-size:12px;color:#c9b8ff}
-.nc-who{color:#ff8ff0;text-shadow:0 0 8px #ff4fd8;font-size:13px}
-.nc-msg.tx .nc-who{color:#7ff6ff;text-shadow:0 0 8px #00e5ff}
-.nc-chip{padding:1px 8px;border-radius:999px;border:1px solid #00e5ff77;color:#9ff4ff;background:#00e5ff14;font-size:11px}
-.nc-chip.reg{border-color:#ff4fd877;color:#ffb3f0;background:#ff4fd814}
-.nc-time{color:#8f7fb8;font-variant-numeric:tabular-nums}
-.nc-bubble{position:relative;padding:12px 16px;border-radius:18px;border:2px solid #ff4fd8;background:linear-gradient(135deg,#2a3cff4d,#00b8ff26 60%,#7a2cff33);box-shadow:0 0 14px #ff4fd8aa,0 0 32px #ff4fd844,inset 0 0 20px #00e5ff44;backdrop-filter:blur(3px)}
-.nc-bubble::after{content:"";position:absolute;bottom:-11px;left:22px;width:18px;height:18px;background:inherit;border-right:2px solid #ff4fd8;border-bottom:2px solid #ff4fd8;transform:skewX(35deg) rotate(45deg) scale(.8);border-bottom-right-radius:4px;background:#1c2a6a}
-.nc-msg.tx .nc-bubble{border-color:#00e5ff;background:linear-gradient(135deg,#7a2cff4d,#ff4fd826 60%,#2a3cff33);box-shadow:0 0 14px #00e5ffaa,0 0 32px #00e5ff44,inset 0 0 20px #ff4fd844}
-.nc-msg.tx .nc-bubble::after{left:auto;right:22px;border-color:#00e5ff;background:#3a1a6a;transform:skewX(-35deg) rotate(45deg) scale(.8)}
-.nc-text{font-family:"JetBrains Mono","Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;font-size:14.5px;line-height:1.5;color:#c8fff4;text-shadow:0 0 6px #00e5ff99;white-space:pre-wrap;word-break:break-word}
-.nc-msg.tx .nc-text{color:#ffe1fb;text-shadow:0 0 6px #ff4fd899}
-.nc-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 8px 0;font-size:11.5px;color:#9a8cc4}
-.nc-heard i{font-style:normal;color:#7fa9c8}
-.nc-reply{background:transparent;border:1px solid #00e5ff99;color:#9ff4ff;border-radius:999px;padding:2px 12px;font-size:11.5px;cursor:pointer;box-shadow:0 0 8px #00e5ff44}
-.nc-reply:hover{background:#00e5ff22;box-shadow:0 0 14px #00e5ff88}
+.nc-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:0 8px 5px;font-size:12px;color:var(--meta)}
+.nc-who{color:var(--a2);text-shadow:0 0 calc(8px * var(--glow)) var(--a);font-size:13px}
+.nc-msg.tx .nc-who{color:var(--b2);text-shadow:0 0 calc(8px * var(--glow)) var(--b)}
+.nc-chip{padding:1px 8px;border-radius:999px;border:1px solid color-mix(in srgb,var(--b) 50%,transparent);color:var(--b2);background:color-mix(in srgb,var(--b) 9%,transparent);font-size:11px}
+.nc-chip.reg{border-color:color-mix(in srgb,var(--a) 50%,transparent);color:var(--a2);background:color-mix(in srgb,var(--a) 9%,transparent)}
+.nc-time{color:var(--muted);font-variant-numeric:tabular-nums}
+.nc-bubble{position:relative;padding:12px 16px;border-radius:18px;border:2px solid var(--a);background:var(--fill-rx);box-shadow:0 0 calc(14px * var(--glow)) color-mix(in srgb,var(--a) 65%,transparent),0 0 calc(32px * var(--glow)) color-mix(in srgb,var(--a) 25%,transparent),inset 0 0 calc(20px * var(--glow)) color-mix(in srgb,var(--b) 25%,transparent);backdrop-filter:blur(3px)}
+.nc-bubble::after{content:"";position:absolute;bottom:-11px;left:22px;width:18px;height:18px;border-right:2px solid var(--a);border-bottom:2px solid var(--a);transform:skewX(35deg) rotate(45deg) scale(.8);border-bottom-right-radius:4px;background:var(--tail-rx)}
+.nc-msg.tx .nc-bubble{border-color:var(--b);background:var(--fill-tx);box-shadow:0 0 calc(14px * var(--glow)) color-mix(in srgb,var(--b) 65%,transparent),0 0 calc(32px * var(--glow)) color-mix(in srgb,var(--b) 25%,transparent),inset 0 0 calc(20px * var(--glow)) color-mix(in srgb,var(--a) 25%,transparent)}
+.nc-msg.tx .nc-bubble::after{left:auto;right:22px;border-color:var(--b);background:var(--tail-tx);transform:skewX(-35deg) rotate(45deg) scale(.8)}
+.nc-text{font-family:var(--font);font-size:14.5px;line-height:1.5;color:var(--txt-rx);text-shadow:0 0 calc(6px * var(--glow)) color-mix(in srgb,var(--b) 60%,transparent);white-space:pre-wrap;word-break:break-word}
+.nc-msg.tx .nc-text{color:var(--txt-tx);text-shadow:0 0 calc(6px * var(--glow)) color-mix(in srgb,var(--a) 60%,transparent)}
+.nc-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 8px 0;font-size:11.5px;color:var(--muted)}
+.nc-heard i{font-style:normal;opacity:.85}
+.nc-reply{background:transparent;border:1px solid color-mix(in srgb,var(--b) 60%,transparent);color:var(--b2);border-radius:999px;padding:2px 12px;font-size:11.5px;cursor:pointer;box-shadow:0 0 calc(8px * var(--glow)) color-mix(in srgb,var(--b) 25%,transparent)}
+.nc-reply:hover{background:color-mix(in srgb,var(--b) 14%,transparent)}
 .nc-msg.fresh .nc-bubble{animation:ncin .6s ease-out,ncglow 2.4s ease-in-out 3}
 @keyframes ncin{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1;transform:none}}
-@keyframes ncglow{50%{box-shadow:0 0 26px #ff4fd8,0 0 60px #ff4fd877,inset 0 0 26px #00e5ff77}}
-.nc-empty{color:#c9b8ff;text-align:center;padding:60px 20px;text-shadow:0 0 8px #7a2cff}
+@keyframes ncglow{50%{box-shadow:0 0 26px var(--a),0 0 60px color-mix(in srgb,var(--a) 45%,transparent),inset 0 0 26px color-mix(in srgb,var(--b) 45%,transparent)}}
+.nc-empty{color:var(--meta);text-align:center;padding:60px 20px}
 @media (prefers-reduced-motion:reduce){.nc-rain,.nc-msg.fresh .nc-bubble{animation:none}}
 @media (max-width:700px){.nc-msg{max-width:92%}#msgFeed{height:58vh}}
 </style></head>
@@ -652,9 +672,18 @@ async function msgLoad() {
   try { m.data = await jget("/api/messages?" + p); } catch (e) { m.err = e.message; }
   msgUpdate();
 }
+const NC_THEMES = [["green", "UMC green", "#2fe27a", "#00d6a3"], ["neon", "Neon night", "#ff4fd8", "#00e5ff"], ["ocean", "Ocean", "#4fb3ff", "#2ee6d6"], ["amber", "Amber terminal", "#ffb000", "#ff7a1a"], ["sunset", "Sunset", "#ff6b6b", "#ffb347"], ["calm", "Calm", "#5d7a6b", "#4a6a8a"]];
+function ncTheme() { let t = "green"; try { t = localStorage.getItem("umc.chatTheme") || "green"; } catch {} return NC_THEMES.some(x => x[0] === t) ? t : "green"; }
+function ncThemeButtons() { const cur = ncTheme(); return `<span>Theme</span>` + NC_THEMES.map(([k, l, a, b]) => `<button type="button" data-nctheme="${k}" class="${k === cur ? "on" : ""}" title="${l}"><i style="background:linear-gradient(135deg,${a} 50%,${b} 50%)"></i>${l}</button>`).join(""); }
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-nctheme]"); if (!b) return;
+  try { localStorage.setItem("umc.chatTheme", b.dataset.nctheme); } catch {}
+  const w = $("#ncWrap"); if (w) w.dataset.nc = b.dataset.nctheme;
+  const t = $("#ncThemes"); if (t) t.innerHTML = ncThemeButtons();
+});
 function vMessages(o) {
   S.msgUp = false;
-  return `<div class="panels neonchat">${panel("Messages", "everything your repeaters hear in your channels, and what you send", `<div id="msgBar"></div><div id="msgChips" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0"></div><div class="nc-stage"><div class="nc-rain"></div><div id="msgFeed"><div class="nc-empty">Loading…</div></div></div>`, "messages")}</div>`;
+  return `<div class="panels neonchat" id="ncWrap" data-nc="${ncTheme()}">${panel("Messages", "everything your repeaters hear in your channels, and what you send", `<div class="nc-themes" id="ncThemes">${ncThemeButtons()}</div><div id="msgBar"></div><div id="msgChips" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0"></div><div class="nc-stage"><div class="nc-rain"></div><div id="msgFeed"><div class="nc-empty">Loading…</div></div></div>`, "messages")}</div>`;
 }
 function msgUpdate() {
   const m = S.mg, d = m.data, bar = $("#msgBar"); if (!bar || !d) return; S.msgUp = true;

@@ -209,6 +209,12 @@ try:
             pg.select_option("#msgChan", "#yorkshire"); pg.select_option("#msgReg", "yorkshire"); pg.fill("#msgText", "hello from the page"); pg.click("#msgSend"); pg.wait_for_timeout(2500)
             check("sending from the page works and shows in the list", "Sent." in pg.inner_text("#msgRes") and "hello from the page" in pg.inner_text("#msgFeed"), pg.inner_text("#msgRes"))
             pg.screenshot(path="/tmp/messages_ui.png")
+            check("the chat starts in the green theme", pg.get_attribute("#ncWrap", "data-nc") == "green")
+            for th in ("neon", "ocean", "amber", "sunset", "calm", "green"):
+                pg.click('[data-nctheme="%s"]' % th); pg.wait_for_timeout(400); pg.locator("#ncWrap").screenshot(path="/tmp/theme_%s.png" % th)
+            check("each of the six themes can be chosen", pg.locator("[data-nctheme]").count() == 6 and pg.get_attribute("#ncWrap", "data-nc") == "green")
+            pg.click('[data-nctheme="ocean"]'); pg.reload(); pg.wait_for_timeout(2500); pg.click('[data-t="messages"]'); pg.wait_for_timeout(2000)
+            check("the chosen theme is remembered after a reload", pg.get_attribute("#ncWrap", "data-nc") == "ocean"); pg.click('[data-nctheme="green"]')
             pg.click('[data-t="network"]'); pg.wait_for_timeout(3500); check("the map has the hours filter", pg.locator('[data-nf="hours"]').count() == 1)
             pg.wait_for_timeout(2500); mk = pg.locator('path[stroke="#f2c14e"]'); check("online repeaters are green dots with a yellow edge", mk.count() == 2 and pg.locator('path[stroke="#f2c14e"][fill="#2fe27a"]').count() == 2, mk.count())
             mk.first.click(force=True); pg.wait_for_timeout(1200); pop = pg.inner_text(".umcpop")
