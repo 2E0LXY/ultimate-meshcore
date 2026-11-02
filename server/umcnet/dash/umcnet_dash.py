@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.9.1"
+VERSION = "2.9.2"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -1332,6 +1332,9 @@ def public_overview():
     o = overview(); now = o["now"]; devices = []
     for d in o["devices"]:
         devices.append({k: d.get(k) for k in ("id", "area", "name", "first", "last", "last_status", "status", "model", "fw", "radio", "client", "repeat", "stats", "n_raw", "n_pkt", "n_rx", "n_tx", "types", "rssi", "snr", "bytes", "skew", "topics", "pm", "label", "age")})
+        br = d.get("bridge") or {}
+        devices[-1]["pm"] = d.get("pm"); devices[-1]["age"] = d.get("age")
+        devices[-1]["bridge"] = {k: br.get(k) for k in ("heard_pm", "passed_pm", "dropped_pm")} if br else None      # rates only: how much each bridge passes on
         devices[-1]["label"] = {"label": d.get("label", {}).get("label", "")}
         devices[-1]["settings"] = {k: d.get("settings", {}).get(k) for k in PUBLIC_SETTING_KEYS if k in d.get("settings", {})}
         devices[-1]["settings_updated"] = d.get("settings_updated", 0)

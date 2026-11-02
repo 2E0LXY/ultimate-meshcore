@@ -245,6 +245,8 @@ footer{
   .route{background:linear-gradient(180deg,rgba(255,43,214,.18),var(--pink),var(--cyan),rgba(35,246,255,.16))}
 }
 
+.lf canvas{display:block;width:100%;border-radius:14px;background:radial-gradient(ellipse at 47% 50%,rgba(122,44,255,.22),transparent 60%),rgba(6,2,16,.55);border:1px solid rgba(255,79,216,.25)}
+.lf-legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:12px;color:#c9b8ff;align-items:center}.lf-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;box-shadow:0 0 8px currentColor;vertical-align:-1px}.lf-note{color:#8f84b8;margin-left:auto}
 </style>
 </head>
 <body>
@@ -265,14 +267,140 @@ function repeaterTraffic(o,d){const cutoff=Date.now()/1000-30,dn=name(d);const p
 function packetDots(){return '<i class="packet"></i><i class="packet"></i><i class="packet"></i>'}
 function flow(o){const connected=o.devices.filter(online),broker=o.mqtt?.state==='connected',cutoff=Date.now()/1000-30,recent=(o.packets||[]).filter(p=>Number(p.t||0)>=cutoff),allMode=trafficMode(recent),lanes=connected.length?connected.map(d=>{const a=repeaterTraffic(o,d),label=a.mode==='both'?'RX + TX':a.mode==='reverse'?'TX':a.mode==='forward'?'RX':'IDLE';return '<div class="repeater-lane"><div class="source '+(a.count?'active':'idle')+'"><i></i><span>'+esc(name(d))+'</span><b class="flow-dir">'+label+'</b></div><div class="lane-route '+(a.count?'active ':'')+a.mode+'">'+packetDots()+'</div></div>'}).join(''):'<span class="muted">Waiting for a repeater connection</span>';return '<section class="card wide flow"><div class="flow-title"><h2>Live bidirectional MQTT flow</h2><span class="'+(recent.length?'ok':'muted')+'"><i class="dot"></i> '+(recent.length?recent.length+' recent packet'+(recent.length===1?'':'s'):'Waiting for traffic')+'</span></div><div class="flow-track"><div class="flow-box repeater-bank"><strong>'+connected.length+' connected repeater'+(connected.length===1?'':'s')+'</strong><small>Each lane moves only when that repeater carries data</small><div class="repeater-lanes">'+lanes+'</div></div><div class="flow-box broker"><div class="broker-icon">&#8635;</div><strong>UMC MQTT broker</strong><small>'+esc(o.mqtt?.state||'unknown')+'</small></div><div class="route '+(recent.length?'active ':'')+allMode+'">'+packetDots()+'</div><div class="flow-box screen"><strong>Public dashboard</strong><div class="mini-bars"><i></i><i></i><i></i><i></i></div><small>Read-only live telemetry</small></div></div></section>'}
 function card(d){const s=d.settings||{};return '<section class="card"><div class="row"><div><b>'+esc(name(d))+'</b><div>'+status(d)+'</div></div><span class="tag">'+esc(d.area||'-')+'</span></div><p class="muted">'+esc(d.model||'Unknown board')+' &middot; '+esc(d.fw||'Unknown firmware')+'</p><code>'+esc(d.id)+'</code><div class="stats"><div><span class="label">Received</span><b>'+fmt(d.n_rx)+'</b></div><div><span class="label">Sent</span><b>'+fmt(d.n_tx)+'</b></div><div><span class="label">RSSI / SNR</span><b>'+esc(d.rssi??'-')+' / '+esc(d.snr??'-')+'</b></div><div><span class="label">Last data</span><b>'+ago(d.last)+'</b></div><div><span class="label">Radio</span><b>'+esc(s.radio||d.radio||'-')+'</b></div><div><span class="label">TX power</span><b>'+esc(s.tx||'-')+' dBm</b></div></div></section>'}
-function renderOverview(o){return kpis(o)+flow(o)+'<div class="grid">'+o.devices.map(card).join('')+'</div>'}
+function renderOverview(o){return kpis(o)+'<div id="lfSlot"></div>'+'<div class="grid">'+o.devices.map(card).join('')+'</div>'}
 function renderRepeaters(o){return '<div class="grid">'+(o.devices.length?o.devices.map(card).join(''):'<div class="card wide empty">No repeaters have reported yet.</div>')+'</div>'}
 function renderTraffic(o){const p=(o.packets||[]).slice().reverse().slice(0,100);return '<section class="card wide scroll"><h2>Recent public traffic</h2><table><thead><tr><th>When</th><th>Repeater</th><th>Direction</th><th>Type</th><th>Route</th><th>Signal</th></tr></thead><tbody>'+p.map(x=>'<tr><td>'+ago(x.t)+'</td><td>'+esc(x.dname||x.dev||'-')+'</td><td>'+esc(x.dir||'-')+'</td><td>'+esc(x.type||'-')+'</td><td>'+esc([x.src,x.dst].filter(Boolean).join(' to ')||'-')+'</td><td>'+esc(x.rssi??'-')+' / '+esc(x.snr??'-')+'</td></tr>').join('')+'</tbody></table></section>'}
 function renderNetwork(n){if(!n)return '<div class="empty">Loading network view...</div>';const nodes=(n.nodes||[]).slice(0,250),links=(n.links||[]).slice(0,250);return '<div class="grid"><section class="card half scroll"><h2>Known nodes</h2><table><thead><tr><th>Node</th><th>Type</th><th>Status</th><th>Last seen</th></tr></thead><tbody>'+nodes.map(x=>'<tr><td>'+esc(x.name||x.key||'-')+'</td><td>'+esc(x.type??'-')+'</td><td>'+esc(x.status||'heard')+'</td><td>'+ago(x.last)+'</td></tr>').join('')+'</tbody></table></section><section class="card half scroll"><h2>Observed links</h2><table><thead><tr><th>From</th><th>To</th><th>Packets</th><th>Signal</th></tr></thead><tbody>'+links.map(x=>'<tr><td>'+esc(x.a_name||x.a||x.from||'-')+'</td><td>'+esc(x.b_name||x.b||x.to||'-')+'</td><td>'+fmt(x.n||x.count)+'</td><td>'+esc(x.rssi??'-')+' / '+esc(x.snr??'-')+'</td></tr>').join('')+'</tbody></table></section></div>'}
-function draw(){const app=document.getElementById('app'),o=state.overview;if(!o){app.className='empty';app.textContent='Loading live network data...';return}app.className='';app.innerHTML=state.view==='overview'?renderOverview(o):state.view==='repeaters'?renderRepeaters(o):state.view==='traffic'?renderTraffic(o):renderNetwork(state.network)}
-async function load(){try{const [a,b]=await Promise.all([fetch('/public/api/overview',{cache:'no-store'}),fetch('/public/api/network',{cache:'no-store'})]);if(!a.ok)throw new Error('Overview '+a.status);state.overview=await a.json();state.network=b.ok?await b.json():null;document.getElementById('updated').textContent='Updated '+new Date().toLocaleTimeString();draw()}catch(e){document.getElementById('updated').textContent='Connection problem';document.getElementById('app').innerHTML='<div class="card wide bad">Live data could not be loaded: '+esc(e.message)+'</div>'}}
+function draw(){const app=document.getElementById('app'),o=state.overview;if(!o){app.className='empty';app.textContent='Loading live network data...';return}app.className='';app.innerHTML=state.view==='overview'?renderOverview(o):state.view==='repeaters'?renderRepeaters(o):state.view==='traffic'?renderTraffic(o):renderNetwork(state.network);const slot=document.getElementById('lfSlot');if(slot){slot.appendChild(lfElement());lfLayout(o)}}
+async function load(){try{const [a,b]=await Promise.all([fetch('/public/api/overview',{cache:'no-store'}),fetch('/public/api/network',{cache:'no-store'})]);if(!a.ok)throw new Error('Overview '+a.status);state.overview=await a.json();lfIngest(state.overview);state.network=b.ok?await b.json():null;document.getElementById('updated').textContent='Updated '+new Date().toLocaleTimeString();draw()}catch(e){document.getElementById('updated').textContent='Connection problem';document.getElementById('app').innerHTML='<div class="card wide bad">Live data could not be loaded: '+esc(e.message)+'</div>'}}
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-view]').forEach(x=>x.classList.toggle('active',x===b));state.view=b.dataset.view;draw()}));
-load();setInterval(load,10000);
+load();setInterval(load,5000);
+// ---------------------------------------------------------------- live data flow (canvas)
+// Every particle is a real packet: heard by a repeater on the radio, published to the broker, then handed by the bridge to
+// every other repeater (which transmits it: the ripple), and to the dashboards; messages and adverts also go to the apps topic.
+const LF = {el: null, cv: null, ctx: null, parts: [], ripples: [], seen: new Set(), queue: [], pos: {}, rep: [], w: 0, h: 0, dpr: 1,
+  o: null, last: 0, count: {up: 0, down: 0, out: 0}, pulse: 0, first: true, reduced: matchMedia("(prefers-reduced-motion: reduce)").matches};
+const LF_TYPE = {ADVERT: "#ffd466", GRP_TXT: "#ff4fd8", TXT_MSG: "#00e5ff", ACK: "#32e77c", PATH: "#b18cff", REQ: "#7fb2ff", RESPONSE: "#7fb2ff", TRACE: "#ff9a5a"};
+const lfCol = t => LF_TYPE[String(t || "").toUpperCase()] || "#e9e3ff";
+function lfElement() {
+  if (LF.el) return LF.el;
+  const w = document.createElement("section"); w.className = "card wide lf";
+  w.innerHTML = '<div class="flow-title"><h2>Live data flow, both ways</h2><span id="lfStat" class="muted">waiting for packets</span></div>' +
+    '<canvas id="lfCanvas" aria-label="Animated map of packets moving between the repeaters, the broker, the dashboards and apps"></canvas>' +
+    '<div class="lf-legend"><span><i style="background:#ffd466"></i>advert</span><span><i style="background:#ff4fd8"></i>channel message</span><span><i style="background:#00e5ff"></i>direct message</span><span><i style="background:#32e77c"></i>ack</span><span><i style="background:#b18cff"></i>path</span><span><i style="background:#e9e3ff"></i>other</span>' +
+    '<span class="lf-note">heard on the radio ⟶ broker ⟶ every other repeater (ripple = sent out on the radio), the dashboards and the apps</span></div>';
+  LF.el = w; LF.cv = w.querySelector("canvas"); LF.ctx = LF.cv.getContext("2d");
+  addEventListener("resize", () => lfLayout(LF.o)); requestAnimationFrame(lfTick);
+  return w;
+}
+function lfLayout(o) {
+  if (!LF.cv || !o) return;
+  const reps = o.devices.filter(online), n = Math.max(1, reps.length);
+  LF.cv.style.width = "100%"; const W = LF.cv.clientWidth || 900, H = Math.min(760, 360 + Math.max(0, n - 2) * 60);
+  LF.dpr = devicePixelRatio || 1; LF.cv.width = W * LF.dpr; LF.cv.height = H * LF.dpr; LF.cv.style.width = W + "px"; LF.cv.style.height = H + "px";
+  LF.ctx.setTransform(LF.dpr, 0, 0, LF.dpr, 0, 0); LF.w = W; LF.h = H;
+  const bx = W * 0.5, by = H * 0.5; LF.pos = {broker: {x: bx, y: by, label: "UMC MQTT broker"}};
+  // repeaters on an arc around the left of the broker; the arc widens as more join
+  const Rx = W * 0.36, Ry = H * 0.40, span = Math.min(Math.PI * 1.1, 0.7 + n * 0.38), a0 = Math.PI - span / 2;
+  LF.rep = reps.map((d, i) => { const a = n === 1 ? Math.PI : a0 + span * i / (n - 1); const p = {x: bx + Math.cos(a) * Rx, y: by + Math.sin(a) * Ry, label: name(d), d}; LF.pos["r:" + d.id] = p; return p; });
+  LF.pos.dash = {x: W * 0.88, y: H * 0.32, label: "Dashboards", sub: "admin + this page"};
+  LF.pos.apps = {x: W * 0.88, y: H * 0.68, label: "Apps", sub: "decoded messages & adverts"};
+}
+function lfIngest(o) {
+  const first = !LF.o; LF.o = o; lfLayout(o);
+  const now = Date.now() / 1000, pk = (o.packets || []).filter(p => Number(p.t || 0) > 0);
+  const maxT = pk.reduce((m, p) => Math.max(m, Number(p.t)), 0) || now;
+  for (const p of pk) {
+    const id = [p.t, p.dev, p.key, p.len, p.type, p.dir].join("|");
+    if (LF.seen.has(id)) continue; LF.seen.add(id);
+    if (first && maxT - Number(p.t) > 20) continue;                               // on opening, replay only the last 20 s
+    const delay = Math.max(0, Math.min(10, Number(p.t) - (maxT - 10))) * 1000;    // replay with the packets' real spacing
+    LF.queue.push({at: performance.now() + delay, p});
+  }
+  if (LF.seen.size > 3000) LF.seen = new Set([...LF.seen].slice(-1500));
+  const up = reps => reps.reduce((s, d) => s + (Number(d.pm) || 0), 0);
+  const on = o.devices.filter(online);
+  const down = on.reduce((s, d) => s + (Number(d.bridge?.passed_pm) || 0), 0);
+  const st = document.getElementById("lfStat");
+  if (st) st.textContent = `${on.length} repeater${on.length === 1 ? "" : "s"} · heard ${up(on).toFixed(1)}/min · bridged back out ${down.toFixed(1)}/min`;
+}
+function lfSpawn(from, to, col, size, bend, after) { if (from && to) LF.parts.push({from, to, col, size, bend, t0: performance.now(), dur: 900 + Math.hypot(to.x - from.x, to.y - from.y) * 2.1, after}); }
+function lfRipple(at, col, out) { if (at) LF.ripples.push({at, col, out, t0: performance.now()}); }
+function lfPacket(p) {
+  const o = LF.o; if (!o) return;
+  const src = LF.pos["r:" + p.dev] || LF.rep.find(r => r.label === p.dname); if (!src) return;
+  const col = lfCol(p.type), dir = String(p.dir || "rx").toLowerCase();
+  if (/tx|out/.test(dir)) { lfRipple(src, col, true); return; }                    // a repeater's own transmission (when reported)
+  lfRipple(src, col, false); LF.count.up++;
+  lfSpawn(src, LF.pos.broker, col, 3.4, -18, () => {                               // up to the broker
+    LF.pulse = performance.now();
+    lfSpawn(LF.pos.broker, LF.pos.dash, col, 2.6, -10);
+    if (/GRP_TXT|ADVERT/i.test(p.type || "")) { lfSpawn(LF.pos.broker, LF.pos.apps, col, 2.6, 10); LF.count.out++; }
+    for (const r of LF.rep) {
+      if (r === src) continue;                                                     // a bridge never sends a repeater its own packet back
+      const b = r.d.bridge || {}, drop = (b.dropped_pm || 0) / Math.max(1, (b.heard_pm || 0)), held = Math.random() < drop;
+      LF.count.down += held ? 0 : 1;
+      lfSpawn(LF.pos.broker, r, held ? col + "55" : col, held ? 2.2 : 3.2, 18, held ? null : () => lfRipple(r, col, true));
+    }
+  });
+}
+function lfQuad(a, b, bend, t) {
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
+  const cx = mx - dy / L * bend, cy = my + dx / L * bend, u = 1 - t;
+  return {x: u * u * a.x + 2 * u * t * cx + t * t * b.x, y: u * u * a.y + 2 * u * t * cy + t * t * b.y, cx, cy};
+}
+function lfNode(p, kind, now) {
+  const c = LF.ctx, glow = kind === "broker" ? (now - LF.pulse < 500 ? 1 - (now - LF.pulse) / 500 : 0) : 0;
+  c.save();
+  if (kind === "broker") {
+    c.shadowColor = "#ff4fd8"; c.shadowBlur = 22 + glow * 30; c.lineWidth = 2.5; c.strokeStyle = "#ff4fd8"; c.fillStyle = "rgba(40,10,70,.85)";
+    c.beginPath(); for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; c.lineTo(p.x + Math.cos(a) * 52, p.y + Math.sin(a) * 52); } c.closePath(); c.fill(); c.stroke();
+    c.save(); c.translate(p.x, p.y); c.rotate(now / 2400); c.setLineDash([6, 10]); c.lineWidth = 2; c.strokeStyle = "rgba(0,229,255,.55)"; c.beginPath(); c.arc(0, 0, 66 + glow * 6, 0, Math.PI * 2); c.stroke(); c.rotate(-now / 1200); c.strokeStyle = "rgba(255,79,216,.35)"; c.beginPath(); c.arc(0, 0, 78, 0, Math.PI * 2); c.stroke(); c.restore();
+    c.shadowBlur = 0; c.fillStyle = "#f6e9ff"; c.font = "700 13px Inter,system-ui,sans-serif"; c.textAlign = "center"; c.fillText("UMC MQTT", p.x, p.y - 4); c.fillText("broker", p.x, p.y + 12);
+    c.font = "11px Inter,system-ui,sans-serif"; c.fillStyle = "#9ff4ff"; c.fillText(LF.o?.mqtt?.state || "", p.x, p.y + 28);
+  } else {
+    const w = Math.max(118, c.measureText ? 0 : 0), col = kind === "rep" ? "#ff4fd8" : "#00e5ff";
+    const sub2 = kind === "rep" ? `↑ heard ${(Number(p.d.pm) || 0).toFixed(1)}/min   ↓ sent ${(Number((p.d.bridge || {}).passed_pm) || 0).toFixed(1)}/min` : (p.sub || "");
+    c.font = "10.5px Inter,system-ui,sans-serif"; const sw = c.measureText(sub2).width;
+    c.font = "700 12.5px Inter,system-ui,sans-serif"; const tw = Math.max(110, c.measureText(p.label).width + 26, sw + 22), h = sub2 ? 44 : 30;
+    c.shadowColor = col; c.shadowBlur = 16; c.lineWidth = 2; c.strokeStyle = col; c.fillStyle = "rgba(14,6,34,.88)";
+    c.beginPath(); c.roundRect ? c.roundRect(p.x - tw / 2, p.y - h / 2, tw, h, 10) : c.rect(p.x - tw / 2, p.y - h / 2, tw, h); c.fill(); c.stroke();
+    c.shadowBlur = 0; c.textAlign = "center"; c.fillStyle = "#fff"; c.fillText(p.label, p.x, p.y - (h > 30 ? 4 : -4));
+    c.font = "10.5px Inter,system-ui,sans-serif"; c.fillStyle = "#c9b8ff";
+    if (sub2) c.fillText(sub2, p.x, p.y + 13);
+  }
+  c.restore();
+}
+function lfTick(now) {
+  requestAnimationFrame(lfTick);
+  if (!LF.cv || !LF.cv.isConnected || !LF.o) return;
+  while (LF.queue.length && LF.queue[0].at <= now) lfPacket(LF.queue.shift().p);
+  LF.queue.sort((a, b) => a.at - b.at);
+  const c = LF.ctx, W = LF.w, H = LF.h; c.clearRect(0, 0, W, H);
+  // the links: a lane each way between every repeater and the broker, and out to the dashboards and apps
+  const busy = new Map(); for (const p of LF.parts) busy.set(p.from.label + ">" + p.to.label, (busy.get(p.from.label + ">" + p.to.label) || 0) + 1);
+  const lane = (a, b, bend, col) => { const m = lfQuad(a, b, bend, .5), k = Math.min(3, busy.get(a.label + ">" + b.label) || 0); c.beginPath(); c.moveTo(a.x, a.y); c.quadraticCurveTo(m.cx, m.cy, b.x, b.y); c.strokeStyle = col; c.lineWidth = 1.4 + k * 1.1; c.shadowColor = col; c.shadowBlur = k * 8; c.stroke(); c.shadowBlur = 0; };
+  c.save(); c.setLineDash([3, 7]); c.lineDashOffset = -(now / 60) % 10;
+  for (const r of LF.rep) { lane(r, LF.pos.broker, -18, "rgba(255,79,216,.28)"); lane(LF.pos.broker, r, 18, "rgba(0,229,255,.24)"); }
+  lane(LF.pos.broker, LF.pos.dash, -10, "rgba(0,229,255,.24)"); lane(LF.pos.broker, LF.pos.apps, 10, "rgba(0,229,255,.24)");
+  c.restore();
+  // ripples: heard on the radio (inward, magenta) and sent out on the radio (outward, cyan / packet colour)
+  LF.ripples = LF.ripples.filter(r => now - r.t0 < 1400);
+  for (const r of LF.ripples) { const k = (now - r.t0) / 1400; c.beginPath(); c.arc(r.at.x, r.at.y, r.out ? 26 + k * 46 : 70 - k * 44, 0, Math.PI * 2); c.strokeStyle = r.col; c.globalAlpha = (1 - k) * .8; c.lineWidth = r.out ? 2.2 : 1.6; c.stroke(); c.globalAlpha = 1; }
+  // the packets in flight, with a short glowing trail
+  const keep = [];
+  for (const p of LF.parts) {
+    const t = Math.min(1, (now - p.t0) / p.dur);
+    if (t >= 1) { if (p.after) p.after(); continue; } keep.push(p);
+    c.save(); c.shadowColor = p.col; c.shadowBlur = 14;
+    for (let k = 5; k >= 0; k--) { const q = lfQuad(p.from, p.to, p.bend, Math.max(0, t - k * .025)); c.globalAlpha = k ? (1 - k / 6) * .5 : 1; c.fillStyle = p.col; c.beginPath(); c.arc(q.x, q.y, k ? p.size * .7 : p.size, 0, Math.PI * 2); c.fill(); }
+    c.restore();
+  }
+  LF.parts = keep;
+  for (const r of LF.rep) lfNode(r, "rep", now);
+  lfNode(LF.pos.broker, "broker", now); lfNode(LF.pos.dash, "out", now); lfNode(LF.pos.apps, "out", now);
+}
+
 </script>
 </body>
 </html>
