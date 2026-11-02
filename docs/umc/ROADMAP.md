@@ -6,6 +6,12 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.33 (T-Deck)
+
+- ✅ **Each conversation shows only its own messages.** The message list showed every stored message whichever channel or person was selected, so Public and #yorkshire looked the same
+- ✅ **Roomier messages.** Bubbles use the clearer proportional font with more space between lines, and are wider
+- ✅ **Menu at the top right instead of the bottom bar.** The ☰ button (with the unread count) opens the page list; every page gains the 30 pixels the bar used. The trackball still steps between pages
+
 ## Done in 0.1.32
 
 - ✅ **#sheffield and #wakefield** join #yorkshire, #northwest and #northeast as built-in channels on the client and T-Deck (Yorkshire defaults). A radio that already has its own channels in those slots keeps them

@@ -153,6 +153,7 @@ private:
 
   // conversation being written to: channel index, or a contact key prefix
   bool _to_channel = true;
+  bool _menu_open = false;     // the page menu (top right) is showing
   uint8_t _to_channel_idx = 0;
   uint8_t _to_key[6] = {0};
   char _to_name[32] = "Public";

@@ -32,7 +32,9 @@ enum SetupEdit { SE_NONE = 0, SE_NAME, SE_SSID, SE_PASSWORD, SE_PIN, SE_REGION, 
 #define SCR_W 320
 #define SCR_H 240
 #define HDR_H 20
-#define TAB_H 30
+#define TAB_H 0          // no bottom bar: pages are chosen from the menu at the top right
+#define MENU_W 128
+#define MENU_ROW 24
 #define BODY_Y HDR_H
 #define BODY_H (SCR_H - HDR_H - TAB_H)
 #define COMPOSE_H 26
@@ -936,9 +938,15 @@ void UITask::drawHeader() {
   uint32_t now = rtc_clock.getCurrentTime();
   DateTime dt(now);
   snprintf(buf, sizeof(buf), "%02d:%02d", dt.hour(), dt.minute());
-  text(SCR_W - 36, 6, buf, C_TXT);
+  text(SCR_W - 62, 6, buf, C_TXT);
 
-  int x = SCR_W - 52;
+  // the menu button: three bars, with the unread count on it when there are new messages
+  const int mx = SCR_W - 22;
+  fill(mx - 4, 0, 26, HDR_H, _menu_open ? C_ACC : C_CARD);
+  for (int i = 0; i < 3; i++) fill(mx, 5 + i * 5, 16, 2, _menu_open ? 0xFFFF : C_TXT);
+  if (umc_chatlog.unread() > 0 && !_menu_open) gfx()->fillCircle(mx + 15, 4, 4, C_WARN);
+
+  int x = SCR_W - 78;
   const uint16_t batt = _board->getBattMilliVolts();
   snprintf(buf, sizeof(buf), "%d.%02dV", batt / 1000, (batt % 1000) / 10);
   text(x - 38, 6, buf, batt && batt < 3500 ? C_BAD : C_DIM);
@@ -950,26 +958,21 @@ void UITask::drawHeader() {
 }
 
 void UITask::drawTabs() {
-  static const char* names[TAB_COUNT] = {"Home", "Msgs", "Who", "Map", "GPS", "Radio", "Set", "Info"};
-  const int w = SCR_W / TAB_COUNT;
+  if (!_menu_open) return;
+  static const char* names[TAB_COUNT] = {"Home", "Messages", "Who", "Map", "GPS", "Radio", "Setup", "Info"};
+  const int x = SCR_W - MENU_W, y = HDR_H;
+  fill(x - 1, y, MENU_W + 1, TAB_COUNT * MENU_ROW + 2, C_LINE);
   for (int i = 0; i < TAB_COUNT; i++) {
     const bool on = (int)_tab == i;
-    fill(i * w, SCR_H - TAB_H, w, TAB_H, on ? C_ACC : C_CARD);
-    gfx()->drawFastVLine(i * w, SCR_H - TAB_H, TAB_H, C_LINE);
-    const char* label = names[i];
-    const int tw = textWidth(label);
-    const int lx = tw < w - 2 ? i * w + (w - tw) / 2 : i * w + 1;
-    textClip(lx, SCR_H - TAB_H + 11, w - 2, label, on ? 0xFFFF : C_TXT);
-    // the unread count rides in the corner, so the label keeps its room
+    const int ry = y + 1 + i * MENU_ROW;
+    fill(x, ry, MENU_W, MENU_ROW - 1, on ? C_ACC : C_CARD);
+    textF(x + 12, ry + 6, names[i], on ? 0xFFFF : C_TXT, F_SMALL);
     if (i == TAB_MSGS && umc_chatlog.unread() > 0) {
-      gfx()->fillCircle(i * w + w - 8, SCR_H - TAB_H + 8, 6, C_WARN);
-      char n[4];
-      snprintf(n, sizeof(n), "%d", umc_chatlog.unread() > 9 ? 9 : umc_chatlog.unread());
-      gfx()->setFont(NULL);
-      gfx()->setTextSize(1);
-      gfx()->setTextColor(0);
-      gfx()->setCursor(i * w + w - 10, SCR_H - TAB_H + 5);
-      gfx()->print(n);           // the one place the tiny built-in font still earns its keep
+      char n[6];
+      snprintf(n, sizeof(n), "%d", umc_chatlog.unread() > 99 ? 99 : umc_chatlog.unread());
+      const int w = textFWidth(n, F_SMALL) + 10;
+      gfx()->fillRoundRect(x + MENU_W - w - 8, ry + 4, w, MENU_ROW - 9, 7, C_WARN);
+      textF(x + MENU_W - w - 3, ry + 6, n, 0, F_SMALL);
     }
   }
 }
@@ -996,22 +999,22 @@ void UITask::applyTheme() {
 int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool mine, bool selected, uint32_t when,
                        bool show_who, const UmcChatLog::Entry* entry) {
   const int avatar = mine ? 0 : 14;                  // the column the incoming avatar sits in
-  const int max_w = SCR_W - 44 - avatar;
-  const int pad = 4;
-  const int line_h = 9;                            // 6x8 bitmap glyph plus one clear row
+  const int max_w = SCR_W - 28 - avatar;
+  const int pad = 6;
+  const int line_h = F_SMALL->yAdvance + 1;         // the proportional font, with breathing room
   const int inner = max_w - pad * 2;
 
   // wrap on spaces
-  char lines[6][64];
+  char lines[8][72];
   int line_count = 0;
   const char* p = body;
-  while (*p && line_count < 6) {
+  while (*p && line_count < 8) {
     int take = strlen(p);
     if (take > (int)sizeof(lines[0]) - 1) take = sizeof(lines[0]) - 1;
     char probe[sizeof(lines[0])];
     memcpy(probe, p, take);
     probe[take] = 0;
-    while (take > 1 && monoWidth(probe) > inner) probe[--take] = 0;    // trim to the width
+    while (take > 1 && textFWidth(probe, F_SMALL) > inner) probe[--take] = 0;    // trim to the width
     if (p[take] != 0) {
       int brk = take;
       while (brk > 6 && p[brk] != ' ') brk--;                          // back to a space
@@ -1027,11 +1030,11 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
 
   int widest = 0;
   for (int i = 0; i < line_count; i++) {
-    const int w = monoWidth(lines[i]);
+    const int w = textFWidth(lines[i], F_SMALL);
     if (w > widest) widest = w;
   }
   const int bw = widest + pad * 2;
-  const int bh = line_count * line_h + 5;
+  const int bh = line_count * line_h + 8;
   const int bx = mine ? SCR_W - bw - 6 : 6 + avatar;
   const int by = y_bottom - bh;
 
@@ -1043,7 +1046,7 @@ int UITask::drawBubble(int y_bottom, const char* who, const char* body, bool min
   if (selected) gfx()->drawRoundRect(bx - 2, by - 2, bw + 4, bh + 4, 8, TH.accent == fill_c ? 0xFFFF : TH.accent);
 
   const uint16_t tc = mine ? TH.mine_text : TH.theirs_text;
-  for (int i = 0; i < line_count; i++) monoClip(bx + pad, by + 3 + i * line_h, inner, lines[i], tc);
+  for (int i = 0; i < line_count; i++) textFClip(bx + pad, by + 4 + i * line_h, inner, lines[i], tc, F_SMALL);
 
   if (!show_who) return by - 2;
 
@@ -1174,9 +1177,19 @@ void UITask::drawMessages() {
 
   // newest at the bottom, working upwards
   int y = content_bottom;
-  const int first = umc_chatlog.count() - 1 - _msg_scroll;
+  // only this conversation: the selected channel, or the one person being written to
+  auto inConv = [&](const UmcChatLog::Entry* x) {
+    if (x == nullptr) return false;
+    return _to_channel ? x->channel == _to_channel_idx : (x->channel == 0xFF && memcmp(x->key, _to_key, sizeof(x->key)) == 0);
+  };
+  auto olderInConv = [&](int i) { for (int k = i - 1; k >= 0; k--) if (inConv(umc_chatlog.get(k))) return k; return -1; };
+  int first = umc_chatlog.count() - 1, conv_total = 0;
+  for (int k = first; k >= 0; k--) if (inConv(umc_chatlog.get(k))) conv_total++;
+  if (_msg_scroll > conv_total - 1) _msg_scroll = conv_total > 0 ? conv_total - 1 : 0;
+  while (first >= 0 && !inConv(umc_chatlog.get(first))) first--;
+  for (int skip = _msg_scroll; skip > 0 && first >= 0; skip--) first = olderInConv(first);
   _msg_rows = 0;
-  for (int i = first; i >= 0 && y > top + 28; i--) {
+  for (int i = first; i >= 0 && y > top + 28; i = olderInConv(i)) {
     const UmcChatLog::Entry* e = umc_chatlog.get(i);
     if (e == nullptr) continue;
     char who[40];
@@ -1184,7 +1197,8 @@ void UITask::drawMessages() {
     else snprintf(who, sizeof(who), "%02x%02x%02x", e->key[0], e->key[1], e->key[2]);
     const int bottom_before = y;
     // a run of messages from the same person shares one heading
-    const UmcChatLog::Entry* prev = i > 0 ? umc_chatlog.get(i - 1) : NULL;
+    const int pi = olderInConv(i);
+    const UmcChatLog::Entry* prev = pi >= 0 ? umc_chatlog.get(pi) : NULL;
     // Same person means the same conversation too: direct messages often have no name, only
     // a key, so the name alone would merge two different people under one heading.
     const bool same_run = prev != NULL && prev->outgoing == e->outgoing && prev->channel == e->channel &&
@@ -1201,8 +1215,8 @@ void UITask::drawMessages() {
       _msg_rows++;
     }
   }
-  if (umc_chatlog.count() == 0) {
-    text(8, top + 40, "No messages yet.", TH.dim);
+  if (conv_total == 0) {
+    text(8, top + 40, _to_channel ? "No messages in this channel yet." : "No messages with them yet.", TH.dim);
     text(8, top + 54, "Type below and press Enter to send.", TH.dim);
   } else if (_msg_sel < 0) {
     textFClip(6, content_bottom, SCR_W - 12, "Tap a message to see delivery details", TH.dim, F_TINY);
@@ -3008,14 +3022,16 @@ void UITask::setupEditDone() {
 // ---------------------------------------------------------------- input
 
 bool UITask::touchInTabs(const TouchEvent& ev) {
-  if (!ev.released || ev.y < SCR_H - TAB_H) return false;
-  const int w = SCR_W / TAB_COUNT;
-  const int t = ev.x / w;
-  if (t >= 0 && t < TAB_COUNT) {
-    _tab = (Tab)t;
+  if (!ev.released) return _menu_open;                    // while the menu is open the page underneath takes no touches
+  if (ev.y < HDR_H && ev.x >= SCR_W - 30) { _menu_open = !_menu_open; _dirty = true; return true; }
+  if (!_menu_open) return false;
+  _menu_open = false;
+  _dirty = true;
+  const int x = SCR_W - MENU_W, y = HDR_H + 1;
+  if (ev.x >= x && ev.y >= y && ev.y < y + TAB_COUNT * MENU_ROW) {
+    _tab = (Tab)((ev.y - y) / MENU_ROW);
     if (_tab == TAB_MSGS) umc_chatlog.markRead();
     if (_tab == TAB_MAP && _follow_self) centreOnSelf();
-    _dirty = true;
   }
   return true;
 }
