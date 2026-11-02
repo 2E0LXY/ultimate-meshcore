@@ -6,6 +6,10 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.32
+
+- ✅ **#sheffield and #wakefield** join #yorkshire, #northwest and #northeast as built-in channels on the client and T-Deck (Yorkshire defaults). A radio that already has its own channels in those slots keeps them
+
 ## Done in dashboard 2.8 (server)
 
 - ✅ **Decoded copies for other apps.** Every channel message, advert and node status the dashboard decodes is also published as plain JSON (`umcnet/v1/<area>/messages`, `adverts`, `nodes/<key>`) for Home Assistant, Node-RED and the like, readable by viewer accounts; the radio traffic between repeaters is unchanged. `umcnet-user sync` applies new permission rules on update

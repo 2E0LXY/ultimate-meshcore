@@ -1238,6 +1238,8 @@ void MyMesh::begin(bool has_display) {
   addChannel("#yorkshire", "6hnpVn7sGxSMF08MudBN1w==");
   addChannel("#northwest", "vXYxsH6KPlnQ07dNh3YeJg==");
   addChannel("#northeast", "OxygrmADGT65+RmE7v713A==");
+  addChannel("#sheffield", "ZvcbtrtmWX/B5W6aQ+qZlA==");   // hashtag channels: the key is SHA-256 of the name
+  addChannel("#wakefield", "FEAY798BU+bbhnDPjE8EGg==");
 #endif
   _store->loadChannels(this);
 
