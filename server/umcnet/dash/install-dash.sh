@@ -26,6 +26,7 @@ mv /opt/umcnet-dash/umcnet-admin.service.new /etc/systemd/system/umcnet-admin.se
 chmod 644 /opt/umcnet-dash/umcnet_admin.py
 chmod 644 /opt/umcnet-dash/umcnet_dash.py /opt/umcnet-dash/umcnet_enrol.py /opt/umcnet-dash/umcnet_msgs.py /opt/umcnet-dash/dash.html /opt/umcnet-dash/public.html
 /opt/umcnet/umcnet-user export          # the dashboard keeps its own copy of the account list (no passwords)
+/opt/umcnet/umcnet-user sync >/dev/null   # this version's permission rules for every account (new topics take effect now)
 
 # The broker accounts are only touched when they are missing or their permissions are out of date: changing an account reloads
 # the broker, which drops every repeater for about 20 seconds, so a re-run that changes nothing must not do it.

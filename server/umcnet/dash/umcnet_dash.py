@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.7"
+VERSION = "2.8"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -113,6 +113,8 @@ def note_network(did, info, snr, rssi, now):
         if info.get("atype"): n["type"] = info["atype"]
         if info.get("lat") is not None: n["lat"], n["lon"] = info["lat"], info["lon"]
         sender = k
+        try: decoded_advert(did, n, info, snr, now)
+        except Exception as e: sys.stderr.write("advert copy: %s\n" % e)
     elif info.get("src"): sender = node_for_hash(info["src"])
     if sender and sender != did:
         l = LINKS.get((did, sender))
@@ -527,6 +529,7 @@ def sampler_loop():
             if int(time.time()) % 300 < 60: nodes_save()
             enrol_housekeeping()
             if int(time.time()) % 3600 < 60: messages_housekeeping()
+            if int(time.time()) % 600 < 60: nodes_housekeeping()
             now = int(time.time()); vals = snapshot_values()
             DB.executemany("INSERT INTO samples VALUES(?,?,?)", [(now, k, float(v)) for k, v in vals.items()])
             if now % 3600 < 60:
@@ -549,7 +552,7 @@ DASH_ID = "DA" * 32                          # the id the dashboard publishes it
 MSG_DEFAULTS = {"tx_enabled": True, "sender": "UMC-DASH", "keep_days": 30,
                 "channels": [{"name": "Public", "psk": MSG.PUBLIC_PSK}, {"name": "#yorkshire"}, {"name": "#northwest"}, {"name": "#northeast"}, {"name": "#derbyshire"}, {"name": "#lincolnshire"}, {"name": "#sheffield"}, {"name": "#wakefield"}],
                 "regions": ["yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire", "sheffield", "wakefield"]}
-DEFAULTS = {"web_users": {}, "messages": MSG_DEFAULTS, "map_hours": 24, "enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
+DEFAULTS = {"publish_decoded": True, "web_users": {}, "messages": MSG_DEFAULTS, "map_hours": 24, "enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
             "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14, "confirm_risky": True, "control_enabled": True,
             "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True},
             "labels": {}}
@@ -586,7 +589,7 @@ def conf_update(patch):
             lo, hi = RANGES[k]
             if not lo <= v <= hi: return "%s must be between %d and %d" % (k, lo, hi)
             new[k] = v
-        elif k in ("confirm_risky", "control_enabled", "join_bridge", "enrol_enabled"): new[k] = bool(v)
+        elif k in ("confirm_risky", "control_enabled", "join_bridge", "enrol_enabled", "publish_decoded"): new[k] = bool(v)
         elif k == "join_iata":
             if not isinstance(v, str) or not re.match(r"^[A-Za-z0-9]{3}$", v): return "join_iata: the three-character area code"
             new[k] = v.upper()
@@ -766,6 +769,45 @@ def users_remove(name):
     CONF["web_users"].pop(name, None); conf_save()
     return {"ok": True}
 
+# ----------------------------------------------------------------------------- decoded copies for other apps
+# Read-only JSON copies of what the dashboard decodes, for Home Assistant, Node-RED and the like. They do not replace the radio
+# traffic: repeaters keep bridging the real packets both ways. Topics, under the network's area:
+#   umcnet/v1/<area>/messages        each channel message (heard or sent from here)
+#   umcnet/v1/<area>/adverts         each node's advert (at most every ten minutes per node, or when it changes)
+#   umcnet/v1/<area>/nodes/<key>     retained: the node's name, kind, position, last heard and online (heard in the last day)
+NODE_KIND = {1: "companion", 2: "repeater", 3: "room", 4: "sensor"}
+ADV_PUB = {}; NODE_ONLINE = {}
+
+def publish_decoded(suffix, obj, retain=False):
+    if not CONF.get("publish_decoded", True): return
+    conn = CTL.get("conn")
+    if not conn or not getattr(conn, "up", False): return
+    try: conn.publish("umcnet/v1/%s/%s" % (CONF["join_iata"], suffix), json.dumps(obj, separators=(",", ":")).encode(), retain)
+    except Exception as e: sys.stderr.write("decoded publish: %s\n" % e)
+
+def decoded_advert(did, n, info, snr, now):
+    k = n["key"]; prev = ADV_PUB.get(k); cur = (n["name"], n["lat"], n["lon"])
+    if prev is not None and now - prev[0] < 600 and prev[1:] == cur: return
+    ADV_PUB[k] = (now,) + cur
+    d = DEV.get(did); kind = NODE_KIND.get(n["type"], "node")
+    try: snr = float(snr) if snr not in (None, "") else None
+    except ValueError: snr = None
+    publish_decoded("adverts", {"key": k, "name": n["name"], "type": kind, "lat": n["lat"], "lon": n["lon"], "time": int(now), "heard_by": (d or {}).get("name") or did[:8], "hops": info.get("hops"), "snr": snr})
+    publish_decoded("nodes/" + k, {"key": k, "name": n["name"], "type": kind, "lat": n["lat"], "lon": n["lon"], "last": int(now), "online": True}, retain=True)
+    NODE_ONLINE[k] = True
+
+def nodes_housekeeping():
+    """A node not heard for a day is published as offline (retained), once."""
+    now = time.time()
+    for k, on in list(NODE_ONLINE.items()):
+        n = NODES.get(k)
+        if on and n and now - n["last"] > 86400:
+            publish_decoded("nodes/" + k, {"key": k, "name": n["name"], "type": NODE_KIND.get(n["type"], "node"), "lat": n["lat"], "lon": n["lon"], "last": int(n["last"]), "online": False}, retain=True)
+            NODE_ONLINE[k] = False
+
+def decoded_message(row_id, ts, chan, region, sender, text, direction, heard):
+    publish_decoded("messages", {"id": row_id, "time": ts, "channel": chan, "region": region, "sender": sender, "text": text, "dir": direction, "heard_by": heard})
+
 # ----------------------------------------------------------------------------- messages (channels and regions)
 MSGSTAT = {}                                # channel hash -> {"n", "last", "regions"}: messages we cannot read (no key for that channel)
 TX_TIMES = collections.deque(maxlen=20)
@@ -802,8 +844,10 @@ def note_message(did, raw, snr, rssi, now):
             return
         ch, ts, flags, text = r
         sender, body = MSG.split_sender(text)
-        try: DB.execute("INSERT OR IGNORE INTO messages(ts,seen,chan,chash,region,sender,text,pkey,dir,hops,snr,rssi,heard) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (ts, int(now), ch.name, "%02X" % ch.hash, region, sender, body, pkey, "rx", entry["h"], entry["s"], entry["r"], json.dumps([entry], separators=(",", ":"))))
-        except Exception as e: sys.stderr.write("messages: %s\n" % e)
+        try: cur = DB.execute("INSERT OR IGNORE INTO messages(ts,seen,chan,chash,region,sender,text,pkey,dir,hops,snr,rssi,heard) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (ts, int(now), ch.name, "%02X" % ch.hash, region, sender, body, pkey, "rx", entry["h"], entry["s"], entry["r"], json.dumps([entry], separators=(",", ":"))))
+        except Exception as e: sys.stderr.write("messages: %s\n" % e); cur = None
+        dn = (DEV.get(did) or {}).get("name") or did[:8]
+    if cur is not None and cur.rowcount: decoded_message(cur.lastrowid, ts, ch.name, region, sender, body, "rx", [{"name": dn, "hops": entry["h"], "snr": entry["s"], "rssi": entry["r"]}])
 
 def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
     where, args = [], []
@@ -856,7 +900,8 @@ def send_message(who, chan, region, text, sender=None):
     body = json.dumps({"origin": "UMC Dashboard", "origin_id": DASH_ID, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now)), "type": "RAW", "data": raw.hex().upper()}, separators=(",", ":")).encode()
     conn.publish("meshcore/%s/%s/raw" % (area, DASH_ID), body)
     pkey = hashlib.sha1(MSG.parse_wire(raw)["payload"]).hexdigest()[:20]
-    with LOCK: DB.execute("INSERT OR IGNORE INTO messages(ts,seen,chan,chash,region,sender,text,pkey,dir,hops,snr,rssi,heard) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (int(now), int(now), ch.name, "%02X" % ch.hash, region, sender, text, pkey, "tx", 0, None, None, "[]"))
+    with LOCK: cur = DB.execute("INSERT OR IGNORE INTO messages(ts,seen,chan,chash,region,sender,text,pkey,dir,hops,snr,rssi,heard) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (int(now), int(now), ch.name, "%02X" % ch.hash, region, sender, text, pkey, "tx", 0, None, None, "[]"))
+    decoded_message(cur.lastrowid, int(now), ch.name, region, sender, text, "tx", [])
     audit(who, "message sent", ch.name + (" / " + region if region else ""), "%s: %s" % (sender, text[:60]))
     return {"ok": True, "repeaters": [d["name"] or d["id"][:8] for d in live]}
 

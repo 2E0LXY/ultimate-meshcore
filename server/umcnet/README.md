@@ -254,3 +254,19 @@ set ntp.server3 ntp2.npl.co.uk
 From firmware 0.1.31 the repeaters re-sync every hour. The dashboard's System tab shows the server clock (source, stratum, offset),
 the Diagnostics tab warns if it is not synchronised, and each repeater's clock difference from the server is shown on its card.
 Signed remote commands are accepted only within a minute of the right time, so a good clock is what keeps remote control working.
+
+### Decoded copies for other apps (dashboard 2.8)
+
+Repeaters keep bridging the real radio packets both ways, and everything is shown and answered on the dashboard's **Messages** tab.
+In addition, the dashboard publishes read-only JSON copies of what it decodes, so Home Assistant, Node-RED and similar can use them
+without decoding MeshCore packets themselves (Settings: *Also publish decoded messages…*, on by default):
+
+| Topic | When | Example |
+|---|---|---|
+| `umcnet/v1/<area>/messages` | each channel message heard, or sent from the dashboard | `{"id":12,"time":1793612345,"channel":"#yorkshire","region":"yorkshire","sender":"Sam","text":"anyone on?","dir":"rx","heard_by":[{"name":"TINGLEY-REPEATER","hops":0,"snr":6.5,"rssi":-92}]}` |
+| `umcnet/v1/<area>/adverts` | each node's advert (at most every ten minutes per node, or when it changes) | `{"key":"52906E2B…","name":"Grange Moor Solar","type":"repeater","lat":53.64,"lon":-1.74,"time":1793612345,"heard_by":"TINGLEY-REPEATER","hops":1,"snr":-6.0}` |
+| `umcnet/v1/<area>/nodes/<key>` | retained; online while heard within a day | `{"key":"52906E2B…","name":"Grange Moor Solar","type":"repeater","lat":53.64,"lon":-1.74,"last":1793612345,"online":true}` |
+
+Messages are only published for channels the dashboard has a key for. Give an app its own read-only account (Accounts tab, role
+**viewer**, or `umcnet-user add homeassistant viewer`): it can read these topics but cannot put anything on the network.
+After updating, `install-dash.sh` runs `umcnet-user sync`, which rewrites every account's permissions for the new topics.

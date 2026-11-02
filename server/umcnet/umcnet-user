@@ -98,17 +98,18 @@ def acl_for(name, info):
     elif role == "controller":
         out += ["topic write umcnet/v1/+/dev/+/cmd", "topic read umcnet/v1/+/dev/+/resp",
                 "topic read umcnet/v1/enrol/hello", "topic write umcnet/v1/enrol/grant/#",
-                "topic write meshcore/+/%s/raw" % ("DA" * 32)]      # messages sent from the dashboard (handed to the repeaters' bridges)      # zero-touch enrolment: hear requests, answer them
+                "topic write meshcore/+/%s/raw" % ("DA" * 32),
+                "topic write umcnet/v1/+/messages", "topic write umcnet/v1/+/adverts", "topic write umcnet/v1/+/nodes/#"]      # messages sent from the dashboard (handed to the repeaters' bridges)      # zero-touch enrolment: hear requests, answer them
     elif role == "enrol":
         # the public doorbell a new repeater knocks with: it may send its signed request and read the answers,
         # which are encrypted so that only the repeater they are for can open them
         out += ["topic write umcnet/v1/enrol/hello", "topic read umcnet/v1/enrol/grant/#"]
     elif role == "monitor":
-        out += ["topic read $SYS/#", "topic read meshcore/#"]
+        out += ["topic read $SYS/#", "topic read meshcore/#", "topic read umcnet/v1/+/messages", "topic read umcnet/v1/+/adverts", "topic read umcnet/v1/+/nodes/#"]
     else:   # client and viewer listen
         out += ["topic read meshcore/+/+/raw",
                 "topic read meshcore/+/+/packets",
-                "topic read meshcore/+/+/status"]
+                "topic read meshcore/+/+/status", "topic read umcnet/v1/+/messages", "topic read umcnet/v1/+/adverts", "topic read umcnet/v1/+/nodes/#"]
     return "\n".join(out)
 
 
@@ -136,10 +137,12 @@ def opt(argv, flag):
 
 
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("add", "remove", "list", "device", "export", "state", "passwd"):
+    if len(argv) < 2 or argv[1] not in ("add", "remove", "list", "device", "export", "state", "passwd", "sync"):
         print(__doc__)
         return 2
     users = load()
+    if argv[1] == "sync":                                  # rewrite the permissions from the account list (after an update of this tool)
+        write_acl(users); reload_broker(); print("permissions rewritten for %d accounts" % len(users)); return 0
     if argv[1] == "export":
         export(load()); print("account list copied for the dashboard"); return
     if argv[1] == "list":

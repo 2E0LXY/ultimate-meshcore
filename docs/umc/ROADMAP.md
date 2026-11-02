@@ -6,6 +6,10 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in dashboard 2.8 (server)
+
+- ✅ **Decoded copies for other apps.** Every channel message, advert and node status the dashboard decodes is also published as plain JSON (`umcnet/v1/<area>/messages`, `adverts`, `nodes/<key>`) for Home Assistant, Node-RED and the like, readable by viewer accounts; the radio traffic between repeaters is unchanged. `umcnet-user sync` applies new permission rules on update
+
 ## Done in 0.1.31
 
 - ✅ **Clocks re-sync every hour** (was every three hours). With `server/umcnet/install-time.sh` the UMC Net server is also a time server, so the repeaters can take their time from the same machine as the broker and the dashboard (`set ntp.server1 <server>`); signed remote commands need the clocks within a minute of each other

@@ -15,7 +15,7 @@ PORT, HTTP = 18853, 19253
 def sh(*a): return subprocess.run(list(a), capture_output=True, text=True)
 
 # ---- the same rules umcnet-user writes for these three roles
-for u, p in (("dash", "dashpw"), ("controller", "ctlpw"), ("enrol", "enrol-open-door-v1"), ("rep1", "pw1"), ("rep2", "pw2")): sh("mosquitto_passwd", "-b", "-c" if u == "dash" else "-b", D + "/passwd", u, p)
+for u, p in (("dash", "dashpw"), ("controller", "ctlpw"), ("enrol", "enrol-open-door-v1"), ("rep1", "pw1"), ("rep2", "pw2"), ("reader", "pwr")): sh("mosquitto_passwd", "-b", "-c" if u == "dash" else "-b", D + "/passwd", u, p)
 open(D + "/acl", "w").write("""user dash
 topic read $SYS/#
 topic read meshcore/#
@@ -26,12 +26,24 @@ topic read umcnet/v1/+/dev/+/resp
 topic read umcnet/v1/enrol/hello
 topic write umcnet/v1/enrol/grant/#
 topic write meshcore/+/DADADADADADADADADADADADADADADADADADADADADADADADADADADADADADADADA/raw
+topic write umcnet/v1/+/messages
+topic write umcnet/v1/+/adverts
+topic write umcnet/v1/+/nodes/#
+
+user reader
+topic read umcnet/v1/+/messages
+topic read umcnet/v1/+/adverts
+topic read umcnet/v1/+/nodes/#
 
 user rep1
-topic readwrite meshcore/#
+topic readwrite meshcore/+/A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1/#
+topic read meshcore/+/+/raw
+topic read meshcore/+/+/status
 
 user rep2
-topic readwrite meshcore/#
+topic readwrite meshcore/+/B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2/#
+topic read meshcore/+/+/raw
+topic read meshcore/+/+/status
 
 user enrol
 topic write umcnet/v1/enrol/hello
@@ -106,6 +118,7 @@ UI = "--ui" in sys.argv
 def iso(t): return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(t))
 try:
     IDA, IDB = "A1" * 32, "B2" * 32; A = Dev("rep1", "pw1", "repA"); B = Dev("rep2", "pw2", "repB")
+    APP = Dev("reader", "pwr", "app"); APP.sub("umcnet/v1/LBA/#"); time.sleep(0.5)
     check("both repeaters connect", A.ack[3:4] == b"\x00" and B.ack[3:4] == b"\x00")
     now = int(time.time())
     for dev_id, name, c in ((IDA, "Hill Top", A), (IDB, "Valley", B)):
@@ -137,7 +150,6 @@ try:
     echo = bytes.fromhex(json.loads(got[0][1])["data"]); echo = echo[:5] + bytes([1, 0x44]) + echo[6:]; B.pub("meshcore/LBA/%s/raw" % IDB, json.dumps({"origin": "Valley", "data": echo.hex().upper(), "SNR": "7"}, separators=(",", ":"))); time.sleep(1.8)
     v = api("/api/messages"); tx = [m for m in v["messages"] if m["dir"] == "tx"]
     check("the sent message is one TX row, later shown as heard by the repeater", len(tx) == 1 and tx[0]["sender"] == "2E0LXY-DASH" and [h["name"] for h in tx[0]["heard"]] == ["Valley"], tx[0]["heard"] if tx else "")
-    check("a repeater cannot publish under the dashboard's id but the control account can (ACL)", True)
     bad = api("/api/messages/send", {"channel": "#yorkshire", "text": "x" * 200}); check("a too-long message is refused", not bad["ok"], bad.get("error"))
     n = api("/api/network?hours=24")["nodes"]; check("the map data marks both repeaters online with their details", sum(1 for x in n if x.get("online")) == 2 and all(x["info"]["stats"].get("noise_floor") == -112 for x in n if x.get("info")), [x["name"] for x in n])
     au = json.loads(urllib.request.urlopen("http://127.0.0.1:%d/api/audit" % HTTP, timeout=10).read()); check("the sent message is in the audit log", any(a["action"] == "message sent" for a in au))
@@ -149,6 +161,19 @@ try:
         cl.pub("meshcore/LBA/%s/raw" % dev_id, json.dumps({"origin": nm, "data": advert(bytes.fromhex(dev_id), nm, la, lo), "SNR": "8"}, separators=(",", ":")))
     A.pub("meshcore/LBA/%s/raw" % IDA, json.dumps({"origin": "Hill Top", "data": advert(os.urandom(32), "Grange Moor Solar", 53.64, -1.74), "SNR": "-6"}, separators=(",", ":")))
     A.pub("meshcore/LBA/%s/raw" % IDA, json.dumps({"origin": "Hill Top", "data": advert(os.urandom(32), "Old Mast", 53.50, -1.30), "SNR": "-3"}, separators=(",", ":"))); time.sleep(2)
+    got = APP.read(4); topics = [x[0] for x in got]; bodies = {}
+    for tp, pl in got: bodies.setdefault(tp, []).append(json.loads(pl))
+    msgs = bodies.get("umcnet/v1/LBA/messages", [])
+    check("an app receives each decoded message once, with channel, region, sender and text", sorted((m["channel"], m["region"], m["sender"], m["text"], m["dir"]) for m in msgs) == sorted([("#yorkshire", "yorkshire", "Sam", "anyone on the Yorkshire repeaters?", "rx"), ("Public", "", "Pat", "good morning", "rx"), ("#yorkshire", "eng-yh", "2E0LXY-DASH", "Net tonight at 8", "tx")]), [(m["sender"], m["text"]) for m in msgs])
+    check("the unreadable channel's message is not published", not any("secret" in m["text"] for m in msgs))
+    adv = bodies.get("umcnet/v1/LBA/adverts", []); check("an app receives each node's advert with name, kind and position", {a["name"] for a in adv} >= {"Hill Top", "Valley", "Grange Moor Solar", "Old Mast"} and all(a["lat"] is not None and a["type"] == "repeater" for a in adv), [(a["name"], a["type"]) for a in adv])
+    nodes = [tp for tp in topics if tp.startswith("umcnet/v1/LBA/nodes/")]; check("each node has a retained status topic marked online", len(set(nodes)) == 4 and all(b["online"] for tp in set(nodes) for b in bodies[tp]))
+    late = Dev("reader", "pwr", "app2"); late.sub("umcnet/v1/LBA/nodes/#"); ret = late.read(2); late.close()
+    check("a newly started app gets every node's status at once (retained)", len(ret) == 4, len(ret))
+    W = Dev("rep2", "pw2", "repB-watch"); W.sub("meshcore/LBA/+/raw"); time.sleep(0.5); W.read(1)
+    APP.pub("meshcore/LBA/%s/raw" % ("CC" * 32), json.dumps({"data": "1500AABB"})); A.pub("meshcore/LBA/%s/raw" % ("DA" * 32), json.dumps({"data": "1500AABB"}))
+    leaked = W.read(2); W.close()
+    check("a read-only app, and a repeater posing as the dashboard, cannot put packets on the network", not leaked, [x[0] for x in leaked])
     net = api("/api/network?hours=24"); check("the map has both repeaters with positions and the other nodes", sum(1 for x in net["nodes"] if x.get("online") and x["lat"] is not None) == 2 and len(net["nodes"]) == 4, [(x["name"], x["online"]) for x in net["nodes"]])
     check("a node last heard long ago is left off the map", len(api("/api/network?hours=1")["nodes"]) >= 2)
     # ---- users: each person their own login, controlling only their own repeater
