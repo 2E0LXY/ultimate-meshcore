@@ -78,6 +78,42 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 .dash2 .tr{color:var(--mu)}.dash2 .conn b{white-space:nowrap}
 .umcpop .leaflet-popup-content-wrapper{background:#0d2219;color:#e9f7ef;border:1px solid #1f4a37;border-radius:12px}.umcpop .leaflet-popup-tip{background:#0d2219}.umcpop .leaflet-popup-content{margin:12px 14px;max-height:430px;overflow:auto}.pop h3{margin:0 0 6px;font-size:15px}.pop h4{margin:10px 0 3px;font-size:12px;color:#9fd8b6}.pp{border-collapse:collapse;width:100%}.pp td{padding:2px 10px 2px 0;font-size:12px;vertical-align:top;border:0;white-space:normal;overflow-wrap:anywhere}.pp td:first-child{white-space:nowrap}
 @keyframes newmsg{from{background:#2fe27a33}to{background:transparent}}tr.newmsg td{animation:newmsg 4s ease-out}
+/* ---- Messages: neon chat (matches the public dashboard) ---- */
+.neonchat .pn{background:linear-gradient(rgba(12,4,28,.62),rgba(12,4,28,.74)),url('https://2e0lxy.uk/images/umc-neon-chat-bg.png') center/cover;border:1px solid #ff4fd855;box-shadow:0 0 24px #ff4fd822,inset 0 0 40px #7a2cff22}
+.neonchat select,.neonchat input{background:#120626cc!important;color:#e9dcff!important;border:1px solid #ff4fd8aa!important;border-radius:10px!important;box-shadow:0 0 8px #ff4fd833}
+.neonchat input:focus,.neonchat select:focus{outline:none;border-color:#00e5ff!important;box-shadow:0 0 12px #00e5ff88}
+.neonchat #msgBar>div:nth-child(2){background:linear-gradient(90deg,#1a0838cc,#081a38cc)!important;border:1px solid #00e5ff88!important;box-shadow:0 0 14px #00e5ff33,inset 0 0 14px #ff4fd822}
+.neonchat #msgSend{background:linear-gradient(90deg,#ff4fd8,#7a2cff);color:#fff;border:0;border-radius:10px;padding:7px 18px;font-weight:700;letter-spacing:.04em;box-shadow:0 0 14px #ff4fd8aa;cursor:pointer}
+.neonchat #msgSend:hover{box-shadow:0 0 22px #ff4fd8}
+.neonchat .tag{background:#ff4fd822;color:#ffb3f0;border:1px solid #ff4fd877}
+.nc-stage{position:relative;border-radius:16px;overflow:hidden;border:1px solid #7a2cff66;background:radial-gradient(ellipse at 50% 120%,#7a2cff44,transparent 60%),rgba(10,3,24,.38)}
+.nc-rain{position:absolute;inset:0;pointer-events:none;opacity:.35;background:repeating-linear-gradient(90deg,transparent 0 46px,#ff4fd855 46px 47px,transparent 47px 93px,#00e5ff44 93px 94px);-webkit-mask-image:linear-gradient(transparent,#000 30%,#000 70%,transparent);mask-image:linear-gradient(transparent,#000 30%,#000 70%,transparent);animation:ncrain 9s linear infinite;background-size:100% 300%}
+@keyframes ncrain{from{background-position:0 0}to{background-position:0 300%}}
+#msgFeed{position:relative;height:62vh;min-height:320px;overflow-y:auto;padding:18px 16px 10px;scroll-behavior:smooth}
+.nc-msg{display:flex;flex-direction:column;max-width:72%;margin:0 0 16px;align-items:flex-start}
+.nc-msg.tx{margin-left:auto;align-items:flex-end}
+.nc-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:0 8px 5px;font-size:12px;color:#c9b8ff}
+.nc-who{color:#ff8ff0;text-shadow:0 0 8px #ff4fd8;font-size:13px}
+.nc-msg.tx .nc-who{color:#7ff6ff;text-shadow:0 0 8px #00e5ff}
+.nc-chip{padding:1px 8px;border-radius:999px;border:1px solid #00e5ff77;color:#9ff4ff;background:#00e5ff14;font-size:11px}
+.nc-chip.reg{border-color:#ff4fd877;color:#ffb3f0;background:#ff4fd814}
+.nc-time{color:#8f7fb8;font-variant-numeric:tabular-nums}
+.nc-bubble{position:relative;padding:12px 16px;border-radius:18px;border:2px solid #ff4fd8;background:linear-gradient(135deg,#2a3cff4d,#00b8ff26 60%,#7a2cff33);box-shadow:0 0 14px #ff4fd8aa,0 0 32px #ff4fd844,inset 0 0 20px #00e5ff44;backdrop-filter:blur(3px)}
+.nc-bubble::after{content:"";position:absolute;bottom:-11px;left:22px;width:18px;height:18px;background:inherit;border-right:2px solid #ff4fd8;border-bottom:2px solid #ff4fd8;transform:skewX(35deg) rotate(45deg) scale(.8);border-bottom-right-radius:4px;background:#1c2a6a}
+.nc-msg.tx .nc-bubble{border-color:#00e5ff;background:linear-gradient(135deg,#7a2cff4d,#ff4fd826 60%,#2a3cff33);box-shadow:0 0 14px #00e5ffaa,0 0 32px #00e5ff44,inset 0 0 20px #ff4fd844}
+.nc-msg.tx .nc-bubble::after{left:auto;right:22px;border-color:#00e5ff;background:#3a1a6a;transform:skewX(-35deg) rotate(45deg) scale(.8)}
+.nc-text{font-family:"JetBrains Mono","Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;font-size:14.5px;line-height:1.5;color:#c8fff4;text-shadow:0 0 6px #00e5ff99;white-space:pre-wrap;word-break:break-word}
+.nc-msg.tx .nc-text{color:#ffe1fb;text-shadow:0 0 6px #ff4fd899}
+.nc-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 8px 0;font-size:11.5px;color:#9a8cc4}
+.nc-heard i{font-style:normal;color:#7fa9c8}
+.nc-reply{background:transparent;border:1px solid #00e5ff99;color:#9ff4ff;border-radius:999px;padding:2px 12px;font-size:11.5px;cursor:pointer;box-shadow:0 0 8px #00e5ff44}
+.nc-reply:hover{background:#00e5ff22;box-shadow:0 0 14px #00e5ff88}
+.nc-msg.fresh .nc-bubble{animation:ncin .6s ease-out,ncglow 2.4s ease-in-out 3}
+@keyframes ncin{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes ncglow{50%{box-shadow:0 0 26px #ff4fd8,0 0 60px #ff4fd877,inset 0 0 26px #00e5ff77}}
+.nc-empty{color:#c9b8ff;text-align:center;padding:60px 20px;text-shadow:0 0 8px #7a2cff}
+@media (prefers-reduced-motion:reduce){.nc-rain,.nc-msg.fresh .nc-bubble{animation:none}}
+@media (max-width:700px){.nc-msg{max-width:92%}#msgFeed{height:58vh}}
 </style></head>
 <body><div class="wrap"><div class="dash2">
 <svg width="0" height="0" style="position:absolute"><defs><filter id="dglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -617,7 +653,7 @@ async function msgLoad() {
 }
 function vMessages(o) {
   S.msgUp = false;
-  return `<div class="panels">${panel("Messages", "everything your repeaters hear in your channels, and what you send", `<div id="msgBar"></div><div id="msgChips" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0"></div><div id="msgFeed"><div class="empty">Loading…</div></div>`, "messages")}</div>`;
+  return `<div class="panels neonchat">${panel("Messages", "everything your repeaters hear in your channels, and what you send", `<div id="msgBar"></div><div id="msgChips" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0"></div><div class="nc-stage"><div class="nc-rain"></div><div id="msgFeed"><div class="nc-empty">Loading…</div></div></div>`, "messages")}</div>`;
 }
 function msgUpdate() {
   const m = S.mg, d = m.data, bar = $("#msgBar"); if (!bar || !d) return; S.msgUp = true;
@@ -634,8 +670,20 @@ function msgUpdate() {
   const unread = Object.entries(d.unreadable || {}).map(([h, v]) => `channel ${h}: ${v.n}`).join(" · ");
   $("#msgChips").innerHTML = `<span class="tr">last 24 hours:</span>` + (Object.keys(bychan).length ? Object.entries(bychan).map(([c, n]) => `<span class="tag" style="cursor:pointer" data-mfset="${esc(c)}">${esc(c)} ${n}</span>`).join("") : `<span class="tr">nothing yet</span>`) + (unread ? `<span class="tr" title="the dashboard has no key for these channels: add them in Settings">· cannot read: ${esc(unread)}</span>` : "");
   const seen = m.lastId || 0; m.lastId = Math.max(seen, ...d.messages.map(x => x.id), 0);
-  const rows = d.messages.map(x => `<tr class="${seen && x.id > seen ? "newmsg" : ""}"><td style="white-space:nowrap">${clock(x.seen).split(", ").pop()}</td><td><span class="tag ${x.dir === "tx" ? "tx" : ""}">${x.dir === "tx" ? "TX" : "RX"}</span></td><td>${esc(x.chan)}</td><td>${x.region ? (x.region === "?" ? '<span class="tr">other region</span>' : esc(x.region)) : '<span class="tr">none</span>'}</td><td><b>${esc(x.sender || "?")}</b></td><td style="white-space:normal;word-break:break-word">${esc(x.text)}</td><td style="white-space:normal">${x.heard.length ? x.heard.map(h => `${esc(h.name)} <span class="tr">${HOPN(h.hops)}${h.snr != null ? " · " + h.snr + " dB" : ""}</span>`).join("<br>") : '<span class="tr">waiting to be heard</span>'}</td><td>${d.tx_enabled && x.dir === "rx" ? `<button class="tool" data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender}))}">Reply</button>` : ""}</td></tr>`);
-  $("#msgFeed").innerHTML = table(["Time", "", "Channel", "Region", "From", "Message", "Heard by", ""], rows, "No messages match yet. Messages appear as your repeaters hear them in the channels set up in Settings.");
+  const feed = $("#msgFeed"), nearBottom = !feed.dataset.drawn || feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+  const bubbles = d.messages.slice().reverse().map(x => {
+    const tx = x.dir === "tx", fresh = seen && x.id > seen;
+    const region = x.region ? (x.region === "?" ? "other region" : x.region) : "";
+    const heard = x.heard.length ? x.heard.map(h => `${esc(h.name)} <i>${HOPN(h.hops)}${h.snr != null ? " · " + h.snr + " dB" : ""}</i>`).join(" &nbsp;|&nbsp; ") : (tx ? "waiting to be heard" : "");
+    return `<div class="nc-msg ${tx ? "tx" : "rx"}${fresh ? " fresh" : ""}">
+      <div class="nc-meta"><b class="nc-who">${esc(x.sender || "?")}</b><span class="nc-chip">${esc(x.chan)}</span>${region ? `<span class="nc-chip reg">${esc(region)}</span>` : ""}<span class="nc-time">${clock(x.seen).split(", ").pop()}</span></div>
+      <div class="nc-bubble"><span class="nc-text">${esc(x.text)}</span></div>
+      <div class="nc-foot">${heard ? `<span class="nc-heard">${tx ? "" : "heard by "}${heard}</span>` : ""}${d.tx_enabled && !tx ? `<button class="nc-reply" data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender}))}">Reply</button>` : ""}</div>
+    </div>`;
+  });
+  feed.innerHTML = bubbles.length ? bubbles.join("") : `<div class="nc-empty">No messages match yet. Messages appear as your repeaters hear them in the channels set up in Settings.</div>`;
+  if (nearBottom) feed.scrollTop = feed.scrollHeight;            // follow the conversation, unless you have scrolled back to read
+  feed.dataset.drawn = "1";
 }
 document.addEventListener("click", async e => {
   const ed = e.target.closest("[data-uedit]"); if (ed) { const n = ed.dataset.uedit, u = (S.o.web_users || {})[n] || {}; S.uedit = {name: n, role: u.role, devices: u.devices || [], sender: u.sender || ""}; draw(); return; }

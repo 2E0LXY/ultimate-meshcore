@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.8"
+VERSION = "2.9"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
