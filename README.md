@@ -289,7 +289,7 @@ The messenger also works on a phone browser:
 - **Home dashboard**: clock and date, sunrise and sunset from your position, channel-busy, and cards for battery, GPS, nodes, messages, last signal and links. Tap a card to open its tab.
 - **Repeater tools**: tap a repeater in People to log in, read its status, trace its route hop by hop, set or reset the route, and run any of its commands.
 - **Radio tab**: live radio settings, airtime per packet, NOW / FLOOR / PEAK / MARGIN meters and a two-minute RSSI spectrum.
-- **Offline maps from the SD card**, with your position and contacts plotted. `scripts/umc_make_map_tiles.py` builds the tiles.
+- **Offline maps from the SD card**, with your position and contacts plotted. Build the tiles in your browser with the **[map builder](https://2e0lxy.github.io/ultimate-meshcore/maps.html)** (one zip, unzip onto the card and the folders are right first time), or with `scripts/umc_make_map_tiles.py`. See [docs/umc/MAPS.md](docs/umc/MAPS.md).
 - Without tiles, contacts are plotted by range and bearing, with distance rings.
 - **Heard line**: the signal screen names who the last packet came from and which repeater passed it on.
 - **GPS auto-detection** for both receivers used on the T-Deck Plus (u-blox at 38400 baud, L76K at 9600). The Info tab names the one that answered.

@@ -840,8 +840,12 @@ Tap the three bars at the top right to open the page list, then tap a page; tap 
 
 **Offline maps on the SD card**
 
-1. Format a micro-SD card as FAT32 and put it in the T-Deck.
-2. On a computer, build the tiles for the area you want:
+1. Format a micro-SD card as FAT32.
+2. Build the tiles for the area you want. The easy way is the **[map builder](https://2e0lxy.github.io/ultimate-meshcore/maps.html)** in your browser: search for your area, draw a box round it, choose the zoom levels and press **Build**. It gives one zip that you unzip onto the **top level** of the card, so that the card has `maps/<zoom>/<x>/<y>.bin` (step by step, with pictures: [MAPS.md](MAPS.md)).
+
+   ![The map builder](../images/map-builder.png)
+
+   Or on a computer with Python:
 
    ```bash
    pip install pillow

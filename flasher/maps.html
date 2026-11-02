@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ultimate MeshCore Map Builder</title>
+<meta name="description" content="Build offline map tiles for the Ultimate MeshCore T-Deck: pick an area, get a zip, unzip it onto the SD card.">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#1b1f24;--muted:#626b75;--line:#dde1e6;--acc:#0b6bcb;--acc-ink:#fff;--warn:#9a6700;--bad:#cf222e;--ok:#1a7f37;--chip:#eef1f4}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ed;--muted:#98a2ad;--line:#2a313a;--acc:#4c9aff;--acc-ink:#07121f;--warn:#d29922;--bad:#f85149;--ok:#3fb950;--chip:#22282f}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:17px;margin:0 0 10px}.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+label{display:block;font-weight:600;margin:10px 0 6px}
+.btn{font:inherit;background:var(--acc);color:var(--acc-ink);border:0;border-radius:10px;padding:10px 18px;cursor:pointer;font-weight:600}
+.btn.sec{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:400}.btn.small{padding:6px 12px;font-size:14px}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+input,select{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+input[type=checkbox],input[type=radio]{width:auto;margin-right:7px}.check{font-weight:400}.help{display:block;color:var(--muted);font-size:13px;margin-top:4px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.grow{flex:1;min-width:200px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}
+.opt{border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;background:var(--bg);font-weight:600;margin:0}.opt.on{border-color:var(--acc);outline:1px solid var(--acc)}
+.opt small{display:block;color:var(--muted);font-weight:400}
+#map{height:420px;border-radius:10px;border:1px solid var(--line);margin-top:10px}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.pill{background:var(--chip);color:var(--muted);border-radius:99px;padding:3px 10px;font-size:13px}.pill b{color:var(--ink)}
+.warn{border:1px solid var(--warn);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:14px;margin-top:10px}
+.status{margin-top:10px;min-height:22px}.status.ok{color:var(--ok)}.status.bad{color:var(--bad)}
+progress{width:100%;height:14px;margin-top:10px;accent-color:var(--acc)}
+pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:200px;overflow:auto;font-size:12.5px;margin:10px 0 0}
+ol{padding-left:20px;margin:8px 0}li{margin:4px 0}code{background:var(--chip);padding:1px 5px;border-radius:5px;font-size:13px}a{color:var(--acc)}
+.tree{font:13px/1.45 ui-monospace,Consolas,monospace;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>Ultimate MeshCore Map Builder</h1>
+  <p class="sub">Offline maps for the T-Deck: choose an area and zoom levels, get one zip, unzip it onto the SD card. The folders and file format are already exactly what the T-Deck reads. <a href="./">Back to the flasher</a></p>
+
+  <div class="card">
+    <h2>1. Choose the area</h2>
+    <div class="row">
+      <input id="q" class="grow" placeholder="Search for a place, e.g. Wakefield" autocomplete="off">
+      <button class="btn sec" id="btnSearch">Search</button>
+    </div>
+    <div id="map" aria-label="Map for choosing the area"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn sec small" id="btnView">Use the area on screen</button>
+      <button class="btn sec small" id="btnDraw">Draw an area (click two corners)</button>
+      <button class="btn sec small" id="btnClear">Clear</button>
+    </div>
+    <span class="help" id="areaText">No area chosen yet.</span>
+  </div>
+
+  <div class="card">
+    <h2>2. Zoom levels</h2>
+    <div class="grid">
+      <div><label for="zmin">From zoom</label><input id="zmin" type="number" min="1" max="18" value="10"><span class="help">Wide view. <a href="#" id="setMin">Use the map's zoom</a></span></div>
+      <div><label for="zmax">To zoom</label><input id="zmax" type="number" min="1" max="18" value="14"><span class="help">Street detail. <a href="#" id="setMax">Use the map's zoom</a></span></div>
+    </div>
+    <div class="meta">
+      <span class="pill">Tiles <b id="nTiles">0</b></span>
+      <span class="pill">Space on the card <b id="nSize">0 MB</b></span>
+      <span class="pill">Map zoom now <b id="zNow">-</b></span>
+    </div>
+    <span class="help">Each tile takes 128 KB on the card (the T-Deck draws them without decoding). A town at zoom 10 to 14 is usually a few hundred tiles; a county at 10 to 15 a few thousand.</span>
+    <div class="warn" id="bigWarn" hidden></div>
+  </div>
+
+  <div class="card">
+    <h2>3. Where the tiles come from</h2>
+    <div class="opts">
+      <label class="opt on"><input type="radio" name="src" value="url" checked>Download from a tile server<small>Your own server, or a provider whose terms allow downloading tiles for offline use (often with your API key).</small></label>
+      <label class="opt"><input type="radio" name="src" value="files">Convert tiles I already have<small>A folder or zip of tiles named <code>&lt;zoom&gt;/&lt;x&gt;/&lt;y&gt;.png</code> (or .jpg).</small></label>
+    </div>
+    <div id="srcUrl">
+      <label for="url">Tile address</label>
+      <input id="url" placeholder="https://tiles.example.com/{z}/{x}/{y}.png?key=YOUR_KEY" spellcheck="false">
+      <span class="help">Use <code>{z}</code>, <code>{x}</code> and <code>{y}</code> (and <code>{s}</code> for a server letter if the provider uses one). The server must allow web pages to read its tiles (CORS); most commercial tile services do.</span>
+      <label class="check"><input type="checkbox" id="terms">I have checked that this provider's terms allow downloading tiles for offline use, and I will keep their attribution.</label>
+      <span class="help">OpenStreetMap's own tile servers are run by volunteers and their <a href="https://operations.osmfoundation.org/policies/tiles/" target="_blank" rel="noopener">tile usage policy</a> does not allow downloading areas for offline use, so this tool will not use them (or other sources whose terms forbid it). The map above uses them only for viewing.</span>
+    </div>
+    <div id="srcFiles" hidden>
+      <label>Your tiles</label>
+      <div class="row">
+        <label class="btn sec small" style="margin:0">Choose a folder<input type="file" id="pickDir" webkitdirectory multiple hidden></label>
+        <label class="btn sec small" style="margin:0">Choose a zip<input type="file" id="pickZip" accept=".zip" hidden></label>
+        <span class="help" id="filesText" style="margin:0">Nothing chosen.</span>
+      </div>
+      <span class="help">Only tiles inside the area and zoom levels above are used. Choose no area to convert them all.</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>4. Build the zip</h2>
+    <div class="row">
+      <button class="btn" id="btnBuild">Build</button>
+      <button class="btn sec" id="btnCancel" hidden>Cancel</button>
+      <a class="btn" id="dl" hidden download>Download the zip</a>
+    </div>
+    <progress id="prog" value="0" max="1" hidden></progress>
+    <div class="status" id="status"></div>
+    <pre id="log" hidden></pre>
+  </div>
+
+  <div class="card">
+    <h2>5. Put it on the card</h2>
+    <ol>
+      <li>Use a microSD card formatted <b>FAT32</b> (cards up to 32 GB come that way).</li>
+      <li>Unzip the file onto the <b>top level</b> of the card. You should then have a <code>maps</code> folder at the top, like this:
+        <div class="tree">SD card<br>└─ maps<br>&nbsp;&nbsp;&nbsp;├─ 10<br>&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;└─ 507<br>&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ 330.bin<br>&nbsp;&nbsp;&nbsp;└─ 11 …</div>
+        Not <code>maps/maps/…</code> and not <code>umc-maps-…/maps/…</code>: if your unzip tool makes an extra folder, move <code>maps</code> up to the top.</li>
+      <li>Put the card in the T-Deck and restart it (or open <b>Map</b>). <b>Info → Maps</b> shows <i>SD maps, zoom 10-14</i> when it has found them.</li>
+      <li>To add another area later, unzip it onto the same card: the folders merge and nothing is lost.</li>
+    </ol>
+    <span class="help">Map data © OpenStreetMap contributors (ODbL) or as stated by your tile provider. The place search uses OpenStreetMap Nominatim.</span>
+  </div>
+</main>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- what the T-Deck reads
+// /maps/<zoom>/<x>/<y>.bin: a 256x256 tile as raw RGB565, big-endian, 131072 bytes (examples/companion_radio/ui-tdeck/UmcTiles.h).
+const TILE = 256, TILE_BYTES = TILE * TILE * 2, MAX_TILES = 20000, WARN_TILES = 6000, PARALLEL = 4, DELAY_MS = 120;
+// Sources whose terms do not allow downloading for offline use (the same rule as scripts/umc_make_map_tiles.py).
+const REFUSED = [/(^|\.)tile\.openstreetmap\.(org|de|fr)$/i, /(^|\.)openstreetmap\.org$/i, /(^|\.)tile\.opentopomap\.org$/i, /(^|\.)arcgisonline\.com$/i, /(^|\.)google(apis)?\.com$/i];
+
+const $ = id => document.getElementById(id);
+const UMCMAP = {
+  // RGBA pixels (Uint8ClampedArray, 256*256*4) -> RGB565 big-endian bytes, as the Python tool and the T-Deck expect
+  toRgb565(rgba) {
+    const out = new Uint8Array(TILE_BYTES);
+    for (let i = 0, o = 0; i < TILE * TILE; i++, o += 2) {
+      const r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
+      const v = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+      out[o] = v >> 8; out[o + 1] = v & 0xFF;
+    }
+    return out;
+  },
+  lon2x: (lon, z) => Math.floor((lon + 180) / 360 * (1 << z)),
+  lat2y: (lat, z) => { const r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * (1 << z)); },
+  tilesFor(b, z0, z1) {                     // every tile covering bounds b at each zoom
+    const out = [];
+    for (let z = z0; z <= z1; z++) {
+      const n = 1 << z, clamp = v => Math.max(0, Math.min(n - 1, v));
+      const x0 = clamp(UMCMAP.lon2x(b.west, z)), x1 = clamp(UMCMAP.lon2x(b.east, z));
+      const y0 = clamp(UMCMAP.lat2y(Math.min(85.05, b.north), z)), y1 = clamp(UMCMAP.lat2y(Math.max(-85.05, b.south), z));
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) out.push({z, x, y});
+    }
+    return out;
+  },
+  countFor(b, z0, z1) {
+    let n = 0;
+    for (let z = z0; z <= z1; z++) {
+      const m = 1 << z, c = v => Math.max(0, Math.min(m - 1, v));
+      n += (c(UMCMAP.lon2x(b.east, z)) - c(UMCMAP.lon2x(b.west, z)) + 1) * (c(UMCMAP.lat2y(Math.max(-85.05, b.south), z)) - c(UMCMAP.lat2y(Math.min(85.05, b.north), z)) + 1);
+    }
+    return n;
+  },
+  inArea(b, t) {                            // is tile t inside bounds b at its own zoom
+    const n = 1 << t.z, c = v => Math.max(0, Math.min(n - 1, v));
+    return t.x >= c(UMCMAP.lon2x(b.west, t.z)) && t.x <= c(UMCMAP.lon2x(b.east, t.z)) && t.y >= c(UMCMAP.lat2y(Math.min(85.05, b.north), t.z)) && t.y <= c(UMCMAP.lat2y(Math.max(-85.05, b.south), t.z));
+  },
+  refused(url) {
+    try { const h = new URL(url.replace(/\{[a-z]\}/g, "a")).hostname; return REFUSED.some(r => r.test(h)); } catch { return false; }
+  },
+  fill(tpl, t) { return tpl.replace("{z}", t.z).replace("{x}", t.x).replace("{y}", t.y).replace("{s}", "abc"[(t.x + t.y) % 3]); },
+  // decode an image (any size) to 256x256 RGBA
+  async decode(blob) {
+    const bmp = await createImageBitmap(blob);
+    const cv = UMCMAP._cv || (UMCMAP._cv = document.createElement("canvas")); cv.width = TILE; cv.height = TILE;
+    const cx = cv.getContext("2d", {willReadFrequently: true}); cx.clearRect(0, 0, TILE, TILE); cx.drawImage(bmp, 0, 0, TILE, TILE);
+    if (bmp.close) bmp.close();
+    return cx.getImageData(0, 0, TILE, TILE).data;
+  },
+  hash(u8) { let h = 2166136261; for (let i = 0; i < u8.length; i += 7) h = Math.imul(h ^ u8[i], 16777619); return h >>> 0; },
+  uniform(u8) { for (let i = 2; i < u8.length; i += 2) if (u8[i] !== u8[0] || u8[i + 1] !== u8[1]) return false; return true; },
+};
+window.UMCMAP = UMCMAP;
+
+// ---------------------------------------------------------------- page
+const st = {area: null, rect: null, drawing: null, files: null, cancel: false, busy: false};
+const map = L.map("map", {worldCopyJump: true}).setView([53.75, -1.5], 9);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19, attribution: "© OpenStreetMap contributors"}).addTo(map);
+const fmtMB = b => b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : (b / 1e6).toFixed(1) + " MB";
+const zr = () => { let a = +$("zmin").value || 1, b = +$("zmax").value || a; a = Math.max(1, Math.min(18, a)); b = Math.max(1, Math.min(18, b)); return a <= b ? [a, b] : [b, a]; };
+function setArea(b) {
+  st.area = b;
+  if (st.rect) map.removeLayer(st.rect);
+  st.rect = b ? L.rectangle([[b.south, b.west], [b.north, b.east]], {color: "#0b6bcb", weight: 2, fillOpacity: .08}).addTo(map) : null;
+  $("areaText").textContent = b ? `Area: ${b.south.toFixed(4)}, ${b.west.toFixed(4)} to ${b.north.toFixed(4)}, ${b.east.toFixed(4)}` : "No area chosen yet.";
+  update();
+}
+function update() {
+  $("zNow").textContent = map.getZoom();
+  const [a, b] = zr(); const n = st.area ? UMCMAP.countFor(st.area, a, b) : 0;
+  $("nTiles").textContent = n.toLocaleString("en-GB"); $("nSize").textContent = fmtMB(n * TILE_BYTES);
+  const w = $("bigWarn");
+  if (n > MAX_TILES) { w.hidden = false; w.textContent = `That is ${n.toLocaleString("en-GB")} tiles, more than the ${MAX_TILES.toLocaleString("en-GB")} this page will build at once. Choose a smaller area or fewer zoom levels (each zoom level has about four times the tiles of the one before).`; }
+  else if (n > WARN_TILES) { w.hidden = false; w.textContent = `That is ${n.toLocaleString("en-GB")} tiles (${fmtMB(n * TILE_BYTES)} on the card). It will take a while; the zip is built in this browser's memory.`; }
+  else w.hidden = true;
+}
+map.on("zoomend moveend", update);
+$("btnView").onclick = () => { const b = map.getBounds(); setArea({south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast()}); };
+$("btnClear").onclick = () => setArea(null);
+$("btnDraw").onclick = () => { st.drawing = []; $("areaText").textContent = "Click the first corner on the map."; map.getContainer().style.cursor = "crosshair"; };
+map.on("click", e => {
+  if (!st.drawing) return;
+  st.drawing.push(e.latlng);
+  if (st.drawing.length === 1) { $("areaText").textContent = "Now click the opposite corner."; return; }
+  const [p, q] = st.drawing; st.drawing = null; map.getContainer().style.cursor = "";
+  setArea({south: Math.min(p.lat, q.lat), north: Math.max(p.lat, q.lat), west: Math.min(p.lng, q.lng), east: Math.max(p.lng, q.lng)});
+});
+$("setMin").onclick = e => { e.preventDefault(); $("zmin").value = map.getZoom(); update(); };
+$("setMax").onclick = e => { e.preventDefault(); $("zmax").value = map.getZoom(); update(); };
+$("zmin").oninput = $("zmax").oninput = update;
+async function search() {
+  const q = $("q").value.trim(); if (!q) return;
+  try {
+    const r = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q), {headers: {"Accept-Language": "en-GB"}});
+    const j = await r.json();
+    if (!j.length) { $("areaText").textContent = "Nothing found for that search."; return; }
+    const bb = j[0].boundingbox.map(Number); map.fitBounds([[bb[0], bb[2]], [bb[1], bb[3]]]);
+  } catch { $("areaText").textContent = "The search did not answer; move the map by hand."; }
+}
+$("btnSearch").onclick = search; $("q").addEventListener("keydown", e => { if (e.key === "Enter") search(); });
+document.querySelectorAll("input[name=src]").forEach(r => r.onchange = () => {
+  document.querySelectorAll(".opt").forEach(o => o.classList.toggle("on", o.querySelector("input").checked));
+  const files = document.querySelector("input[name=src]:checked").value === "files"; $("srcUrl").hidden = files; $("srcFiles").hidden = !files;
+});
+
+// tiles you already have: a folder (webkitRelativePath) or a zip, anything ending <z>/<x>/<y>.png|jpg|jpeg
+const TILE_PATH = /(?:^|\/)(\d{1,2})\/(\d+)\/(\d+)\.(png|jpe?g)$/i;
+$("pickDir").onchange = e => {
+  const m = new Map();
+  for (const f of e.target.files) { const p = (f.webkitRelativePath || f.name).replace(/\\/g, "/").match(TILE_PATH); if (p) m.set(`${p[1]}/${p[2]}/${p[3]}`, {z: +p[1], x: +p[2], y: +p[3], get: () => f}); }
+  st.files = m; $("filesText").textContent = `${m.size.toLocaleString("en-GB")} tiles found in that folder.`;
+};
+$("pickZip").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return; $("filesText").textContent = "Reading the zip…";
+  try {
+    const z = await JSZip.loadAsync(f), m = new Map();
+    z.forEach((path, entry) => { const p = path.match(TILE_PATH); if (p && !entry.dir) m.set(`${p[1]}/${p[2]}/${p[3]}`, {z: +p[1], x: +p[2], y: +p[3], get: () => entry.async("blob")}); });
+    st.files = m; $("filesText").textContent = `${m.size.toLocaleString("en-GB")} tiles found in ${f.name}.`;
+  } catch (err) { $("filesText").textContent = "That zip could not be read: " + err.message; }
+};
+
+// ---------------------------------------------------------------- build
+const log = msg => { const l = $("log"); l.hidden = false; l.textContent += msg + "\n"; l.scrollTop = l.scrollHeight; };
+const status = (msg, cls = "") => { const s = $("status"); s.textContent = msg; s.className = "status " + cls; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function build() {
+  if (st.busy) return;
+  const [z0, z1] = zr(), fromFiles = document.querySelector("input[name=src]:checked").value === "files";
+  let jobs;
+  if (fromFiles) {
+    if (!st.files || !st.files.size) return status("Choose a folder or zip of tiles first.", "bad");
+    jobs = [...st.files.values()].filter(t => t.z >= z0 && t.z <= z1 && (!st.area || UMCMAP.inArea(st.area, t)));
+  } else {
+    const tpl = $("url").value.trim();
+    if (!st.area) return status("Choose an area first (step 1).", "bad");
+    if (!/\{z\}/.test(tpl) || !/\{x\}/.test(tpl) || !/\{y\}/.test(tpl)) return status("The tile address needs {z}, {x} and {y}.", "bad");
+    if (UMCMAP.refused(tpl)) return status("That tile server's terms do not allow downloading for offline use, so this page will not use it. Use a provider that allows it, your own server, or tiles you already have.", "bad");
+    if (!$("terms").checked) return status("Tick the box to confirm the provider allows offline use.", "bad");
+    jobs = UMCMAP.tilesFor(st.area, z0, z1).map(t => ({...t, get: async () => { const r = await fetch(UMCMAP.fill(tpl, t), {mode: "cors"}); if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); }}));
+  }
+  if (!jobs.length) return status("No tiles to build for that area and those zoom levels.", "bad");
+  if (jobs.length > MAX_TILES) return status(`That is ${jobs.length.toLocaleString("en-GB")} tiles: choose a smaller area or fewer zoom levels.`, "bad");
+
+  st.busy = true; st.cancel = false; $("btnBuild").disabled = true; $("btnCancel").hidden = false; $("dl").hidden = true; $("log").textContent = "";
+  const prog = $("prog"); prog.hidden = false; prog.max = jobs.length; prog.value = 0;
+  const zip = new JSZip(), maps = zip.folder("maps"), seen = new Map();
+  let done = 0, ok = 0, failed = 0, stop = "";
+  log(`${jobs.length} tiles, zoom ${z0}-${z1}, ${fmtMB(jobs.length * TILE_BYTES)} on the card`);
+  const worker = async () => {
+    while (jobs.length && !st.cancel && !stop) {
+      const t = jobs.shift();
+      try {
+        const rgba = await UMCMAP.decode(await t.get()), bin = UMCMAP.toRgb565(rgba);
+        // a server that sends one picture for everything (an error or "access blocked" image) would fill the card with copies
+        if (!UMCMAP.uniform(bin)) { const h = UMCMAP.hash(bin), n = (seen.get(h) || 0) + 1; seen.set(h, n); if (n >= 25 && n > ok * 0.5) stop = "The server sent the same picture for many different tiles (probably an error or access-blocked image), so the build stopped. Check the tile address and your key."; }
+        maps.file(`${t.z}/${t.x}/${t.y}.bin`, bin, {binary: true}); ok++;
+      } catch (e) {
+        failed++; if (failed <= 8) log(`tile ${t.z}/${t.x}/${t.y}: ${e.message || e}`);
+        if (failed === 8 && ok === 0) stop = "The first tiles all failed. If the address is right, the server may not allow web pages to read its tiles (CORS), or it needs a key.";
+      }
+      done++; prog.value = done; if (done % 10 === 0 || !jobs.length) status(`Converted ${ok} of ${prog.max}${failed ? ", " + failed + " failed" : ""}…`);
+      if (!fromFiles) await sleep(DELAY_MS);                                // be kind to the tile server
+    }
+  };
+  await Promise.all(Array.from({length: fromFiles ? 2 : PARALLEL}, worker));
+  if (st.cancel || stop || !ok) {
+    status(stop || (st.cancel ? "Cancelled." : "No tiles could be converted."), "bad"); if (stop) log(stop);
+  } else {
+    status("Packing the zip…");
+    zip.file("UMC-MAPS-README.txt", `Ultimate MeshCore offline map tiles\r\nUnzip onto the top level of the T-Deck's SD card so that the card has /maps/<zoom>/<x>/<y>.bin\r\nZoom ${z0}-${z1}, ${ok} tiles (256x256 RGB565). Built ${new Date().toISOString()}.\r\nMap data (c) OpenStreetMap contributors (ODbL) or as stated by your tile provider.\r\nThis text file can stay on the card or be deleted; the T-Deck ignores it.\r\n`);
+    const blob = await zip.generateAsync({type: "blob", compression: "DEFLATE", compressionOptions: {level: 6}}, m => prog.value = done * m.percent / 100);
+    const a = $("dl"); a.href = URL.createObjectURL(blob); a.download = `umc-maps-z${z0}-${z1}-${new Date().toISOString().slice(0, 10)}.zip`; a.hidden = false;
+    status(`Done: ${ok} tiles${failed ? " (" + failed + " could not be fetched)" : ""}. Zip ${fmtMB(blob.size)}, ${fmtMB(ok * TILE_BYTES)} once unzipped. Download it and unzip onto the card (step 5).`, "ok");
+  }
+  st.busy = false; $("btnBuild").disabled = false; $("btnCancel").hidden = true;
+}
+$("btnBuild").onclick = build;
+$("btnCancel").onclick = () => { st.cancel = true; status("Cancelling…"); };
+update();
+</script>
+</body>
+</html>
