@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.6"
+VERSION = "2.7"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -457,7 +457,7 @@ def system():
         try: mfd = len(os.listdir("/proc/%s/fd" % pid))
         except Exception: pass
     return {"cpu": cpu_pct(), "cores": os.cpu_count(), "load": [float(x) for x in la[:3]] if la else [], "uptime": up, "mem_total": mem.get("MemTotal", 0) * 1024, "mem_avail": mem.get("MemAvailable", 0) * 1024,
-            "swap_total": mem.get("SwapTotal", 0) * 1024, "swap_free": mem.get("SwapFree", 0) * 1024, "disk_total": st.total, "disk_free": st.free, "net": net, "services": svc, "broker_rss": mrss, "broker_fds": mfd,
+            "clock": clock_status(), "swap_total": mem.get("SwapTotal", 0) * 1024, "swap_free": mem.get("SwapFree", 0) * 1024, "disk_total": st.total, "disk_free": st.free, "net": net, "services": svc, "broker_rss": mrss, "broker_fds": mfd,
             "dash_rss": next((int(l.split()[1]) * 1024 for l in read("/proc/self/status").splitlines() if l.startswith("VmRSS")), None), "db_bytes": os.path.getsize(os.path.join(CFG["data"], "dash.sqlite")) if os.path.exists(os.path.join(CFG["data"], "dash.sqlite")) else 0}
 
 _cert = {"t": 0, "v": None}
@@ -1161,12 +1161,34 @@ def pending_list():
     return out
 
 # ----------------------------------------------------------------------------- the overview the page draws
+CLOCK = {"t": 0, "v": None}
+def clock_status():
+    """The server clock as chrony sees it: source, stratum, offset. None when chrony is not installed."""
+    if time.time() - CLOCK["t"] < 30: return CLOCK["v"]
+    CLOCK["t"] = time.time(); v = None
+    try:
+        out = subprocess.run(["chronyc", "-c", "tracking"], capture_output=True, text=True, timeout=5).stdout.strip().split(",")
+        if len(out) >= 14:
+            names = {}
+            try:
+                for l in subprocess.run(["chronyc", "-c", "-n", "sources"], capture_output=True, text=True, timeout=5).stdout.splitlines():
+                    f = l.split(",")
+                    if len(f) > 2: names[f[2]] = f[1]
+            except Exception: pass
+            src = out[1]; v = {"source": src, "stratum": int(out[2]), "offset": float(out[4]), "rms": float(out[6]), "freq_ppm": float(out[7]), "leap": out[13],
+                               "ok": out[13] == "Normal" and int(out[2]) < 16 and abs(float(out[4])) < 0.1, "npl": "npl.co.uk" in src or src in ("139.143.5.30", "139.143.5.31")}
+    except Exception: v = None
+    CLOCK["v"] = v
+    return v
+
 def diagnostics(sysinfo, accs, cert):
     out = []; now = time.time(); C = CONF
     def add(level, title, detail): out.append({"level": level, "title": title, "detail": detail})
     add("ok" if MQTT["state"] == "connected" else "bad", "Dashboard link to the broker", "connected since %s" % time.strftime("%H:%M:%S", time.localtime(MQTT["since"])) if MQTT["state"] == "connected" else "not connected: %s" % MQTT["error"])
     add("ok" if CTL_STATUS.get("state") == "connected" else "warn", "Control link to the broker", "ready" if CTL_STATUS.get("state") == "connected" else "not ready (%s)" % CTL_STATUS.get("error", CTL_STATUS.get("state", "")))
     for u, st in sysinfo["services"].items(): add("ok" if st == "active" else "bad", "Service " + u, st)
+    ck = sysinfo.get("clock")
+    if ck: add("ok" if ck["ok"] else "warn", "Server clock", "%s, stratum %d, %+.1f ms (repeaters take their time from here)" % ("National Physical Laboratory" if ck["npl"] else ck["source"], ck["stratum"], ck["offset"] * 1000) if ck["ok"] else "not synchronised (%s, %+.3f s): the repeaters' time comes from here, so check chrony" % (ck["leap"], ck["offset"]))
     up = sysnum("$SYS/broker/uptime", -1)
     if up >= 0: add("warn" if up < 300 else "ok", "Broker uptime", "%d min%s" % (up // 60, " (it restarted recently)" if up < 300 else ""))
     if cert and "days" in cert: add("bad" if cert["days"] < C["cert_bad_days"] else "warn" if cert["days"] < C["cert_warn_days"] else "ok", "TLS certificate for %s" % cert["host"], "%.0f days left (%s)" % (cert["days"], cert.get("issuer", "")))

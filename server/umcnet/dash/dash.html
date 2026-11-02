@@ -347,7 +347,7 @@ function vBroker(o) {
 
 function vSystem(o) {
   const s = o.system, c = o.cert || {};
-  const rows = [["Uptime", dur(s.uptime)], ["CPU", s.cpu == null ? "—" : s.cpu + "%"], ["Cores", s.cores], ["Load", s.load.join(" · ")], ["Memory", `${bytes(s.mem_total - s.mem_avail)} used of ${bytes(s.mem_total)}`], ["Swap", `${bytes(s.swap_total - s.swap_free)} of ${bytes(s.swap_total)}`], ["Disk", `${bytes(s.disk_total - s.disk_free)} used of ${bytes(s.disk_total)}`],
+  const rows = [["Time", s.clock ? `${s.clock.npl ? "National Physical Laboratory" : esc(s.clock.source)} · stratum ${s.clock.stratum} · ${(s.clock.offset * 1000).toFixed(2)} ms ${s.clock.ok ? "" : "(not synchronised)"}` : "chrony not installed"], ["Uptime", dur(s.uptime)], ["CPU", s.cpu == null ? "—" : s.cpu + "%"], ["Cores", s.cores], ["Load", s.load.join(" · ")], ["Memory", `${bytes(s.mem_total - s.mem_avail)} used of ${bytes(s.mem_total)}`], ["Swap", `${bytes(s.swap_total - s.swap_free)} of ${bytes(s.swap_total)}`], ["Disk", `${bytes(s.disk_total - s.disk_free)} used of ${bytes(s.disk_total)}`],
     ["Broker process", `${bytes(s.broker_rss)} memory · ${s.broker_fds ?? "—"} open files`], ["This dashboard", `${bytes(s.dash_rss)} memory · history database ${bytes(s.db_bytes)}`], ["Dashboard link to broker", `${o.mqtt.state}${o.mqtt.reconnects ? " · " + o.mqtt.reconnects + " reconnects" : ""}`]];
   const svc = Object.entries(s.services).map(([k, v]) => `<tr><td>${dot(v === "active" ? "ok" : "bad")}</td><td><b>${esc(k)}</b></td><td>${esc(v)}</td></tr>`);
   const net = Object.entries(s.net).filter(([k]) => k !== "lo").map(([k, v]) => `<tr><td><b>${esc(k)}</b></td><td>${bytes(v.rx)}</td><td>${bytes(v.tx)}</td></tr>`);

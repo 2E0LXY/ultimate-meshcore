@@ -1027,6 +1027,7 @@ void NetworkService::updateTimeSync() {
   }
 
   if (!_sntp_started) {
+    sntp_set_sync_interval(3600000UL);   // re-sync with the time server every hour (the platform default is three)
     configTzTime("UTC0", _prefs.ntp_server1, _prefs.ntp_server2, _prefs.ntp_server3);
     _sntp_started = true;
     _sntp_started_ms = millis();

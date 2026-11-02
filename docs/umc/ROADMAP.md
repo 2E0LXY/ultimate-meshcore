@@ -6,6 +6,14 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.31
+
+- ✅ **Clocks re-sync every hour** (was every three hours). With `server/umcnet/install-time.sh` the UMC Net server is also a time server, so the repeaters can take their time from the same machine as the broker and the dashboard (`set ntp.server1 <server>`); signed remote commands need the clocks within a minute of each other
+
+## Done in 0.1.31
+
+- ✅ **The clock re-syncs every hour** (the platform default was three hours). With `install-ntp.sh` the UMC Net server keeps its own clock to the National Physical Laboratory and serves it to the repeaters (`set ntp.server1 <server>`); the dashboard (2.7) shows the server clock's source, stratum and offset on the System tab and warns if it is not synchronised
+
 ## Done in 0.1.30
 
 - ✅ **No more waiting for the time behind some access points.** UMC Net connects only once a time server has answered. Behind one of the home access points none answered after a restart, so the repeater sat on `ntp:wait` and stayed off the network. It now asks again after a minute, and after three tries reconnects WiFi (which may join a better access point). Found on the V4: a reconnect fixed it within 15 seconds

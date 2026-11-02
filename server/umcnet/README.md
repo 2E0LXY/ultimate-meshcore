@@ -230,3 +230,27 @@ only, so they cannot be shown. On the map a station that was reflashed or replac
 `server/umcnet/dash/shots_dashboard.py <folder>` takes the dashboard pictures used in the README and manual from a real broker and
 dashboard fed by simulated repeaters with demo names; `web/umc/shots_web.py <folder>` takes the repeater and client page pictures
 from their built-in demo mode, and the web flasher.
+
+### One clock for the whole network (`install-time.sh`)
+
+Signed remote commands are accepted only within a minute of the repeater's clock, so the repeaters should keep the same time as
+the server. `install-time.sh` makes the server a time server (chrony, UDP 123, rate-limited) that keeps itself right from the public
+pool. Point each repeater at it with `set ntp.server1 <server name>` (the dashboard can do it from the Control tab); the public
+servers stay as servers 2 and 3 in case it cannot be reached. From firmware 0.1.31 the repeaters re-sync every hour. The dashboard's
+Diagnostics flag any repeater whose clock is off.
+
+### Time: the server keeps the network's clock (install-ntp.sh, dashboard 2.7)
+
+`server/umcnet/install-ntp.sh` sets up **chrony** on the server, synchronised to the UK's **National Physical Laboratory**
+(`ntp1.npl.co.uk`, `ntp2.npl.co.uk`, traceable to UTC(NPL)), with the UK NTP pool as a fallback only if both are unreachable, and
+answers time requests on UDP 123 (rate-limited). Point each repeater at it, with NPL as its own fallbacks:
+
+```
+set ntp.server1 net.2e0lxy.uk
+set ntp.server2 ntp1.npl.co.uk
+set ntp.server3 ntp2.npl.co.uk
+```
+
+From firmware 0.1.31 the repeaters re-sync every hour. The dashboard's System tab shows the server clock (source, stratum, offset),
+the Diagnostics tab warns if it is not synchronised, and each repeater's clock difference from the server is shown on its card.
+Signed remote commands are accepted only within a minute of the right time, so a good clock is what keeps remote control working.
