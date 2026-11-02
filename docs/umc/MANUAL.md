@@ -819,12 +819,14 @@ Regional meshes ask clients to **scope** flood traffic so it does not cross the 
 
 The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x240 screen, using the keyboard, trackball and touch panel. It is the same client firmware, so Bluetooth, USB, WiFi apps, the web interface and updates all work as on any other board.
 
-**Tabs along the bottom**
+**Pages (the ☰ menu at the top right)**
+
+Tap the three bars at the top right to open the page list, then tap a page; tap anywhere else to close it. A dot on the button means unread messages, and the **Messages** row shows how many. The trackball steps between pages too. Each conversation (a channel, or one person) shows only its own messages.
 
 | Tab | What you get |
 |---|---|
 | **Home** | Clock and date, sunrise and sunset (needs a position fix and a set clock), channel-busy percentage and noise floor, and six cards: battery, GPS, nodes, messages, last signal and links. Tap a card to jump to the matching tab. |
-| **Msgs** | The conversation log. **To:** at the top picks the channel or contact (tap **change** to cycle). Type on the keyboard and press **Enter** (or tap **Send**). Drag the list to scroll back. Tap a message for explicit pending/delivered/failed state and route/return-hop details. Tap a timed-out direct message again to clear its stale path and resend by flood so a successful ACK can teach the radio a fresh route. |
+| **Messages** | The conversation log. **To:** at the top picks the channel or contact (tap **change** to cycle). Type on the keyboard and press **Enter** (or tap **Send**). Drag the list to scroll back. Tap a message for explicit pending/delivered/failed state and route/return-hop details. Tap a timed-out direct message again to clear its stale path and resend by flood so a successful ACK can teach the radio a fresh route. |
 | **People** | Contacts with type, path and how long ago they were heard. Tap one, then **Message**, **Show map**, **Share** (zero-hop) or **Reset path**. |
 | **Repeater page** | Tap a **repeater** in People to open it (other contacts still open as before; **Details** has the rest). **Status**: **Log in** with the admin password (a new repeater uses `password`), then its battery, uptime, noise floor, last RSSI/SNR, queue, errors, packets heard and sent (flood and direct), duplicates and airtime. **Path**: the route messages take (hop ids, with names where the repeater is in your contacts), **Trace** (out along the route and back; every hop's SNR; needs a known route of 1 or 2 byte ids), **Set route** (type ids like `a1,b2,c3`) and **Reset** (flood next time). **Admin**: run any repeater command. Eight quick buttons, **Command** to type one (or just start typing), and **List** with the usual ones: get/set name, radio, tx, repeat, lat/lon, advert intervals, flood.max, path.hash.mode, loop.detect, dutycycle, stats, passwords, clock sync, reboot and start ota. Reboot and start ota ask twice. Replies come back as text in the box above the buttons. |
 | **Map** | Offline map with your position and every contact that shares a location. Drag to pan, **+**/**−** to zoom, **me** to recentre. Without map tiles it plots contacts by range and bearing with distance rings, and the Info tab's **Maps** line says what it found on the card. |
