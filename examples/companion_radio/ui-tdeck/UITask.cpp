@@ -156,6 +156,58 @@ static const uint8_t kIconBits[IC_COUNT - 1][24] = {
 };
 
 // Scaled 1-bit blit, so the same art serves a list row and a headline.
+// ---- colour emoji (UmcEmoji.h, made by scripts/umc_make_emoji.py from Noto Emoji) ----
+// In folded text an emoji is two bytes: EMOJI_MARK, then its table index + 1 (never 0).
+#include "UmcEmoji.h"
+#define EMOJI_MARK 0x1F
+
+static int emojiIndex(uint32_t cp) {
+  int lo = 0, hi = UMC_EMOJI_COUNT - 1;
+  while (lo <= hi) {
+    const int m = (lo + hi) / 2;
+    const uint32_t v = kEmojiCp[m] & 0x7FFFFFFFu;
+    if (v == cp) return m;
+    if (v < cp) lo = m + 1; else hi = m - 1;
+  }
+  return -1;
+}
+
+// Draws emoji idx at px x px (scaled from 16), leaving the background showing through its mask.
+static void drawEmoji(int x, int y, int idx, int px) {
+  if (idx < 0 || idx >= UMC_EMOJI_COUNT || px <= 0) return;
+  const uint16_t* pix = kEmojiPx[idx];
+  const uint8_t* mask = kEmojiMask[idx];
+  for (int r = 0; r < px; r++) {
+    const int sy = r * UMC_EMOJI_PX / px;
+    int c = 0;
+    while (c < px) {                                   // one horizontal run per colour
+      const int k = sy * UMC_EMOJI_PX + c * UMC_EMOJI_PX / px;
+      if (!(mask[k >> 3] & (0x80 >> (k & 7)))) { c++; continue; }
+      const uint16_t col = pix[k];
+      int e = c + 1;
+      while (e < px) {
+        const int k2 = sy * UMC_EMOJI_PX + e * UMC_EMOJI_PX / px;
+        if (!(mask[k2 >> 3] & (0x80 >> (k2 & 7))) || pix[k2] != col) break;
+        e++;
+      }
+      gfx()->drawFastHLine(x + c, y + r, e - c, col);
+      c = e;
+    }
+  }
+}
+
+// The UTF-8 for emoji idx (with U+FE0F when phones need it to show colour); returns the length.
+static int emojiUtf8(int idx, char* out) {
+  const uint32_t cp = kEmojiCp[idx] & 0x7FFFFFFFu;
+  int n = 0;
+  if (cp < 0x800) { out[n++] = 0xC0 | (cp >> 6); out[n++] = 0x80 | (cp & 0x3F); }
+  else if (cp < 0x10000) { out[n++] = 0xE0 | (cp >> 12); out[n++] = 0x80 | ((cp >> 6) & 0x3F); out[n++] = 0x80 | (cp & 0x3F); }
+  else { out[n++] = 0xF0 | (cp >> 18); out[n++] = 0x80 | ((cp >> 12) & 0x3F); out[n++] = 0x80 | ((cp >> 6) & 0x3F); out[n++] = 0x80 | (cp & 0x3F); }
+  if (kEmojiCp[idx] & 0x80000000u) { out[n++] = (char)0xEF; out[n++] = (char)0xB8; out[n++] = (char)0x8F; }
+  out[n] = 0;
+  return n;
+}
+
 static void drawIcon(int x, int y, uint8_t id, uint16_t c, int px) {
   if (id == IC_NONE || id >= IC_COUNT) return;
   const uint8_t* bits = kIconBits[id - 1];
@@ -293,6 +345,8 @@ static void foldUtf8(const char* s, char* out, size_t out_n) {
       // emoji presentation selector, joiner, skin tone, combining accent: nothing to draw
     } else if (cp >= 0x1F1E6 && cp <= 0x1F1FF) {
       if (!(prev >= 0x1F1E6 && prev <= 0x1F1FF)) out[o++] = (char)IC_FLAG;   // one per pair
+    } else if (cp >= 0x2000 && emojiIndex(cp) >= 0) {
+      if (o + 3 < out_n) { out[o++] = (char)EMOJI_MARK; out[o++] = (char)(emojiIndex(cp) + 1); }
     } else {
       const char* a = asciiForCodepoint(cp);
       if (a != NULL) {
@@ -339,6 +393,13 @@ static int richDraw(int x, int y, const char* s, uint16_t c, const GFXfont* font
   }
   for (int i = 0; buf[i] != 0; i++) {
     const uint8_t ch = (uint8_t)buf[i];
+    if (ch == EMOJI_MARK && buf[i + 1] != 0) {               // a colour emoji, a little taller than the letters
+      const int ep = ih + 2;
+      if (pen + ep + 2 > limit) break;
+      if (draw) drawEmoji(pen + 1, base - asc + (asc - ep) / 2, (uint8_t)buf[i + 1] - 1, ep);
+      pen += ep + 2; i++;
+      continue;
+    }
     const bool is_icon = ch < 0x20;
     const int adv = is_icon ? ih + 2 : charAdvance(font, ch);
     if (pen + adv > limit) {                               // out of room: show it was cut
@@ -390,6 +451,12 @@ static int monoDraw(int x, int y, const char* s, uint16_t c, int max_w, bool dra
   }
   for (int i = 0; buf[i] != 0; i++) {
     const uint8_t ch = (uint8_t)buf[i];
+    if (ch == EMOJI_MARK && buf[i + 1] != 0) {
+      if (pen + 10 > limit) break;
+      if (draw) drawEmoji(pen + 1, y - 1, (uint8_t)buf[i + 1] - 1, 9);
+      pen += 11; i++;
+      continue;
+    }
     const bool is_icon = ch < 0x20;
     const int adv = is_icon ? 10 : 6;
     if (pen + adv > limit) {
@@ -1253,6 +1320,7 @@ void UITask::drawMessages() {
   button(SCR_W - 70, top, 68, 16, "Channels", _conversation_picker);
   if (_conversation_picker) drawConversationPicker(top + 17, list_bottom);
   if (_quick_open) drawQuickPanel();
+  if (_emoji_open) drawEmojiPanel();
   drawCompose();
 }
 
@@ -1290,6 +1358,36 @@ void UITask::drawConversationPicker(int top, int bottom) {
 
 // The canned replies, over the conversation. Tapping one loads it into the composer so it
 // can be added to before sending.
+#define EMO_COLS 12
+#define EMO_ROWS 5
+#define EMO_CELL 26
+void UITask::drawEmojiPanel() {
+  const int per = EMO_COLS * EMO_ROWS, pages = (UMC_EMOJI_COUNT + per - 1) / per;
+  if (_emoji_page >= pages) _emoji_page = 0;
+  const int h = EMO_ROWS * EMO_CELL + 22, y0 = SCR_H - TAB_H - COMPOSE_H - h, x0 = (SCR_W - EMO_COLS * EMO_CELL) / 2;
+  fill(0, y0, SCR_W, h, C_CARD);
+  gfx()->drawFastHLine(0, y0, SCR_W, C_LINE);
+  char head[32];
+  snprintf(head, sizeof(head), "Tap to add   %d / %d", _emoji_page + 1, pages);
+  text(6, y0 + 6, head, C_DIM);
+  button(SCR_W - 64, y0 + 2, 28, 16, "<");
+  button(SCR_W - 32, y0 + 2, 28, 16, ">");
+  for (int i = 0; i < per; i++) {
+    const int n = _emoji_page * per + i;
+    if (n >= UMC_EMOJI_COUNT) break;
+    drawEmoji(x0 + (i % EMO_COLS) * EMO_CELL + 5, y0 + 21 + (i / EMO_COLS) * EMO_CELL + 4, kEmojiPick[n], 16);
+  }
+}
+
+// Adds emoji idx to the message being written, if it fits.
+void UITask::addEmoji(int idx) {
+  char u[8];
+  const int n = emojiUtf8(idx, u);
+  if (_compose_len + n >= (int)sizeof(_compose)) return;
+  memcpy(&_compose[_compose_len], u, n + 1);
+  _compose_len += n;
+}
+
 void UITask::drawQuickPanel() {
   const UmcPrefs& p = the_mesh.getUmc().prefs();
   const int row_h = 20;
@@ -1320,11 +1418,13 @@ void UITask::drawCompose() {
   const int y = SCR_H - TAB_H - COMPOSE_H;
   fill(0, y, SCR_W, COMPOSE_H, C_CARD);
   gfx()->drawFastHLine(0, y, SCR_W, C_LINE);
-  const int max_w = SCR_W - 110;
+  const int max_w = SCR_W - 142;
   const char* shown = _compose;
-  while (shown[0] != 0 && textWidth(shown) > max_w) shown++;     // keep the end in view
+  while (shown[0] != 0 && textWidth(shown) > max_w) { do shown++; while ((*shown & 0xC0) == 0x80); }   // keep the end in view, a character at a time
   text(4, y + 9, shown[0] ? shown : "type a message...", shown[0] ? C_TXT : C_DIM);
   if (shown[0]) fill(5 + textWidth(shown), y + 7, 2, 11, C_ACC);
+  button(SCR_W - 136, y + 3, 28, 20, "", _emoji_open);
+  drawEmoji(SCR_W - 136 + 7, y + 5, emojiIndex(0x1F600), 15);
   button(SCR_W - 106, y + 3, 42, 20, "Quick", _quick_open);
   button(SCR_W - 62, y + 3, 58, 20, "Send", _compose_len > 0);
 }
@@ -3102,10 +3202,31 @@ void UITask::handleTouch(const TouchEvent& ev) {
       if (ev.y >= top + 17) return;
     }
     if (hit(ev, SCR_W - 62, SCR_H - TAB_H - COMPOSE_H + 3, 58, 20)) { sendCompose(); return; }
-    if (hit(ev, SCR_W - 106, SCR_H - TAB_H - COMPOSE_H + 3, 42, 20)) {
-      _quick_open = !_quick_open;
+    if (hit(ev, SCR_W - 136, SCR_H - TAB_H - COMPOSE_H + 3, 28, 20)) {
+      _emoji_open = !_emoji_open; _quick_open = false;
       _dirty = true;
       return;
+    }
+    if (hit(ev, SCR_W - 106, SCR_H - TAB_H - COMPOSE_H + 3, 42, 20)) {
+      _quick_open = !_quick_open; _emoji_open = false;
+      _dirty = true;
+      return;
+    }
+    if (_emoji_open) {
+      const int h = EMO_ROWS * EMO_CELL + 22, y0 = SCR_H - TAB_H - COMPOSE_H - h, x0 = (SCR_W - EMO_COLS * EMO_CELL) / 2;
+      if (ev.y >= y0 && ev.y < y0 + h) {
+        if (!ev.released) return;
+        const int per = EMO_COLS * EMO_ROWS, pages = (UMC_EMOJI_COUNT + per - 1) / per;
+        if (ev.y < y0 + 20) {
+          if (ev.x >= SCR_W - 64 && ev.x < SCR_W - 34) _emoji_page = (_emoji_page + pages - 1) % pages;
+          else if (ev.x >= SCR_W - 32) _emoji_page = (_emoji_page + 1) % pages;
+        } else if (ev.x >= x0 && ev.x < x0 + EMO_COLS * EMO_CELL) {
+          const int n = _emoji_page * per + ((ev.y - y0 - 21) / EMO_CELL) * EMO_COLS + (ev.x - x0) / EMO_CELL;
+          if (n >= 0 && n < UMC_EMOJI_COUNT) addEmoji(kEmojiPick[n]);
+        }
+        _dirty = true;
+        return;
+      }
     }
     if (_quick_open && ev.released) {
       const int row_h = 20;
@@ -3422,7 +3543,12 @@ void UITask::handleKey(char c) {
     umc_chatlog.markRead();
   }
   if (c == 8 || c == 127) {                 // backspace
-    if (_compose_len > 0) _compose[--_compose_len] = 0;
+    if (_compose_len > 0) {
+      auto dropOne = [&]() { do _compose_len--; while (_compose_len > 0 && (_compose[_compose_len] & 0xC0) == 0x80); _compose[_compose_len] = 0; };
+      const bool vs16 = _compose_len >= 3 && (uint8_t)_compose[_compose_len - 3] == 0xEF && (uint8_t)_compose[_compose_len - 2] == 0xB8 && (uint8_t)_compose[_compose_len - 1] == 0x8F;
+      dropOne();
+      if (vs16 && _compose_len > 0) dropOne();
+    }
   } else if (c == 13 || c == 10) {          // enter sends
     sendCompose();
   } else if (c >= 32 && c < 127 && _compose_len < (int)sizeof(_compose) - 1) {

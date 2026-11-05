@@ -153,7 +153,11 @@ private:
 
   // conversation being written to: channel index, or a contact key prefix
   bool _to_channel = true;
-  bool _menu_open = false;     // the page menu (top right) is showing
+  bool _menu_open = false;
+  bool _emoji_open = false;     // the emoji picker above the composer
+  int _emoji_page = 0;
+  void drawEmojiPanel();
+  void addEmoji(int idx);     // the page menu (top right) is showing
   uint8_t _to_channel_idx = 0;
   uint8_t _to_key[6] = {0};
   char _to_name[32] = "Public";
