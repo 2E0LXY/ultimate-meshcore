@@ -41,7 +41,9 @@ public:
   const char* mapStatus() { return _tiles.status(); }
 
 private:
+public:
   enum Tab { TAB_HOME = 0, TAB_MSGS, TAB_CONTACTS, TAB_MAP, TAB_GPS, TAB_RADIO, TAB_SETUP, TAB_INFO, TAB_COUNT };
+private:
 
   void draw();
   void drawHeader();

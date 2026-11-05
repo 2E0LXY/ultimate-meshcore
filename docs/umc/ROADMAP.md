@@ -6,6 +6,11 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.36 (T-Deck)
+
+- ✅ **Home is a launcher.** Seven colour tiles (Messages, Who, Map, GPS, Radio, Setup, Info) with drawn symbols; unread messages show as a count on the Messages tile. The six small status cards are gone: what they showed lives on the pages themselves
+- ✅ **A phone-style status bar**: the node's name on the left, then signal bars from the strongest packet heard in the last ten minutes, a location pin (green with a GPS fix, grey otherwise), and the battery with its charge drawn in
+
 ## Done in 0.1.35 (T-Deck)
 
 - ✅ **Emoji in messages, both ways.** 247 common emoji are shown in colour in messages, names and lists (from Noto Emoji, made by `scripts/umc_make_emoji.py`); rarer symbols still fall back to the small one-colour icons. The composer has an emoji button that opens a picker (five pages); tap to add, and Backspace removes a whole emoji. Emoji that phones need a colour selector for are sent with it

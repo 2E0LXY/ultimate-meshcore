@@ -1000,31 +1000,73 @@ void UITask::draw() {
   drawAlert();
 }
 
+static const UmcTraffic::Entry* lastReceived() {
+  for (int i = 0; i < umc_traffic.count(); i++) {
+    const UmcTraffic::Entry* e = umc_traffic.get(i);
+    if (e != NULL && !e->tx) return e;
+  }
+  return NULL;
+}
+
+// Signal bars drawn from the last packet heard, as a phone shows reception: four bars, lit by
+// how strong the best recent link is (SNR first, falling back to RSSI).
+static void drawBars(int x, int y, int lit, uint16_t on, uint16_t off) {
+  for (int i = 0; i < 4; i++) {
+    const int h = 4 + i * 3, bx = x + i * 5;
+    gfx()->fillRect(bx, y + 13 - h, 3, h, i < lit ? on : off);
+  }
+}
+
+// A map pin: green when the GPS has a fix, grey when the position is only typed in or unknown.
+static void drawPin(int x, int y, uint16_t c) {
+  gfx()->fillCircle(x + 5, y + 5, 5, c);
+  gfx()->fillTriangle(x, y + 7, x + 10, y + 7, x + 5, y + 15, c);
+  gfx()->fillCircle(x + 5, y + 5, 2, C_CARD);
+}
+
+// The battery, with the charge drawn inside it.
+static void drawBattery(int x, int y, int pct, uint16_t c) {
+  gfx()->drawRect(x, y, 24, 12, c);
+  gfx()->fillRect(x + 24, y + 3, 2, 6, c);
+  if (pct > 0) gfx()->fillRect(x + 2, y + 2, clampi(20 * pct / 100, 1, 20), 8, c);
+}
+
 void UITask::drawHeader() {
   fill(0, 0, SCR_W, HDR_H, C_CARD);
-  textClip(4, 6, 150, the_mesh.getNodeName(), C_TXT);
+  textFClip(6, 2, 150, the_mesh.getNodeName(), C_TXT, F_SMALL);
 
-  char buf[40];
-  uint32_t now = rtc_clock.getCurrentTime();
-  DateTime dt(now);
-  snprintf(buf, sizeof(buf), "%02d:%02d", dt.hour(), dt.minute());
-  text(SCR_W - 62, 6, buf, C_TXT);
-
-  // the menu button: three bars, with the unread count on it when there are new messages
-  const int mx = SCR_W - 22;
-  fill(mx - 4, 0, 26, HDR_H, _menu_open ? C_ACC : C_CARD);
-  for (int i = 0; i < 3; i++) fill(mx, 5 + i * 5, 16, 2, _menu_open ? 0xFFFF : C_TXT);
-  if (umc_chatlog.unread() > 0 && !_menu_open) gfx()->fillCircle(mx + 15, 4, 4, C_WARN);
-
-  int x = SCR_W - 78;
+  // --- how well we are hearing the mesh: the strongest packet of the last ten minutes ---
+  const UmcTraffic::Entry* last_rx = lastReceived();
+  const uint32_t now_s = rtc_clock.getCurrentTime();
+  int lit = 0;
+  uint16_t sig_col = C_DIM;
+  if (last_rx != NULL && millis() - last_rx->ms < 600000UL) {                 // nothing heard for ten minutes: no bars
+    const float snr = last_rx->snr4 / 4.0f, rssi = last_rx->rssi;
+    lit = snr >= 8 ? 4 : snr >= 2 ? 3 : snr >= -4 ? 2 : 1;
+    if (snr == 0 && rssi != 0) lit = rssi > -90 ? 4 : rssi > -105 ? 3 : rssi > -115 ? 2 : 1;
+    sig_col = lit >= 3 ? C_OK : lit == 2 ? C_WARN : C_BAD;
+  }
+  int x = SCR_W - 30;
   const uint16_t batt = _board->getBattMilliVolts();
-  snprintf(buf, sizeof(buf), "%d.%02dV", batt / 1000, (batt % 1000) / 10);
-  text(x - 38, 6, buf, batt && batt < 3500 ? C_BAD : C_DIM);
+  const int pct = batt ? clampi((int)(((int)batt - 3300) * 100 / 900), 0, 100) : 0;
+  drawBattery(x, 4, pct, batt == 0 ? C_DIM : pct < 15 ? C_BAD : pct < 35 ? C_WARN : C_OK);
+  x -= 20;
+  LocationProvider* loc = sensors.getLocationProvider();
+  drawPin(x, 2, loc != NULL && loc->isValid() ? C_OK : C_DIM);
+  x -= 28;
+  drawBars(x, 3, lit, sig_col, C_LINE);
 
-  // link indicators
-  text(162, 6, the_mesh.getNetwork().isWifiConnected() ? "wifi" : (the_mesh.getNetwork().isApActive() ? "AP" : "----"),
-       the_mesh.getNetwork().isWifiConnected() ? C_OK : C_DIM);
-  text(196, 6, isBluetoothEnabled() ? (hasConnection() ? "BT+" : "BT") : "--", hasConnection() ? C_OK : C_DIM);
+  // the menu button: three bars, with a dot when messages are waiting
+  const int mx = 160;
+  if (_tab != TAB_HOME) {
+    fill(mx - 6, 0, 26, HDR_H, _menu_open ? C_ACC : C_CARD);
+    for (int i = 0; i < 3; i++) fill(mx, 5 + i * 5, 16, 2, _menu_open ? 0xFFFF : C_TXT);
+    if (umc_chatlog.unread() > 0 && !_menu_open) gfx()->fillCircle(mx + 15, 4, 4, C_WARN);
+  }
+  char buf[16];
+  DateTime dt(now_s);
+  snprintf(buf, sizeof(buf), "%02d:%02d", dt.hour(), dt.minute());
+  textFClip(mx + 30, 2, 50, buf, now_s > 1700000000UL ? C_TXT : C_DIM, F_SMALL);
 }
 
 void UITask::drawTabs() {
@@ -1809,14 +1851,6 @@ static void describeLastHeard(const UmcTraffic::Entry* e, char* out, size_t n) {
   snprintf(out, n, "Heard: %s%s", who, via);
 }
 
-static const UmcTraffic::Entry* lastReceived() {
-  for (int i = 0; i < umc_traffic.count(); i++) {
-    const UmcTraffic::Entry* e = umc_traffic.get(i);
-    if (e != NULL && !e->tx) return e;
-  }
-  return NULL;
-}
-
 void UITask::sampleRadio() {
   // The driver already reads the radio many times in each noise-floor burst and keeps the
   // lowest and highest. Taking those costs nothing; reading the radio from here would fight
@@ -1848,131 +1882,111 @@ void UITask::sampleRadio() {
   }
 }
 
+// The home screen: the apps, as tiles. Each one is a rounded square of colour with a white
+// symbol drawn into it, so the screen says what the radio can do at a glance.
+struct HomeApp { const char* name; uint8_t tab; uint16_t col; uint8_t art; };
+static const HomeApp kApps[] = {
+  {"Messages", (uint8_t)UITask::TAB_MSGS, 0x1CBF, 0},   // blue
+  {"Who",      (uint8_t)UITask::TAB_CONTACTS, 0x9018, 1},   // purple
+  {"Map",      (uint8_t)UITask::TAB_MAP, 0x2E6A, 2},   // green
+  {"GPS",      (uint8_t)UITask::TAB_GPS, 0xFB00, 3},   // orange
+  {"Radio",    (uint8_t)UITask::TAB_RADIO, 0xE041, 4},   // red
+  {"Setup",    (uint8_t)UITask::TAB_SETUP, 0xFD00, 5},   // amber
+  {"Info",     (uint8_t)UITask::TAB_INFO, 0x2B5F, 6},   // light blue
+};
+#define HOME_APPS ((int)(sizeof(kApps) / sizeof(kApps[0])))
+#define APP_COLS 4
+#define APP_W 76
+#define APP_H 76
+#define APP_TILE 54
+
+// Rows are centred, so a part-full last row sits under the middle of the one above.
+static void homeApp(int i, int& x, int& y, int& w, int& h) {
+  w = APP_W; h = APP_H;
+  const int row = i / APP_COLS, first = row * APP_COLS;
+  const int in_row = HOME_APPS - first < APP_COLS ? HOME_APPS - first : APP_COLS;
+  x = (SCR_W - in_row * APP_W) / 2 + (i - first) * APP_W;
+  y = BODY_Y + 8 + row * (APP_H + 4);
+}
+
+// The white symbol inside a tile: drawn rather than stored, so it is sharp at this size.
+static void appArt(int x, int y, int s, uint8_t art) {
+  const uint16_t w = 0xFFFF;
+  const uint16_t bg = art == 0 ? 0x1CBF : art == 2 ? 0x2E6A : art == 4 ? 0xE041 : art == 5 ? 0xFD00 : 0x2B5F;
+  const int c = s / 2, u = s / 10;                       // u: one tenth of the tile, every size is in these
+  switch (art) {
+    case 0:                                              // speech bubble with three dots
+      gfx()->fillRoundRect(x + u, y + 2 * u, s - 2 * u, 5 * u, u + 1, w);
+      gfx()->fillTriangle(x + 2 * u, y + 7 * u - 1, x + 5 * u, y + 7 * u - 1, x + 2 * u, y + 9 * u, w);
+      for (int i = -1; i <= 1; i++) gfx()->fillCircle(x + c + i * 2 * u, y + 4 * u + u / 2, u / 2 + 1, bg);
+      break;
+    case 1:                                              // two people: a tall one in front, a shorter one behind
+      gfx()->fillCircle(x + c + 2 * u, y + 4 * u, 3 * u / 2, w);
+      gfx()->fillRoundRect(x + c, y + 5 * u + u / 2, 4 * u, 3 * u, u, w);
+      gfx()->fillCircle(x + c - 2 * u, y + 7 * u / 2, 2 * u, w);
+      gfx()->fillRoundRect(x + 2 * u, y + 11 * u / 2, 5 * u, 7 * u / 2, 3 * u / 2, w);
+      break;
+    case 2:                                              // folded map with a pin on it
+      gfx()->fillTriangle(x + u, y + 8 * u, x + u, y + 3 * u, x + 4 * u, y + 2 * u, w);
+      gfx()->fillTriangle(x + u, y + 8 * u, x + 4 * u, y + 7 * u, x + 4 * u, y + 2 * u, w);
+      gfx()->fillTriangle(x + 9 * u, y + 8 * u, x + 9 * u, y + 2 * u, x + 6 * u, y + 3 * u, w);
+      gfx()->fillTriangle(x + 9 * u, y + 8 * u, x + 6 * u, y + 7 * u, x + 6 * u, y + 3 * u, w);
+      gfx()->fillCircle(x + c, y + 4 * u, 2 * u, w);
+      gfx()->fillTriangle(x + c - 2 * u, y + 5 * u, x + c + 2 * u, y + 5 * u, x + c, y + 8 * u, w);
+      gfx()->fillCircle(x + c, y + 4 * u, u - 1, bg);
+      break;
+    case 3: {                                            // satellite above, target below
+      const int sx = x + 11 * u / 2, sy = y + 2 * u;     // the satellite's body, kept inside the tile
+      gfx()->fillRoundRect(sx, sy, 3 * u / 2, 3 * u / 2, 1, w);
+      gfx()->fillRoundRect(sx + 2 * u, sy + 2 * u, 3 * u / 2, 3 * u / 2, 1, w);
+      gfx()->fillRect(sx + 5 * u / 4, sy + 5 * u / 4, u, u, w);
+      for (int r = 1; r <= 2; r++) gfx()->drawCircle(sx + 3 * u / 4, sy + 3 * u / 4, r * u, w);
+      const int tx = x + 7 * u / 2, ty = y + 13 * u / 2;  // the target below it
+      gfx()->drawCircle(tx, ty, 2 * u, w); gfx()->drawCircle(tx, ty, u, w); gfx()->fillCircle(tx, ty, u / 2 + 1, w);
+      gfx()->drawFastHLine(tx - 3 * u, ty, u, w); gfx()->drawFastHLine(tx + 2 * u, ty, u, w);
+      gfx()->drawFastVLine(tx, ty - 3 * u, u, w); gfx()->drawFastVLine(tx, ty + 2 * u, u, w);
+      break;
+    }
+    case 4:                                              // handheld radio
+      gfx()->fillRoundRect(x + 3 * u, y + 5 * u / 2, 4 * u, 7 * u, u, w);
+      gfx()->fillRect(x + 6 * u, y + u / 2, u, 2 * u, w);
+      gfx()->fillRect(x + 7 * u / 2, y + 7 * u / 2, 3 * u, 2 * u, bg);
+      for (int i = 0; i < 3; i++) gfx()->fillRect(x + 7 * u / 2, y + 6 * u + i * 3 * u / 2, 3 * u, u - 1, bg);
+      break;
+    case 5: {                                            // gear
+      gfx()->fillCircle(x + c, y + c, 3 * u, w);
+      for (int i = 0; i < 8; i++) {
+        const float a = i * 3.14159f / 4;
+        gfx()->fillRect(x + c - u + (int)(cosf(a) * 7 * u / 2), y + c - u + (int)(sinf(a) * 7 * u / 2), 2 * u, 2 * u, w);
+      }
+      gfx()->fillCircle(x + c, y + c, 5 * u / 4, bg);
+      break;
+    }
+    default:                                             // information
+      gfx()->fillCircle(x + c, y + c, 4 * u, w);
+      gfx()->fillCircle(x + c, y + c, 3 * u, bg);
+      gfx()->fillCircle(x + c, y + c - 7 * u / 4, u / 2 + 1, w);
+      gfx()->fillRoundRect(x + c - u / 2 - 1, y + c - u / 2, u + 2, 3 * u, u / 2 + 1, w);
+      break;
+  }
+}
+
 void UITask::drawHome() {
-  const int top = BODY_Y;
-  char buf[64];
-  static const char* wd[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-  static const char* mon[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-
-  // ---- clock and date (local time when a timezone is set, otherwise as the header) ----
-  const uint32_t now = rtc_clock.getCurrentTime();
-  const bool clock_ok = now > 1700000000UL;
-  struct tm lt = {0}, gt = {0};
-  int tz_min = 0;
-  if (clock_ok) {
-    time_t t = (time_t)now;
-    localtime_r(&t, &lt);
-    gmtime_r(&t, &gt);
-    tz_min = (lt.tm_hour * 60 + lt.tm_min) - (gt.tm_hour * 60 + gt.tm_min);
-    if (tz_min > 720) tz_min -= 1440;
-    if (tz_min < -720) tz_min += 1440;
-    snprintf(buf, sizeof(buf), "%02d:%02d", lt.tm_hour, lt.tm_min);
-  } else {
-    snprintf(buf, sizeof(buf), "--:--");
-  }
-  textF(8, top + 4, buf, C_TXT, F_BIG);
-  if (clock_ok) {
-    snprintf(buf, sizeof(buf), "%s %02d %s %04d", wd[weekdayOf(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday)],
-             lt.tm_mday, mon[lt.tm_mon], lt.tm_year + 1900);
-    text(8, top + 44, buf, C_DIM);
-  } else {
-    text(8, top + 44, "clock not set", C_WARN);
-  }
-
-  // ---- sunrise / sunset from the node's position ----
-  double lat, lon;
-  int rise, set;
-  if (clock_ok && selfLocation(lat, lon) &&
-      sunTimes(lat, lon, lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, tz_min, rise, set)) {
-    snprintf(buf, sizeof(buf), "Sunrise %02d:%02d", rise / 60, rise % 60);
-    text(8, top + 58, buf, C_WARN);
-    snprintf(buf, sizeof(buf), "Sunset  %02d:%02d", set / 60, set % 60);
-    text(8, top + 71, buf, C_WARN);
-  } else {
-    text(8, top + 58, selfLocation(lat, lon) ? "No sunrise/sunset today" : "Sunrise/sunset: needs a location", C_DIM);
-  }
-
-  // ---- channel busy ----
-  text(176, top + 6, "CHANNEL BUSY", C_DIM);
-  if (_busy_pct >= 0) {
-    snprintf(buf, sizeof(buf), "%d%%", _busy_pct);
-    meter(176, top + 20, 140, 10, _busy_pct / 100.0f, _busy_pct > 60 ? C_BAD : (_busy_pct > 25 ? C_WARN : C_OK));
-    textF(176, top + 34, buf, C_TXT, F_MED);
-  } else {
-    text(176, top + 20, "measuring...", C_DIM);
-  }
-  const int nf = radio_driver.getNoiseFloor();
-  if (nf) {
-    snprintf(buf, sizeof(buf), "noise %d dBm", nf);
-    text(176, top + 58, buf, C_DIM);
-  }
-
-  // ---- status cards ----
-  const uint16_t batt = _board->getBattMilliVolts();
-  NetworkService& net = the_mesh.getNetwork();
-  const UmcTraffic::Entry* last_rx = lastReceived();
-  const float rssi = last_rx ? last_rx->rssi : 0.0f;
-  const float snr = last_rx ? last_rx->snr4 / 4.0f : 0.0f;
-  double glat, glon;
-  const bool fix = selfLocation(glat, glon);
-
-  struct Card { const char* title; char val[12]; char sub[22]; uint16_t col; uint8_t icon; } cards[6];
-  memset(cards, 0, sizeof(cards));
-  static const uint8_t kCardIcon[6] = {IC_BOLT, IC_PIN, IC_TOWER, IC_FACE, IC_DISH, IC_GLOBE};
-  for (int i = 0; i < 6; i++) cards[i].icon = kCardIcon[i];
-
-  cards[0].title = "BATTERY";
-  if (batt) {
-    snprintf(cards[0].val, sizeof(cards[0].val), "%d.%02dV", batt / 1000, (batt % 1000) / 10);
-    const int pct = clampi((int)(((int)batt - 3300) * 100 / 900), 0, 100);   // rough Li-ion curve
-    snprintf(cards[0].sub, sizeof(cards[0].sub), "~%d%%", pct);
-    cards[0].col = batt < 3500 ? C_BAD : (batt < 3700 ? C_WARN : C_OK);
-  } else {
-    snprintf(cards[0].val, sizeof(cards[0].val), "--");
-    cards[0].col = C_DIM;
-  }
-
-  cards[1].title = "GPS";
-  LocationProvider* loc = sensors.getLocationProvider();
-  const bool gps_fix = loc != NULL && loc->isValid();
-  snprintf(cards[1].val, sizeof(cards[1].val), gps_fix ? "FIX" : fix ? "SET" : "NONE");
-  if (fix) snprintf(cards[1].sub, sizeof(cards[1].sub), "%.2f,%.2f", glat, glon);
-  cards[1].col = gps_fix ? C_OK : fix ? C_TXT : C_DIM;
-
-  cards[2].title = "NODES";
-  snprintf(cards[2].val, sizeof(cards[2].val), "%d", contactCount());
-  snprintf(cards[2].sub, sizeof(cards[2].sub), "contacts");
-  cards[2].col = C_TXT;
-
-  cards[3].title = "MESSAGES";
-  snprintf(cards[3].val, sizeof(cards[3].val), "%d", umc_chatlog.unread());
-  snprintf(cards[3].sub, sizeof(cards[3].sub), "of %d kept", umc_chatlog.count());
-  cards[3].col = umc_chatlog.unread() > 0 ? C_WARN : C_TXT;
-
-  cards[4].title = "SIGNAL";
-  if (rssi != 0) {
-    snprintf(cards[4].val, sizeof(cards[4].val), "%d", (int)rssi);
-    snprintf(cards[4].sub, sizeof(cards[4].sub), "SNR %.1f dB", snr);
-    cards[4].col = snr > 5 ? C_OK : (snr > -5 ? C_WARN : C_BAD);
-  } else {
-    snprintf(cards[4].val, sizeof(cards[4].val), "--");
-    cards[4].col = C_DIM;
-  }
-
-  cards[5].title = "LINKS";
-  snprintf(cards[5].val, sizeof(cards[5].val), net.isWifiConnected() ? "WIFI" : (net.isApActive() ? "AP" : "OFF"));
-  snprintf(cards[5].sub, sizeof(cards[5].sub), "BT %s", isBluetoothEnabled() ? (hasConnection() ? "app" : "on") : "off");
-  cards[5].col = net.isWifiConnected() ? C_OK : C_DIM;
-
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < HOME_APPS; i++) {
     int x, y, w, h;
-    homeCard(i, x, y, w, h);
-    fill(x, y, w, h, C_CARD);
-    gfx()->drawRect(x, y, w, h, C_LINE);
-    drawIcon(x + 4, y + 4, cards[i].icon, cards[i].col, 8);
-    textClip(x + 16, y + 3, w - 18, cards[i].title, C_DIM);
-    textFClip(x + 4, y + 15, w - 6, cards[i].val, cards[i].col, F_MED);
-    textClip(x + 4, y + 34, w - 6, cards[i].sub, C_DIM);
+    homeApp(i, x, y, w, h);
+    const int tx = x + (w - APP_TILE) / 2;
+    gfx()->fillRoundRect(tx, y, APP_TILE, APP_TILE, 9, kApps[i].col);
+    appArt(tx, y, APP_TILE, kApps[i].art);
+    if (i == 0 && umc_chatlog.unread() > 0) {                   // unread count on the Messages tile
+      char n[6];
+      snprintf(n, sizeof(n), "%d", umc_chatlog.unread() > 99 ? 99 : umc_chatlog.unread());
+      const int bw = textFWidth(n, F_SMALL) + 10;
+      gfx()->fillRoundRect(tx + APP_TILE - bw + 5, y - 4, bw, 16, 8, C_BAD);
+      textF(tx + APP_TILE - bw + 10, y - 2, n, 0xFFFF, F_SMALL);
+    }
+    const int lw = textFWidth(kApps[i].name, F_SMALL);
+    textF(x + (w - lw) / 2, y + APP_TILE + 4, kApps[i].name, C_TXT, F_SMALL);
   }
 }
 
@@ -3160,12 +3174,11 @@ void UITask::handleTouch(const TouchEvent& ev) {
   if (touchInTabs(ev)) return;
 
   if (_tab == TAB_HOME) {
-    static const Tab target[6] = {TAB_INFO, TAB_MAP, TAB_CONTACTS, TAB_MSGS, TAB_RADIO, TAB_INFO};
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < HOME_APPS; i++) {
       int x, y, w, h;
-      homeCard(i, x, y, w, h);
-      if (hit(ev, x, y, w, h)) {
-        _tab = target[i];
+      homeApp(i, x, y, w, h);
+      if (hit(ev, x, y, w, h + 12)) {
+        _tab = (Tab)kApps[i].tab;
         if (_tab == TAB_MSGS) umc_chatlog.markRead();
         if (_tab == TAB_MAP && _follow_self) centreOnSelf();
         _dirty = true;
