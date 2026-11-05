@@ -235,9 +235,12 @@ class ProvisionLink {
     this.frameWaiters = [];
   }
 
-  async open() {
-    await this.port.open({baudRate: 115200, bufferSize: 4096});
-    try { await this.port.setSignals({dataTerminalReady: false, requestToSend: false}); } catch (_) {}
+  async open(dtr = true) {
+    await this.port.open({baudRate: 115200, bufferSize: 8192});
+    // A board with native USB (Heltec V4, T-Deck) only sends anything once DTR is on; a board with a
+    // USB-serial chip is reset by DTR and RTS together, so RTS stays off.
+    try { await this.port.setSignals({dataTerminalReady: dtr, requestToSend: false}); } catch (_) {}
+    this.dtr = dtr;
     this.reader = this.port.readable.getReader();
     this.writer = this.port.writable.getWriter();
     this.pump();
@@ -308,7 +311,25 @@ class ProvisionLink {
 
   async write(data) { await this.writer.write(data); }
 
+  // Throw away anything already in flight, so a late answer to a timed-out request cannot be read as
+  // the answer to the next one. Without this, one slow reply makes every command after it report the
+  // previous command's result, and settings quietly do not save.
+  async drain(ms = 220) {
+    this.text = ""; this.frames = new Uint8Array();
+    await new Promise(resolve => setTimeout(resolve, ms));
+    this.text = ""; this.frames = new Uint8Array();
+  }
+
+  // Try the other DTR setting once: some boards answer only with it on, some only with it off.
+  async retrySignals() {
+    this.dtr = !this.dtr;
+    try { await this.port.setSignals({dataTerminalReady: this.dtr, requestToSend: false}); } catch (_) {}
+    await this.drain(300);
+    return this.dtr;
+  }
+
   async textRequest(request, ms = 2500) {
+    this.text = "";
     const answer = this.waitFor(this.textWaiters, line => {
       const marker = line.indexOf("@umc ");
       if (marker < 0) return false;
@@ -316,16 +337,18 @@ class ProvisionLink {
       return json.startsWith("{") || json.startsWith("[");
     }, ms, "waiting for repeater USB bridge");
     await this.write(utf8.encode(`@umc ${request}\r`));
-    const line = await answer;
+    let line;
+    try { line = await answer; } catch (error) { await this.drain(); throw error; }
     return line.slice(line.indexOf("@umc ") + 5).trim();
   }
 
   async frameRequest(payload, expectedCode, ms = 3000, message = "waiting for client USB reply") {
     const answer = this.waitFor(this.frameWaiters, frame => frame[0] === expectedCode, ms, message);
+    const fail = async error => { await this.drain(); throw error; };
     const packet = new Uint8Array(payload.length + 3);
     packet[0] = 0x3c; packet[1] = payload.length & 255; packet[2] = payload.length >> 8; packet.set(payload, 3);
     await this.write(packet);
-    return answer;
+    try { return await answer; } catch (error) { return fail(error); }
   }
 
   async clientHandshake(ms = 3000) {
@@ -373,12 +396,13 @@ class ProvisionLink {
     for (let attempt = 1; attempt <= attempts; attempt++) {
       status(`Waiting for ${role} USB bridge… attempt ${attempt}/${attempts}`);
       try {
-        if (role === "client") await this.clientHandshake(2200);
-        const raw = await this.request(role, "info", 2200);
+        if (role === "client") await this.clientHandshake(2500);
+        const raw = await this.request(role, "info", 3000);
         const info = JSON.parse(raw);
         if (info && info.umc) return info;
       } catch (error) { lastError = error; }
-      await new Promise(resolve => setTimeout(resolve, 800));
+      if (attempt === 2 || attempt === 5) { status(`No answer yet: trying the other USB signal setting…`); await this.retrySignals(); }
+      else await this.drain(500);
     }
     throw new Error(`The firmware did not answer over USB. Wait for it to finish booting and try again${lastError ? ` (${lastError.message})` : ""}.`);
   }
@@ -387,9 +411,20 @@ class ProvisionLink {
     return (await this.runCommands(role, command))[0] ?? "";
   }
 
-  async runCommands(role, command) {
-    const raw = await this.request(role, `cli ${command}`, 6000);
-    return normaliseCliReplies(raw);
+  async runCommands(role, command, retry = true) {
+    try {
+      return normaliseCliReplies(await this.request(role, `cli ${command}`, 8000));
+    } catch (error) {
+      if (!retry) throw error;
+      await this.drain(400);                                  // one quiet retry: a single lost reply should not fail the run
+      return normaliseCliReplies(await this.request(role, `cli ${command}`, 8000));
+    }
+  }
+
+  // Reads a setting back, so the page can say what really saved.
+  async readSetting(role, key) {
+    try { return String((await this.runCommands(role, `get ${key}`))[0] ?? "").replace(/^>\s*/, "").trim(); }
+    catch (_) { return null; }
   }
 
   async close() {
