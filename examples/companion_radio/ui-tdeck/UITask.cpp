@@ -2351,26 +2351,46 @@ static void liveWifiLine(char* out, size_t n) {
 }
 
 void UITask::wifiScanStart() {
-  _wifi_scan_state = 1;
   _wifi_found = 0;
   _wifi_scan_started = millis();
+  NetworkService& net = the_mesh.getNetwork();
+  net.holdForScan(true);                             // no background join while scanning
   WiFi.scanDelete();
-  WiFi.scanNetworks(true, false);   // asynchronous: the screen stays alive
+  if (WiFi.getMode() == WIFI_OFF) WiFi.mode(net.isApActive() ? WIFI_AP_STA : WIFI_STA);
+  else if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);
+  const int r = WiFi.scanNetworks(true, true);      // asynchronous, hidden networks too
+  if (r == WIFI_SCAN_FAILED) {
+    // Refused to start: scan now, in one go. It blocks the screen for a few seconds, but it is the
+    // reliable way, and only happens when the asynchronous scan is refused.
+    const int n = WiFi.scanNetworks(false, true);
+    net.holdForScan(false);
+    _wifi_scan_state = 2;
+    if (n < 0) { StrHelper::strncpy(_setup_status, "Scan refused by the WiFi radio", sizeof(_setup_status)); return; }
+    _wifi_found = n > 24 ? 24 : n;
+    if (n == 0) StrHelper::strncpy(_setup_status, "No networks in range (WiFi is 2.4 GHz only)", sizeof(_setup_status));
+    else snprintf(_setup_status, sizeof(_setup_status), "%d network%s found: tap one", n, n == 1 ? "" : "s");
+    return;
+  }
+  _wifi_scan_state = 1;
   StrHelper::strncpy(_setup_status, "Scanning...", sizeof(_setup_status));
 }
 
 void UITask::wifiScanPoll() {
   if (_wifi_scan_state != 1) return;
-  const int n = WiFi.scanComplete();
+  const int n = WiFi.scanComplete();                 // WIFI_SCAN_RUNNING (-1) while going, WIFI_SCAN_FAILED (-2) when it failed
   if (n >= 0) {
+    the_mesh.getNetwork().holdForScan(false);
     _wifi_found = n > 24 ? 24 : n;
     _wifi_scan_state = 2;
-    snprintf(_setup_status, sizeof(_setup_status), "%d network%s found", _wifi_found, _wifi_found == 1 ? "" : "s");
+    if (n == 0) StrHelper::strncpy(_setup_status, "No networks in range (WiFi is 2.4 GHz only)", sizeof(_setup_status));
+    else snprintf(_setup_status, sizeof(_setup_status), "%d network%s found: tap one", n, n == 1 ? "" : "s");
     _dirty = true;
-  } else if (millis() - _wifi_scan_started > 15000) {
+  } else if (n == WIFI_SCAN_FAILED || millis() - _wifi_scan_started > 12000) {
+    the_mesh.getNetwork().holdForScan(false);
+    WiFi.scanDelete();
     _wifi_scan_state = 2;
     _wifi_found = 0;
-    StrHelper::strncpy(_setup_status, "Scan failed", sizeof(_setup_status));
+    StrHelper::strncpy(_setup_status, n == WIFI_SCAN_FAILED ? "Scan failed: try again" : "Scan timed out: try again", sizeof(_setup_status));
     _dirty = true;
   }
 }

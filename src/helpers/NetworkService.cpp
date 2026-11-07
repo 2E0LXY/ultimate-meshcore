@@ -918,6 +918,10 @@ void NetworkService::updateMdns() {
 }
 
 void NetworkService::ensureWifi(bool network_required) {
+  if (_scan_hold) {                             // a WiFi scan is running: a connect attempt would make it fail
+    if (millis() < _scan_hold_until) return;
+    _scan_hold = false;                         // the scan was abandoned (left the page): never hold joins for long
+  }
   if (!network_required) {
     if (_wifi_started && !_ap_active) {
       WiFi.disconnect(true, true);
@@ -1122,3 +1126,11 @@ void NetworkService::updateConnectivityWatchdog() {
   }
 }
 #endif
+
+// While the screen scans for networks the background connect loop stays quiet: an ESP32 cannot
+// scan while it is also trying to join, and the scan reports failure instead of results.
+void NetworkService::holdForScan(bool on) {
+  _scan_hold = on;
+  _scan_hold_until = millis() + 20000UL;
+  if (on && WiFi.status() != WL_CONNECTED) WiFi.disconnect(false, false);   // stop a join in progress
+}

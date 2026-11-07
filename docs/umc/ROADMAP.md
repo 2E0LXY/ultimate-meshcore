@@ -6,6 +6,10 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.38 (T-Deck)
+
+- ✅ **WiFi scan works.** The background join loop kept starting connection attempts, and the ESP32 cannot scan while it is joining, so every scan failed (the screen reported "Scanning" and then "Scan failed"). The join loop now pauses for the duration of a scan (for at most 20 seconds, so it can never be left paused). A scan the radio refuses to start is retried once in the blocking way. The screen now says what happened: networks found, none in range, scan refused, or timed out, instead of a generic message
+
 ## Done in 0.1.37 (T-Deck)
 
 - ✅ **The menu button is gone.** Moving it in 0.1.36 left its touch area behind at the old place, so taps did nothing. Pages are now opened from the launcher, and every page has a **back arrow** (with the page's name) at the top left that returns to it

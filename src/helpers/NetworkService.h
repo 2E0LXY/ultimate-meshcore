@@ -79,6 +79,7 @@ public:
   bool isSetupMode() const { return _setup_mode; }
 
   bool isApActive() const { return _ap_active; }
+  void holdForScan(bool on);                     // pause background joining while a WiFi scan runs
   uint8_t getApClientCount() const;
   const char* getApSsid() const { return _ap_ssid; }
   bool isNetworkReachable() const { return isWifiConnected() || _ap_active; }
@@ -123,6 +124,8 @@ private:
   const char* _default_ap_password;
   bool _setup_mode;
   bool _ap_active;
+  bool _scan_hold = false;
+  unsigned long _scan_hold_until = 0;
   uint8_t _min_powersave = 0;
   char _ap_ssid[33];
   char _hostname_buf[33];
