@@ -819,7 +819,9 @@ Regional meshes ask clients to **scope** flood traffic so it does not cross the 
 
 The `umc_lilygo_tdeck_client` build adds a touch interface on the T-Deck's 320x240 screen, using the keyboard, trackball and touch panel. It is the same client firmware, so Bluetooth, USB, WiFi apps, the web interface and updates all work as on any other board.
 
-**Pages (the ☰ menu at the top right)**
+**Pages (the launcher)**
+
+Home is the launcher: tap a tile to open that page. Every other page has a **back arrow** and the page's name at the top left; tap it to return to the launcher. The trackball still steps between pages. A count on the Messages tile, and a dot beside the back arrow, show unread messages.
 
 Tap the three bars at the top right to open the page list, then tap a page; tap anywhere else to close it. A dot on the button means unread messages, and the **Messages** row shows how many. The trackball steps between pages too. Each conversation (a channel, or one person) shows only its own messages.
 

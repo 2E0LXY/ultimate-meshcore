@@ -6,6 +6,11 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Done in 0.1.37 (T-Deck)
+
+- ✅ **The menu button is gone.** Moving it in 0.1.36 left its touch area behind at the old place, so taps did nothing. Pages are now opened from the launcher, and every page has a **back arrow** (with the page's name) at the top left that returns to it
+- ✅ **The trackball no longer misses.** Its pulses are counted on an interrupt instead of being polled, so none are lost while the screen is being drawn, which is what made it feel intermittent
+
 ## Done in 0.1.36 (T-Deck)
 
 - ✅ **Home is a launcher.** Seven colour tiles (Messages, Who, Map, GPS, Radio, Setup, Info) with drawn symbols; unread messages show as a count on the Messages tile. The six small status cards are gone: what they showed lives on the pages themselves

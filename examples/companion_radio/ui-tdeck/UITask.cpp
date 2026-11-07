@@ -1033,7 +1033,17 @@ static void drawBattery(int x, int y, int pct, uint16_t c) {
 
 void UITask::drawHeader() {
   fill(0, 0, SCR_W, HDR_H, C_CARD);
-  textFClip(6, 2, 150, the_mesh.getNodeName(), C_TXT, F_SMALL);
+  if (_tab == TAB_HOME) {
+    textFClip(6, 2, 150, the_mesh.getNodeName(), C_TXT, F_SMALL);
+  } else {
+    // Back to the launcher: the arrow and the page's name are one big target.
+    static const char* kPageName[TAB_COUNT] = {"Home", "Messages", "Who", "Map", "GPS", "Radio", "Setup", "Info"};
+    const uint16_t c = _back_down ? C_ACC : C_TXT;
+    gfx()->fillTriangle(8, 10, 16, 4, 16, 16, c);
+    gfx()->fillRect(16, 8, 7, 5, c);
+    textFClip(28, 2, 140, kPageName[_tab], c, F_SMALL);
+    if (umc_chatlog.unread() > 0 && _tab != TAB_MSGS) gfx()->fillCircle(176, 10, 4, C_WARN);
+  }
 
   // --- how well we are hearing the mesh: the strongest packet of the last ten minutes ---
   const UmcTraffic::Entry* last_rx = lastReceived();
@@ -1056,38 +1066,13 @@ void UITask::drawHeader() {
   x -= 28;
   drawBars(x, 3, lit, sig_col, C_LINE);
 
-  // the menu button: three bars, with a dot when messages are waiting
-  const int mx = 160;
-  if (_tab != TAB_HOME) {
-    fill(mx - 6, 0, 26, HDR_H, _menu_open ? C_ACC : C_CARD);
-    for (int i = 0; i < 3; i++) fill(mx, 5 + i * 5, 16, 2, _menu_open ? 0xFFFF : C_TXT);
-    if (umc_chatlog.unread() > 0 && !_menu_open) gfx()->fillCircle(mx + 15, 4, 4, C_WARN);
-  }
   char buf[16];
   DateTime dt(now_s);
   snprintf(buf, sizeof(buf), "%02d:%02d", dt.hour(), dt.minute());
-  textFClip(mx + 30, 2, 50, buf, now_s > 1700000000UL ? C_TXT : C_DIM, F_SMALL);
+  textFClip(190, 2, 50, buf, now_s > 1700000000UL ? C_TXT : C_DIM, F_SMALL);
 }
 
-void UITask::drawTabs() {
-  if (!_menu_open) return;
-  static const char* names[TAB_COUNT] = {"Home", "Messages", "Who", "Map", "GPS", "Radio", "Setup", "Info"};
-  const int x = SCR_W - MENU_W, y = HDR_H;
-  fill(x - 1, y, MENU_W + 1, TAB_COUNT * MENU_ROW + 2, C_LINE);
-  for (int i = 0; i < TAB_COUNT; i++) {
-    const bool on = (int)_tab == i;
-    const int ry = y + 1 + i * MENU_ROW;
-    fill(x, ry, MENU_W, MENU_ROW - 1, on ? C_ACC : C_CARD);
-    textF(x + 12, ry + 6, names[i], on ? 0xFFFF : C_TXT, F_SMALL);
-    if (i == TAB_MSGS && umc_chatlog.unread() > 0) {
-      char n[6];
-      snprintf(n, sizeof(n), "%d", umc_chatlog.unread() > 99 ? 99 : umc_chatlog.unread());
-      const int w = textFWidth(n, F_SMALL) + 10;
-      gfx()->fillRoundRect(x + MENU_W - w - 8, ry + 4, w, MENU_ROW - 9, 7, C_WARN);
-      textF(x + MENU_W - w - 3, ry + 6, n, 0, F_SMALL);
-    }
-  }
-}
+void UITask::drawTabs() {}        // the launcher and the back arrow replaced the menu
 
 void UITask::drawAlert() {
   if (!_alert_expiry) return;
@@ -3156,19 +3141,15 @@ void UITask::setupEditDone() {
 // ---------------------------------------------------------------- input
 
 bool UITask::touchInTabs(const TouchEvent& ev) {
-  if (!ev.released) return _menu_open;                    // while the menu is open the page underneath takes no touches
-  if (ev.y < HDR_H && ev.x >= SCR_W - 30) { _menu_open = !_menu_open; _dirty = true; return true; }
-  if (!_menu_open) return false;
+  if (_tab == TAB_HOME || ev.y >= HDR_H || ev.x >= 184) return false;     // only the back arrow lives up here
+  if (!ev.released) { if (!_back_down) { _back_down = true; _dirty = true; } return true; }
+  _back_down = false;
+  _tab = TAB_HOME;
   _menu_open = false;
   _dirty = true;
-  const int x = SCR_W - MENU_W, y = HDR_H + 1;
-  if (ev.x >= x && ev.y >= y && ev.y < y + TAB_COUNT * MENU_ROW) {
-    _tab = (Tab)((ev.y - y) / MENU_ROW);
-    if (_tab == TAB_MSGS) umc_chatlog.markRead();
-    if (_tab == TAB_MAP && _follow_self) centreOnSelf();
-  }
   return true;
 }
+
 
 void UITask::handleTouch(const TouchEvent& ev) {
   if (touchInTabs(ev)) return;

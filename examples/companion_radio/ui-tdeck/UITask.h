@@ -156,6 +156,7 @@ private:
   // conversation being written to: channel index, or a contact key prefix
   bool _to_channel = true;
   bool _menu_open = false;
+  bool _back_down = false;      // the back arrow is being pressed
   bool _emoji_open = false;     // the emoji picker above the composer
   int _emoji_page = 0;
   void drawEmojiPanel();

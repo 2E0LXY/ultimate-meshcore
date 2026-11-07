@@ -39,6 +39,12 @@ struct TouchEvent {
   int dx = 0, dy = 0;     // movement since the last frame (drag)
 };
 
+// The trackball's pulses, counted by an interrupt so none is lost while the screen is being drawn.
+// A plain function at file scope, not a class member: an interrupt handler in IRAM cannot reach
+// class literals from there.
+static volatile uint16_t s_tb_ball[4] = {0, 0, 0, 0};
+static void IRAM_ATTR tdeckBallIsr(void* arg) { s_tb_ball[(intptr_t)arg]++; }
+
 class TDeckInput {
 public:
   void begin(int screen_w, int screen_h, uint8_t touch_map = 0) {
@@ -69,8 +75,14 @@ public:
     pinMode(TDECK_TOUCH_INT, INPUT);
     _addr = probe(0x5D) ? 0x5D : (probe(0x14) ? 0x14 : 0);
     _kbd = probe(TDECK_KEYBOARD_ADDR);
-    for (int pin : {TDECK_TB_UP, TDECK_TB_DOWN, TDECK_TB_LEFT, TDECK_TB_RIGHT}) pinMode(pin, INPUT_PULLUP);
-    _tb_state = trackballBits();
+    static const int kBallPins[4] = {TDECK_TB_UP, TDECK_TB_DOWN, TDECK_TB_LEFT, TDECK_TB_RIGHT};
+    for (int i = 0; i < 4; i++) {
+      pinMode(kBallPins[i], INPUT_PULLUP);
+      // Counted on an interrupt: the ball sends short pulses, and polling missed them whenever the
+      // screen was being drawn, which made it feel intermittent.
+      attachInterruptArg(digitalPinToInterrupt(kBallPins[i]), tdeckBallIsr, (void*)(intptr_t)i, CHANGE);
+    }
+    for (int i = 0; i < 4; i++) s_tb_ball[i] = 0;
   }
 
   bool hasTouch() const { return _addr != 0; }
@@ -108,16 +120,15 @@ public:
   // One step per few pulses, and never faster than kBallStepMs, so a flick of the ball
   // moves a line or two instead of racing to the end.
   char readTrackball() {
-    const uint8_t now = trackballBits();
-    const uint8_t changed = now ^ _tb_state;
-    _tb_state = now;
-    if (changed) {
+    bool any = false;
+    for (int i = 0; i < 4; i++) {
+      const uint16_t n = s_tb_ball[i];                 // take what the interrupt has counted
+      if (n) { s_tb_ball[i] -= n; _tb_pulses[i] += n; any = true; }
+    }
+    if (any) {
       _last_ball_pulse = millis();
     } else if (millis() - _last_ball_pulse > 400) {
       for (int k = 0; k < 4; k++) _tb_pulses[k] = 0;   // the ball stopped: start counting afresh
-    }
-    for (int i = 0; i < 4; i++) {
-      if (changed & (1 << i)) _tb_pulses[i]++;
     }
     if (millis() - _last_ball_step < kBallStepMs) return 0;
     static const char kDirs[4] = {'U', 'D', 'L', 'R'};
@@ -236,7 +247,7 @@ private:
   static const unsigned long kKeyPollMs = 20;
   static const unsigned long kTouchPollMs = 25;
   static const unsigned long kBallStepMs = 130;
-  static const uint8_t kBallPulsesPerStep = 4;
+  static const uint8_t kBallPulsesPerStep = 3;
 
   unsigned long _last_key_poll = 0, _last_touch_poll = 0, _last_ball_step = 0, _last_probe = 0;
   unsigned long _last_kbd_probe = 0, _last_ball_pulse = 0;
@@ -244,7 +255,7 @@ private:
   static const uint8_t kMaxProbes = 6;   // then stop: a bus with nothing on it must not stall the loop
   uint8_t _kbd_tries = 0, _touch_tries = 0;
   bool _bus_ok = false;
-  uint8_t _tb_pulses[4] = {0, 0, 0, 0};
+  uint16_t _tb_pulses[4] = {0, 0, 0, 0};
   uint8_t _addr = 0;
   bool _kbd = false;
   bool _down = false;
@@ -253,3 +264,4 @@ private:
   uint8_t _map = 0;
   uint8_t _tb_state = 0;
 };
+
