@@ -453,6 +453,10 @@ String NetworkService::getStaIp() const {
 
 bool NetworkService::startScan() {
 #if defined(ESP_PLATFORM)
+  // Every scan (the web wizard, the web page, the command line and the T-Deck screen) starts here, so the
+  // background join loop is paused for the scan in one place. Without this a scan started from the web
+  // wizard was abandoned by the join loop and the page reported "Nothing found".
+  holdForScan(true);
   if (WiFi.getMode() == WIFI_OFF) {
     WiFi.mode(WIFI_STA);
     _wifi_started = true;
