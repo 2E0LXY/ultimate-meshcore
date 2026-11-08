@@ -414,6 +414,36 @@ class SettingsCache(unittest.TestCase):
         self.assertEqual("> 0.1.33", dash.SETTINGS["AB" * 32]["values"]["build"]); self.assertEqual(1234.0, dash.SETTINGS["AB" * 32]["updated"]); self.assertFalse(dash.SETTINGS["AB" * 32]["loading"])
 
 
+class Batch2(unittest.TestCase):
+    """Confirmed neighbour links, the mesh issues check and the Prometheus endpoint."""
+    def setUp(self):
+        dash.db_init(); dash.DEV.clear(); dash.NODES.clear(); dash.KEYS.clear(); dash.DB.execute("DELETE FROM links")
+        dash.CONF.clear(); dash.CONF.update(json.loads(json.dumps(dash.DEFAULTS)))
+
+    def test_neighbour_reply_is_parsed_and_confirmed_with_the_repeater_own_snr(self):
+        d = dash.device("AA" * 32, "LBA"); d["last"] = time.time(); d["name"] = "Rep"; dash.KEYS["AA" * 32] = {"k": 1}
+        dash.send_command = lambda dev, cmd, *a, **k: {"ok": True, "reply": "E616B12A:1083:-44 52906E2B:1085:-24"}
+        dash.neighbour_poll_once()
+        rows = {r["b"]: r for r in dash.confirmed_links()}
+        self.assertEqual({"E616B12A", "52906E2B"}, set(rows)); self.assertEqual(-11.0, rows["E616B12A"]["snr"])
+        dash.send_command = lambda dev, cmd, *a, **k: {"ok": True, "reply": "E616B12A:1083:-40"}
+        dash.neighbour_poll_once(); self.assertEqual(1, len([r for r in dash.confirmed_links() if r["b"] == "E616B12A"]))
+
+    def test_mesh_issues_are_listed_in_diagnostics(self):
+        now = time.time(); n = {"key": "CC" * 32, "name": "Quiet", "type": 2, "lat": None, "lon": None, "first": 0, "last": now - 3 * 86400, "adverts": 1}
+        dash.NODES[n["key"]] = n
+        d = dash.device("DD" * 32, "LBA"); d["last"] = now; d["name"] = "Tired"; d["stats"] = {"battery_mv": 3300}; d["bridge"] = {"heard": 100, "dropped": 30, "passed": 70}
+        sysinfo = {"services": {}, "clock": None, "disk_total": 100, "disk_free": 50, "swap_total": 0, "swap_free": 0, "mem_total": 1, "mem_avail": 1, "load": [0, 0, 0], "cores": 1, "uptime": 1, "temp": None, "cert_days": None}
+        titles = [x["title"] for x in dash.diagnostics(sysinfo, [], None)]
+        self.assertIn("Stale: Quiet", titles); self.assertIn("No position: Quiet", titles); self.assertIn("Low battery: Tired", titles); self.assertIn("Bridge holding back packets: Tired", titles)
+
+    def test_prometheus_text_has_the_numbers_and_the_names(self):
+        d = dash.device("EE" * 32, "LBA"); d["last"] = time.time(); d["name"] = "TINGLEY"; d["pm"] = 2.5
+        text = dash.prometheus_text()
+        self.assertIn("umcnet_repeaters_online 1", text); self.assertIn('umcnet_packets_per_minute{repeater="TINGLEY"}', text)
+        self.assertIn("# TYPE umcnet_broker_up gauge", text)
+
+
 class AdminHelper(unittest.TestCase):
     def test_password_hash_round_trip(self):
         h = adm.pbkdf2("Correct-horse-9"); self.assertTrue(adm.check_password("Correct-horse-9", h)); self.assertFalse(adm.check_password("Correct-horse-8", h)); self.assertFalse(adm.check_password("x", "garbage"))

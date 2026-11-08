@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.10"
+VERSION = "2.11"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -179,7 +179,7 @@ def network_view(hours=24):
         keep = {n["key"] for n in nodes}
         links = [{"recv": a, "node": b, "hops": l["hops_min"], "hops_last": l["hops_last"], "n": l["n"], "snr": l["snr"], "rssi": l["rssi"], "first": l["first"], "last": l["last"], "types": dict(l["types"])} for (a, b), l in LINKS.items() if a in keep and b in keep]
         journeys = [dict(j) for j in list(JOURNEYS)[-80:]][::-1]
-    return {"now": now, "hours": hours, "nodes": nodes, "links": links, "journeys": journeys}
+    return {"now": now, "hours": hours, "nodes": nodes, "links": links, "journeys": journeys, "confirmed": confirmed_links()}
 
 def locate_loop():
     """Ask each repeater that has a control key where it is, until we know (for the map)."""
@@ -500,6 +500,7 @@ def db_init():
     DB.execute("PRAGMA journal_mode=WAL"); DB.execute("PRAGMA synchronous=NORMAL")
     DB.execute("CREATE TABLE IF NOT EXISTS samples(ts INTEGER, k TEXT, v REAL)"); DB.execute("CREATE INDEX IF NOT EXISTS s_k ON samples(k, ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, seen INTEGER, chan TEXT, chash TEXT, region TEXT, sender TEXT, text TEXT, pkey TEXT UNIQUE, dir TEXT, hops INTEGER, snr REAL, rssi INTEGER, heard TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS m_seen ON messages(seen)")
+    DB.execute("CREATE TABLE IF NOT EXISTS links(a TEXT, b TEXT, first INTEGER, last INTEGER, snr REAL, rssi INTEGER, PRIMARY KEY(a, b))")
     DB.execute("CREATE TABLE IF NOT EXISTS events(ts INTEGER, kind TEXT, client TEXT, user TEXT, ip TEXT, text TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS e_ts ON events(ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS audit(ts INTEGER, who TEXT, action TEXT, target TEXT, detail TEXT, ok INTEGER)"); DB.execute("CREATE INDEX IF NOT EXISTS a_ts ON audit(ts)")
 
@@ -1133,6 +1134,39 @@ def preload_settings(dev, force=False):
             if good: state["updated"] = time.time()
         if good: settings_save()
 
+NEIGH_RX = re.compile(r"([0-9A-Fa-f]{4,16}):(\d+):(-?\d+)")
+NEIGH_EVERY = 1800
+
+def neighbour_poll_once():
+    """Ask each online repeater who it hears directly. A link is confirmed by the repeater itself, with its own SNR."""
+    now = time.time()
+    for dev in list(KEYS):
+        d = DEV.get(dev)
+        if not d or not d.get("last") or now - d["last"] > CONF["stale_minutes"] * 60: continue
+        r = send_command(dev, "neighbors", "neighbour-poll", timeout=12, quiet=True)
+        if not r.get("ok"): continue
+        rows = []
+        for m in NEIGH_RX.finditer(r.get("reply") or ""):
+            try: rows.append((dev, m.group(1).upper(), int(now), float(m.group(3)) / 4.0))
+            except ValueError: pass
+        if not rows: continue
+        with LOCK:
+            for a, b, t, snr in rows:
+                DB.execute("INSERT INTO links(a,b,first,last,snr,rssi) VALUES(?,?,?,?,?,NULL) ON CONFLICT(a,b) DO UPDATE SET last=excluded.last, snr=excluded.snr", (a, b, t, t, snr))
+            DB.execute("DELETE FROM links WHERE last < ?", (int(now) - 14 * 86400,))
+
+def neighbour_loop():
+    time.sleep(120)
+    while True:
+        try: neighbour_poll_once()
+        except Exception as e: sys.stderr.write("neighbour poll: %s\n" % e)
+        time.sleep(NEIGH_EVERY)
+
+def confirmed_links(hours=48):
+    with LOCK:
+        rows = DB.execute("SELECT a, b, first, last, snr FROM links WHERE last > ?", (int(time.time()) - hours * 3600,)).fetchall()
+    return [{"a": a, "b": b, "first": f, "last": l, "snr": s} for a, b, f, l, s in rows]
+
 def settings_loop():
     """Keep every online controlled repeater's editable settings warm for the dashboard."""
     time.sleep(12)
@@ -1290,7 +1324,37 @@ def diagnostics(sysinfo, accs, cert):
         if d["status"] == "offline" and (age is None or age > 300): add("warn", "%s reports itself offline" % nm, "its last status message said offline and nothing has arrived since")
     dr = sysnum("$SYS/broker/load/publish/dropped/1min")
     if dr > 0: add("warn", "Broker is dropping messages", "%.1f a minute (a slow subscriber or full queues)" % dr)
+    # mesh issues: nodes gone quiet for a day, repeaters with no position, low batteries, a bridge that holds packets back
+    for k, n in NODES.items():
+        if n["type"] in (2, 3) and n["last"] and now - n["last"] > 86400 and now - n["last"] < 30 * 86400:
+            add("warn", "Stale: %s" % (n["name"] or k[:8]), "not heard for %d days" % int((now - n["last"]) // 86400))
+        if n["type"] == 2 and n["lat"] is None: add("warn", "No position: %s" % (n["name"] or k[:8]), "a repeater without a position cannot be placed on the map")
+    for d in DEV.values():
+        nm = d["name"] or d["id"][:12]; mv = (d.get("stats") or {}).get("battery_mv")
+        if mv and mv < 3500 and now - d["last"] < 900: add("warn", "Low battery: %s" % nm, "%.2f V" % (mv / 1000))
+        b = d.get("bridge") or {}
+        if b.get("heard") and b.get("dropped") and b["dropped"] / max(1, b["heard"]) > 0.10:
+            add("warn", "Bridge holding back packets: %s" % nm, "%d of %d heard were held back by the rate limit" % (b["dropped"], b["heard"]))
     return out
+
+def prometheus_text():
+    """Node and traffic numbers in the Prometheus text format (behind the dashboard's login)."""
+    now = time.time(); out = []
+    def g(name, help_, samples):
+        out.append("# HELP umcnet_%s %s" % (name, help_)); out.append("# TYPE umcnet_%s gauge" % name)
+        for labels, v in samples: out.append("umcnet_%s%s %s" % (name, ("{%s}" % labels) if labels else "", v))
+    reps = [d for d in DEV.values() if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60]
+    g("repeaters_online", "Repeaters reporting now", [("", len(reps))])
+    g("packets_per_minute", "Packets heard per minute by each repeater", [('repeater="%s"' % (d["name"] or d["id"][:8]), round(rate_per_min("pkt:" + d["id"], 300), 2)) for d in reps])
+    g("bridge_passed_total", "Packets each bridge has passed on to its radio", [('repeater="%s"' % (d["name"] or d["id"][:8]), (d.get("bridge") or {}).get("passed", 0)) for d in reps])
+    g("bridge_held_total", "Packets each bridge held back by its rate limit", [('repeater="%s"' % (d["name"] or d["id"][:8]), (d.get("bridge") or {}).get("dropped", 0)) for d in reps])
+    g("clock_skew_seconds", "Each repeater's clock against this server", [('repeater="%s"' % (d["name"] or d["id"][:8]), round(d["skew"] or 0, 3)) for d in reps if d.get("skew") is not None])
+    g("nodes_known", "Nodes heard in the last 30 days", [("", sum(1 for n in NODES.values() if n["last"] and now - n["last"] < 30 * 86400))])
+    g("confirmed_links", "Neighbour links confirmed in the last 48 hours", [("", len(confirmed_links()))])
+    ck = CLOCK.get("v") or {}
+    g("server_clock_offset_seconds", "This server's clock against its time source", [("", ck.get("offset", 0))])
+    g("broker_up", "1 when the dashboard's link to the broker is up", [("", 1 if MQTT.get("state") == "connected" else 0)])
+    return "\n".join(out) + "\n"
 
 def overview():
     sysinfo = system(); cert = certificate(); accs = accounts(); now = time.time()
@@ -1474,6 +1538,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, csv_text(("device id", "name", "area", "model", "firmware", "radio", "status", "received", "sent", "last data (epoch)", "label"), rows), "text/csv")
             if u.path == "/api/export/config.json": return self.send(200, json.dumps(CONF, indent=1))
             if u.path in ("/", "/index.html"): return self.send(200, open(CFG["static"], "rb").read(), "text/html")
+            if u.path == "/metrics":
+                return self.send(200, prometheus_text(), ctype="text/plain; version=0.0.4")
             if u.path == "/api/overview":
                 o = overview(); o["me"] = me_view(who)
                 if role == "admin": o["web_users"] = CONF["web_users"]
@@ -1497,7 +1563,7 @@ def export_accounts_soon():
 
 def main():
     db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); settings_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
-    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop): threading.Thread(target=fn, daemon=True).start()
+    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop, neighbour_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)
     try: srv.serve_forever()
