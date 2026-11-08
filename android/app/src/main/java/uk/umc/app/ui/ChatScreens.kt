@@ -21,7 +21,7 @@ import uk.umc.app.proto.ChatMessage
 import uk.umc.app.proto.MAX_TEXT_BYTES
 import uk.umc.app.proto.MeshSession
 
-/** Conversations: every channel, plus contacts we can chat to. */
+/** Messages: the groups (channels) and room servers. People you chat with one-to-one are under Users. */
 @Composable
 fun ChatsScreen(onOpen: (String) -> Unit) {
     val session by AppState.session.collectAsState()
@@ -37,7 +37,9 @@ fun ChatsScreen(onOpen: (String) -> Unit) {
             val last = messages.lastOrNull { it.conversation == "ch:${ch.idx}" }
             add(Row("ch:${ch.idx}", ch.name, "channel", last))
         }
-        contacts.filter { it.type == uk.umc.app.proto.ADV_TYPE_CHAT || it.type == uk.umc.app.proto.ADV_TYPE_ROOM }.forEach { c ->
+        // Room servers are shared rooms, so they stay here with the groups. People (chat contacts) are not
+        // listed here: they are under Users, where tapping one opens the direct conversation.
+        contacts.filter { it.type == uk.umc.app.proto.ADV_TYPE_ROOM }.forEach { c ->
             val last = messages.lastOrNull { it.conversation == "c:${c.prefix}" }
             add(Row("c:${c.prefix}", c.name, c.typeName + " · " + pathLabel(c), last))
         }
@@ -56,7 +58,7 @@ fun ChatsScreen(onOpen: (String) -> Unit) {
             )
             HorizontalDivider()
         }
-        if (rows.isEmpty()) item { SectionCard("No conversations yet", "Channels and contacts appear here once the radio has them.") {} }
+        if (rows.isEmpty()) item { SectionCard("No groups yet", "Channels and room servers appear here. To message a person, open Users and tap them.") {} }
     }
 }
 
