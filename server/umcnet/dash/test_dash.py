@@ -444,6 +444,18 @@ class Batch2(unittest.TestCase):
         self.assertIn("# TYPE umcnet_broker_up gauge", text)
 
 
+class PacketRoutes(unittest.TestCase):
+    def test_copies_of_one_packet_become_one_route_heard_by_several(self):
+        dash.JOURNEYS.clear(); dash.DEV.clear(); now = time.time()
+        d1 = dash.device("11" * 32, "LBA"); d1["name"] = "TINGLEY"; d2 = dash.device("22" * 32, "LBA"); d2["name"] = "BlakeUK"
+        for dev, t in (("11" * 32, now), ("22" * 32, now + 1)):
+            dash.JOURNEYS.append({"t": t, "pkt": "ab12cd34ef56", "size": 30, "type": "REQ", "flood": True, "hops": 2, "from": "4B",
+                                  "path": [{"h": "1A2B", "n": "1A2B"}, {"h": "330D", "n": "330D"}], "to": dev, "snr": 4, "rssi": -90})
+        rows = dash.packet_routes()
+        self.assertEqual(1, len(rows)); self.assertEqual(2, rows[0]["heard"]); self.assertEqual("TINGLEY", rows[0]["first"])
+        self.assertEqual(["1A2B", "330D"], [h["n"] for h in rows[0]["route"]]); self.assertEqual(30, rows[0]["size"])
+
+
 class AdminHelper(unittest.TestCase):
     def test_password_hash_round_trip(self):
         h = adm.pbkdf2("Correct-horse-9"); self.assertTrue(adm.check_password("Correct-horse-9", h)); self.assertFalse(adm.check_password("Correct-horse-8", h)); self.assertFalse(adm.check_password("x", "garbage"))

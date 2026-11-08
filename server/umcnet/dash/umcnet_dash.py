@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.11"
+VERSION = "2.12"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -125,7 +125,26 @@ def note_network(did, info, snr, rssi, now):
             if rssi is not None and (l["rssi"] is None or int(rssi) > l["rssi"]): l["rssi"] = int(rssi)
         except (ValueError, TypeError): pass
     if sender or info.get("path"):
-        JOURNEYS.append({"t": now, "type": info["type"], "flood": info["flood"], "hops": info["hops"], "from": sender or (info.get("src") or info.get("chan") or ""), "path": [{"h": h, "n": hop_name(h)} for h in info.get("path", [])], "to": did, "snr": snr, "rssi": rssi})
+        JOURNEYS.append({"t": now, "pkt": info.get("pkt"), "size": info.get("size"), "type": info["type"], "flood": info["flood"], "hops": info["hops"], "from": sender or (info.get("src") or info.get("chan") or ""), "path": [{"h": h, "n": hop_name(h)} for h in info.get("path", [])], "to": did, "snr": snr, "rssi": rssi})
+
+def packet_routes(limit=40):
+    """One row per packet: when, type, size, the first repeater that heard it, how many repeaters heard it,
+    the route it took (the first copy's hops, named) and who sent it to whom. Like the LetsMesh analyzer's table."""
+    groups = collections.OrderedDict()
+    for j in list(JOURNEYS):
+        if not j.get("pkt"): continue
+        g = groups.get(j["pkt"])
+        if g is None:
+            g = groups[j["pkt"]] = {"pkt": j["pkt"], "t": j["t"], "type": j["type"], "size": j.get("size"), "first": j["to"],
+                                    "from": j["from"], "heard": 0, "path": j["path"], "hops": j["hops"], "seen_by": set()}
+        g["heard"] += 1; g["seen_by"].add(j["to"]); g["t"] = max(g["t"], j["t"])
+    rows = []
+    for g in list(groups.values())[::-1][:limit]:
+        def nm(dev):
+            d = DEV.get(dev); return (d["name"] if d and d["name"] else dev[:8])
+        rows.append({"pkt": g["pkt"], "t": g["t"], "type": g["type"], "size": g["size"], "first": nm(g["first"]),
+                     "heard": g["heard"], "route": [{"h": h["h"], "n": h["n"]} for h in g["path"]], "from": g["from"], "to": nm(g["first"]), "hops": g["hops"]})
+    return rows
 
 def nodes_path(): return os.path.join(CFG["data"], "nodes.json")
 def nodes_save():
@@ -255,6 +274,10 @@ def on_publish(topic, payload, retained=False):
         try: raw = bytes.fromhex(raw_hex) if raw_hex else b""
         except ValueError: raw = b""
         info = parse_packet(raw) or {}
+        try:
+            info["pkt"] = hashlib.sha1(MSG.parse_wire(raw)["payload"]).hexdigest()[:12] if raw and MSG.parse_wire(raw) else None
+        except Exception: info["pkt"] = None
+        info["size"] = len(raw)
         direction = j.get("direction", "rx") if kind == "packets" else "rx"
         # a device that publishes both topics is counted once: count 'packets', and 'raw' only when no packets arrive
         counted = kind == "packets" or d["n_pkt"] == 0
@@ -1380,7 +1403,7 @@ def overview():
         sysd = {k: v[0] for k, v in SYS.items()}
         try: msg_last = (DB.execute("SELECT MAX(id) FROM messages").fetchone() or [0])[0] or 0
         except Exception: msg_last = 0
-        res = {"msg_last": msg_last, "version": VERSION, "now": now, "started": START, "mqtt": dict(MQTT), "sys": sysd, "system": sysinfo, "cert": cert, "devices": devs, "clients": clients, "accounts": accs,
+        res = {"routes": packet_routes(), "msg_last": msg_last, "version": VERSION, "now": now, "started": START, "mqtt": dict(MQTT), "sys": sysd, "system": sysinfo, "cert": cert, "devices": devs, "clients": clients, "accounts": accs,
                "packets": [dict(p) for p in list(PKTS)[-60:]][::-1], "events": [dict(e) for e in list(EVENTS)[-80:]][::-1], "log": [dict(l) for l in list(LOG)[-60:]][::-1], "count": dict(COUNT),
                "rates": {"messages": rate_per_min("messages"), "packets": rate_per_min("packets"), "unique": rate_per_min("unique")},
                "overlap": {"ids": ids, "names": [DEV[i]["name"] or i[:8] for i in ids], "m": overlap}, "heard_by": dict(sorted(multi.items())), "types": dict(types),

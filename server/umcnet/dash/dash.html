@@ -135,6 +135,7 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 .nc-emoji{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px}.nc-emoji button{font-size:17px;line-height:1;background:#0006;border:1px solid color-mix(in srgb,var(--a) 35%,transparent);border-radius:8px;padding:4px 6px;cursor:pointer;color:inherit}.nc-emoji button:hover{background:color-mix(in srgb,var(--a) 16%,transparent)}
 @media (prefers-reduced-motion:reduce){.nc-rain,.nc-msg.fresh .nc-bubble{animation:none}}
 @media (max-width:700px){.nc-msg{max-width:92%}#msgFeed{height:58vh}}
+.hop{background:#0d2219;border:1px solid #1b3a30;border-radius:6px;padding:1px 6px;font-size:12px}
 </style></head>
 <body><div class="wrap"><div class="dash2">
 <svg width="0" height="0" style="position:absolute"><defs><filter id="dglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -369,11 +370,19 @@ function vClients(o) {
   return `<div class="panels">${panel("Connected and recent clients", "from the broker's log", table(["", "Account", "Client id", "From", "Connected for / ended", "Keepalive", "Protocol", "Logins last hour", "Logins total"], rows, "No connection seen since the dashboard started."), "clients")}</div>`;
 }
 
+// Packets by route: each packet once, with the route it took through the repeaters (named hop by hop)
+function routesPanel(o) {
+  const rows = (o.routes || []).map(r => {
+    const chain = r.route.length ? r.route.map(x => `<span class="hop" title="${esc(x.h)}">${esc(x.n && x.n !== x.h ? x.n : x.h)}</span>`).join(' <i class="tr">→</i> ') : '<span class="tr">direct</span>';
+    return `<tr><td style="white-space:nowrap">${clock(r.t).split(", ").pop()}</td><td><code>${esc(r.pkt.slice(0, 3))}…${esc(r.pkt.slice(-3))}</code></td><td><span class="tag">${esc(r.type)}</span></td><td>${esc(r.size ?? "")} B</td><td>${esc(r.first)}</td><td>heard ${r.heard} time${r.heard === 1 ? "" : "s"}</td><td style="white-space:normal">${chain}</td><td class="tr">${esc(r.from ? r.from.slice(0, 8) : "")}</td></tr>`;
+  });
+  return panel("Packets by route", "each packet once: the route it took, and how many repeaters heard it", table(["Time", "Packet", "Type", "Size", "First heard by", "Heard", "Route", "Sent by"], rows, "No routes yet: packets appear here as the repeaters hear them."));
+}
 function vTraffic(o) {
   const f = S.pq.toLowerCase(), rows = o.packets.filter(p => !f || JSON.stringify(p).toLowerCase().includes(f)).slice(0, 60).map(p => `<tr><td>${clock(p.t).split(", ").pop()}</td><td>${esc(devName(o, p.dev))}</td><td><span class="tag ${p.dir === "tx" ? "tx" : ""}">${p.dir.toUpperCase()}</span></td><td>${esc(p.type)} <span class="tr">${p.flood ? "flood" : "direct"}</span></td><td><b>${esc(who(o, p))}</b></td><td>${esc(p.via ? resolveHash(o, p.via) : p.hops === 0 ? "direct" : "—")}</td><td>${p.hops}</td><td>${p.rssi ?? ""} / ${p.snr ?? ""}</td><td>${p.len ?? ""}</td></tr>`);
   const ty = Object.entries(o.types).sort((a, b) => b[1] - a[1]), colors = {ADVERT: "#2fe27a", CHAN: "#4aa8ff", RESP: "#e977c5", REQ: "#e977c5", MSG: "#a58bff", ACK: "#f2c14e", PATH: "#ff8f5a", TRACE: "#5be3d8"};
   const l = o.latency;
-  return `<div class="panels">${panel("Live packets", "newest first", `<div class="row" style="margin-bottom:8px"><input id="pq" placeholder="Filter by name, type, repeater…" value="${esc(S.pq)}" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 10px;width:260px"></div>` + table(["Time", "Heard by", "Dir", "Type", "From", "Via", "Hops", "RSSI / SNR", "Bytes"], rows), "traffic", "s8")}
+  return `<div class="panels">${routesPanel(o)}${panel("Live packets", "newest first", `<div class="row" style="margin-bottom:8px"><input id="pq" placeholder="Filter by name, type, repeater…" value="${esc(S.pq)}" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 10px;width:260px"></div>` + table(["Time", "Heard by", "Dir", "Type", "From", "Via", "Hops", "RSSI / SNR", "Bytes"], rows), "traffic", "s8")}
     ${panel("Packet types", "since the dashboard started", ty.length ? D.donut(ty.slice(0, 7).map(([k, v]) => ({label: k, value: v, color: colors[k] || "#7fa392"})), String(ty.reduce((s, x) => s + x[1], 0)), "packets") : `<div class="empty">Nothing yet.</div>`, "", "s4")}
     ${panel("Delivery delay", "device clock to this server", l.n ? `<div class="dials">${D.gauge(l.avg, 0, 10, "Average", l.avg + " s", l.n + " messages", level(l.avg, 2, 6))}${D.gauge(l.max, 0, 30, "Slowest", l.max + " s", "", level(l.max, 5, 15))}</div>` : `<div class="empty">No timestamps seen yet.</div>`, "latency", "s4")}</div>`;
 }
