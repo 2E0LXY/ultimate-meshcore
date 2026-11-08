@@ -2222,7 +2222,7 @@ struct RadioBand { const char* name; float freq; float bw; uint8_t sf; uint8_t c
 static const RadioBand kBands[] = {
   {"EU/UK (Narrow)",         869.618f,  62.5f,  8, 8, -1},
   {"EU/UK narrow, CR5",      869.618f,  62.5f,  8, 5, -1},
-  {"EU/UK (Deprecated)",     869.525f, 250.0f, 11, 5, -1},
+  {"UK default (869.525 MHz)", 869.525f, 250.0f, 10, 5, -1},
   {"EU 433 (Long Range)",    433.650f, 250.0f, 11, 5, -1},
   {"EU 433 (Narrow)",        433.650f,  62.5f,  8, 8, -1},
   {"Czech Republic",         869.432f,  62.5f,  7, 5,  1},

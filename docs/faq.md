@@ -543,7 +543,7 @@ pip install -U platformio
 git clone https://github.com/ripplebiz/MeshCore.git
 cd MeshCore
 ```
-open platformio.ini and in `[arduino_base]` edit the `LORA_FREQ=867.5`
+open platformio.ini and in `[arduino_base]` set `LORA_FREQ=869.525`, `LORA_BW=250`, `LORA_SF=10` (the UK default; 867.500 MHz was for testing and is no longer used)
 save, then run:
 ```
 pio run -e RAK_4631_Repeater

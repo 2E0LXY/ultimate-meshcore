@@ -10,6 +10,12 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 - ✅ **WiFi scan works.** The background join loop kept starting connection attempts, and the ESP32 cannot scan while it is joining, so every scan failed (the screen reported "Scanning" and then "Scan failed"). The join loop now pauses for the duration of a scan (for at most 20 seconds, so it can never be left paused). A scan the radio refuses to start is retried once in the blocking way. The screen now says what happened: networks found, none in range, scan refused, or timed out, instead of a generic message
 
+## Done in 0.1.40
+
+- ✅ **UK default radio: 869.525 MHz, 250 kHz, SF10, CR5** (the MeshCore UK default channel). 867.500 MHz was the test setting and is removed from the defaults, the presets, the docs and the FAQ. Devices keep the settings they already have; change them with `set radio 869.525,250,10,5` (or the presets in the apps)
+- ✅ **Android chat bubbles follow the backdrop.** Text was dark on dark bubbles over a photo or gradient; it is now white over glass, and the theme's own contrast colour on the plain look
+- ✅ **Dashboard messages take emoji.** An emoji row under the send box adds them at the cursor (130-byte limit kept)
+
 ## Done in 0.1.39
 
 - ✅ **Wi-Fi scan works from the web wizard and web page.** Every scan now pauses the background join loop, so the scan is no longer cancelled and the page no longer reports "Nothing found" (0.1.38 only covered the T-Deck's screen)

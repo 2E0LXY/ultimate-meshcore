@@ -14,7 +14,7 @@ import uk.umc.app.AppState
 /** Regional presets, exactly as the firmware and other MeshCore apps use them. */
 val PRESETS = listOf(
     Triple("EU/UK (Narrow)", listOf(869618L, 62500L), listOf(8, 8)),
-    Triple("EU/UK (Medium Range)", listOf(869525L, 250000L), listOf(10, 5)),
+    Triple("UK default (869.525 MHz, Medium Range)", listOf(869525L, 250000L), listOf(10, 5)),
     Triple("EU/UK (Long Range)", listOf(869525L, 250000L), listOf(11, 5)),
     Triple("US/Canada", listOf(910525L, 250000L), listOf(10, 5)),
     Triple("Australia/NZ", listOf(915800L, 250000L), listOf(10, 5)),

@@ -1090,10 +1090,11 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   _prefs.airtime_factor = 1.0;
   strcpy(_prefs.node_name, "NONAME");
 #ifdef UMC_YORKSHIRE_DEFAULTS
-  _prefs.freq = 869.618f;
-  _prefs.sf = 8;
-  _prefs.bw = 62.5f;
-  _prefs.cr = 8;
+  // The UK's default MeshCore channel (from 0.1.40): 869.525 MHz, 250 kHz, SF10, CR5
+  _prefs.freq = 869.525f;
+  _prefs.sf = 10;
+  _prefs.bw = 250.0f;
+  _prefs.cr = 5;
 #else
   _prefs.freq = LORA_FREQ;
   _prefs.sf = LORA_SF;

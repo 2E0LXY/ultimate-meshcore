@@ -146,16 +146,32 @@ private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.corouti
         Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp),
         horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start,
     ) {
+        // The bubble's colours follow the backdrop: over a photo, gradient or colour it is frosted glass
+        // with white text; on the plain system look it is the theme's own container with its own text colour.
+        val glass = onGlass()
+        val scheme = MaterialTheme.colorScheme
+        val bubble = when {
+            glass && m.outgoing -> Color(0xFF2E7D5B).copy(alpha = 0.55f)
+            glass -> Color.White.copy(alpha = 0.12f)
+            m.outgoing -> scheme.primaryContainer
+            else -> scheme.surfaceVariant
+        }
+        val ink = when {
+            glass -> Color.White
+            m.outgoing -> scheme.onPrimaryContainer
+            else -> scheme.onSurfaceVariant
+        }
+        val dim = if (glass) Color.White.copy(alpha = 0.72f) else scheme.outline
         Column(
             Modifier
                 .clip(RoundedCornerShape(12.dp))
-                .background(if (m.outgoing) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
+                .background(bubble)
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
             if (!m.outgoing && m.from.isNotEmpty()) {
-                Text(m.from, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                Text(m.from, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = ink)
             }
-            Text((if (m.cli) "⌨ " else "") + m.text)
+            Text((if (m.cli) "⌨ " else "") + m.text, color = ink)
             val meta = buildList {
                 add(clock(m.timestamp))
                 if (!m.outgoing) {
@@ -175,7 +191,7 @@ private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.corouti
                 }
             }.joinToString(" · ")
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text(meta, style = MaterialTheme.typography.labelSmall, color = dim)
                 if (m.outgoing && show != "off" && mark.isNotEmpty()) {
                     Text("  $mark", style = MaterialTheme.typography.labelSmall, color = markColour,
                          fontWeight = FontWeight.Bold)

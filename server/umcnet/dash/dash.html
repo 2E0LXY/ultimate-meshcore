@@ -132,6 +132,7 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 @keyframes ncin{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1;transform:none}}
 @keyframes ncglow{50%{box-shadow:0 0 26px var(--a),0 0 60px color-mix(in srgb,var(--a) 45%,transparent),inset 0 0 26px color-mix(in srgb,var(--b) 45%,transparent)}}
 .nc-empty{color:var(--meta);text-align:center;padding:60px 20px}
+.nc-emoji{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px}.nc-emoji button{font-size:17px;line-height:1;background:#0006;border:1px solid color-mix(in srgb,var(--a) 35%,transparent);border-radius:8px;padding:4px 6px;cursor:pointer;color:inherit}.nc-emoji button:hover{background:color-mix(in srgb,var(--a) 16%,transparent)}
 @media (prefers-reduced-motion:reduce){.nc-rain,.nc-msg.fresh .nc-bubble{animation:none}}
 @media (max-width:700px){.nc-msg{max-width:92%}#msgFeed{height:58vh}}
 </style></head>
@@ -672,10 +673,21 @@ async function msgLoad() {
   try { m.data = await jget("/api/messages?" + p); } catch (e) { m.err = e.message; }
   msgUpdate();
 }
+const NC_EMOJI = ["😀","😂","😊","😎","🤔","😮","😢","👍","👎","👋","🙏","👏","🎉","❤","🔥","✅","❌","⚠","📡","🔋","📍","☀","🌧","🚗","🏠","📶"];
 const NC_THEMES = [["green", "UMC green", "#2fe27a", "#00d6a3"], ["neon", "Neon night", "#ff4fd8", "#00e5ff"], ["ocean", "Ocean", "#4fb3ff", "#2ee6d6"], ["amber", "Amber terminal", "#ffb000", "#ff7a1a"], ["sunset", "Sunset", "#ff6b6b", "#ffb347"], ["calm", "Calm", "#5d7a6b", "#4a6a8a"]];
 function ncTheme() { let t = "green"; try { t = localStorage.getItem("umc.chatTheme") || "green"; } catch {} return NC_THEMES.some(x => x[0] === t) ? t : "green"; }
 function ncThemeButtons() { const cur = ncTheme(); return `<span>Theme</span>` + NC_THEMES.map(([k, l, a, b]) => `<button type="button" data-nctheme="${k}" class="${k === cur ? "on" : ""}" title="${l}"><i style="background:linear-gradient(135deg,${a} 50%,${b} 50%)"></i>${l}</button>`).join(""); }
 document.addEventListener("click", e => {
+  const em = e.target.closest("[data-emo]");
+  if (em) {
+    const t = $("#msgText"); if (!t) return;
+    const at = t.selectionStart ?? t.value.length, add = em.dataset.emo;
+    if (new TextEncoder().encode(t.value + add).length > 130) return;     // the limit is in bytes
+    t.value = t.value.slice(0, at) + add + t.value.slice(t.selectionEnd ?? at);
+    t.focus(); t.setSelectionRange(at + add.length, at + add.length);
+    const n = $("#msgCount"); if (n) n.textContent = new TextEncoder().encode(t.value).length + "/130";
+    return;
+  }
   const b = e.target.closest("[data-nctheme]"); if (!b) return;
   try { localStorage.setItem("umc.chatTheme", b.dataset.nctheme); } catch {}
   const w = $("#ncWrap"); if (w) w.dataset.nc = b.dataset.nctheme;
@@ -693,7 +705,7 @@ function msgUpdate() {
     const opt = (list, cur, first) => (first ? [`<option value="">${first}</option>`] : []).concat(list.map(x => `<option value="${esc(x.v)}" ${x.v === cur ? "selected" : ""}>${esc(x.l)}</option>`)).join("");
     const chans = d.channels.map(c => ({v: c.name, l: c.name})), regs = d.regions.map(r => ({v: r, l: r}));
     bar.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><select id="mfChan" data-mf="channel">${opt(chans, m.channel, "all channels")}</select><select id="mfReg" data-mf="region">${opt([{v: "-", l: "no region (heard everywhere)"}].concat(regs), m.region, "all regions")}</select><select id="mfDir" data-mf="dir"><option value="">heard and sent</option><option value="rx" ${m.dir === "rx" ? "selected" : ""}>heard only</option><option value="tx" ${m.dir === "tx" ? "selected" : ""}>sent only</option></select><input id="mfQ" data-mf="q" placeholder="search" value="${esc(m.q)}" style="min-width:160px"></div>` +
-      (d.tx_enabled ? `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;padding:10px;border:1px solid #1f4a37;border-radius:10px;background:#0d2219"><b>Send</b><select id="msgChan">${opt(chans, keep.chan)}</select><select id="msgReg">${opt(regs, keep.reg, "no region")}</select>${(() => { const me = S.o && S.o.me, adm = !me || me.role === "admin", own = me && (me.sender || me.name.toUpperCase()); return `<input id="msgSender" value="${esc(adm ? (keep.sender != null && keep.sender !== undefined ? keep.sender : d.sender) : own)}" ${adm ? "" : "readonly"} style="width:130px" title="${adm ? "the name shown before your message" : "your messages go out under your own name"}">`; })()}<input id="msgText" maxlength="130" placeholder="type a message" value="${esc(keep.text)}" style="flex:1;min-width:220px"><span class="tr" id="msgCount">0/130</span><button class="tool" id="msgSend">Send</button></div><div class="tr" id="msgRes" style="margin:4px 2px 8px">${esc(m.sent)}</div>` : `<div class="tr">Sending is switched off in Settings.</div>`);
+      (d.tx_enabled ? `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;padding:10px;border:1px solid #1f4a37;border-radius:10px;background:#0d2219"><b>Send</b><select id="msgChan">${opt(chans, keep.chan)}</select><select id="msgReg">${opt(regs, keep.reg, "no region")}</select>${(() => { const me = S.o && S.o.me, adm = !me || me.role === "admin", own = me && (me.sender || me.name.toUpperCase()); return `<input id="msgSender" value="${esc(adm ? (keep.sender != null && keep.sender !== undefined ? keep.sender : d.sender) : own)}" ${adm ? "" : "readonly"} style="width:130px" title="${adm ? "the name shown before your message" : "your messages go out under your own name"}">`; })()}<input id="msgText" maxlength="130" placeholder="type a message" value="${esc(keep.text)}" style="flex:1;min-width:220px"><span class="tr" id="msgCount">0/130</span><button class="tool" id="msgSend">Send</button></div><div class="tr" id="msgRes" style="margin:4px 2px 4px">${esc(m.sent)}</div><div class="nc-emoji" aria-label="Emoji">${NC_EMOJI.map(e => `<button type="button" data-emo="${e}" title="add ${e}">${e}</button>`).join("")}</div>` : `<div class="tr">Sending is switched off in Settings.</div>`);
     bar.dataset.sig = sig;
   }
   const bychan = {}; d.counts.forEach(c => bychan[c.chan] = (bychan[c.chan] || 0) + c.n);
