@@ -10,6 +10,11 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 - ✅ **WiFi scan works.** The background join loop kept starting connection attempts, and the ESP32 cannot scan while it is joining, so every scan failed (the screen reported "Scanning" and then "Scan failed"). The join loop now pauses for the duration of a scan (for at most 20 seconds, so it can never be left paused). A scan the radio refuses to start is retried once in the blocking way. The screen now says what happened: networks found, none in range, scan refused, or timed out, instead of a generic message
 
+## Done in 0.1.41
+
+- ✅ **Repeater memory fixed.** The V4 at Blake ran with Bluetooth on and no idle timeout, down to about 2 KB of free memory, so its update checks failed. Repeaters now switch Bluetooth off after 10 idle minutes by default. Remotely, Bluetooth was switched off on both repeaters and they recovered to over 110 KB free
+- ✅ **Dashboard 2.14:** the mesh issues check summarises nodes quiet across the mesh into one line (it had listed about 300 separately), and checks only our own repeaters one by one for missing positions
+
 ## Done in 0.1.40
 
 - ✅ **UK default radio: 869.525 MHz, 250 kHz, SF10, CR5** (the MeshCore UK default channel). 867.500 MHz was the test setting and is removed from the defaults, the presets, the docs and the FAQ. Devices keep the settings they already have; change them with `set radio 869.525,250,10,5` (or the presets in the apps)

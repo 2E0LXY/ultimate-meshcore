@@ -435,7 +435,8 @@ class Batch2(unittest.TestCase):
         d = dash.device("DD" * 32, "LBA"); d["last"] = now; d["name"] = "Tired"; d["stats"] = {"battery_mv": 3300}; d["bridge"] = {"heard": 100, "dropped": 30, "passed": 70}
         sysinfo = {"services": {}, "clock": None, "disk_total": 100, "disk_free": 50, "swap_total": 0, "swap_free": 0, "mem_total": 1, "mem_avail": 1, "load": [0, 0, 0], "cores": 1, "uptime": 1, "temp": None, "cert_days": None}
         titles = [x["title"] for x in dash.diagnostics(sysinfo, [], None)]
-        self.assertIn("Stale: Quiet", titles); self.assertIn("No position: Quiet", titles); self.assertIn("Low battery: Tired", titles); self.assertIn("Bridge holding back packets: Tired", titles)
+        self.assertIn("1 mesh node quiet for over a day", titles); self.assertIn("Low battery: Tired", titles); self.assertIn("Bridge holding back packets: Tired", titles)
+        self.assertNotIn("Stale: Quiet", titles)
 
     def test_prometheus_text_has_the_numbers_and_the_names(self):
         d = dash.device("EE" * 32, "LBA"); d["last"] = time.time(); d["name"] = "TINGLEY"; d["pm"] = 2.5

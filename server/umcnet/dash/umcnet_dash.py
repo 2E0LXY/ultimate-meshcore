@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.13"
+VERSION = "2.14"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -1348,10 +1348,15 @@ def diagnostics(sysinfo, accs, cert):
     dr = sysnum("$SYS/broker/load/publish/dropped/1min")
     if dr > 0: add("warn", "Broker is dropping messages", "%.1f a minute (a slow subscriber or full queues)" % dr)
     # mesh issues: nodes gone quiet for a day, repeaters with no position, low batteries, a bridge that holds packets back
-    for k, n in NODES.items():
-        if n["type"] in (2, 3) and n["last"] and now - n["last"] > 86400 and now - n["last"] < 30 * 86400:
-            add("warn", "Stale: %s" % (n["name"] or k[:8]), "not heard for %d days" % int((now - n["last"]) // 86400))
-        if n["type"] == 2 and n["lat"] is None: add("warn", "No position: %s" % (n["name"] or k[:8]), "a repeater without a position cannot be placed on the map")
+    # Our own repeaters are checked one by one (and they are not "stale" while they report). Other nodes heard
+    # across the mesh are summarised in one line, so the list stays readable.
+    own = {d["id"] for d in DEV.values() if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60}
+    quiet = [(n["name"] or k[:8]) for k, n in NODES.items() if k not in own and n["type"] in (2, 3) and n["last"] and 86400 < now - n["last"] < 30 * 86400]
+    if quiet:
+        add("warn", "%d mesh node%s quiet for over a day" % (len(quiet), "" if len(quiet) == 1 else "s"), ", ".join(sorted(quiet, key=str.lower)[:15]) + (" …" if len(quiet) > 15 else ""))
+    for d in DEV.values():
+        if d["id"] in own and d.get("lat") is None and not (CONF.get("locations") or {}).get(d["id"]):
+            add("warn", "No position: %s" % (d["name"] or d["id"][:8]), "this repeater has no position, so it cannot be placed on the map")
     for d in DEV.values():
         nm = d["name"] or d["id"][:12]; mv = (d.get("stats") or {}).get("battery_mv")
         if mv and mv < 3500 and now - d["last"] < 900: add("warn", "Low battery: %s" % nm, "%.2f V" % (mv / 1000))
