@@ -706,10 +706,25 @@ function popupHtml(x, n, nodes, now) {
   return `<div class="pop"><h3>${esc(x.name)}</h3>` + pkv([["Kind", KINDN[x.type] || "node"], ["Key", `<code style="font-size:10px;word-break:break-all">${esc(x.key)}</code>`], ["Position", pos], ["Last heard", ago(x.last)], ["First heard", ago(x.first)], ["Adverts heard", x.adverts]]) + ltab("Heard by", heardBy, l => l.recv) + `</div>`;
 }
 
+async function grpLoad(force) {
+  const box = $("#grpBox"); if (!box) return;
+  if (!force && S.grpAt && Date.now() - S.grpAt < 60000) return;     // the scan is not needed every few seconds
+  S.grpAt = Date.now();
+  let g; try { g = await jget("/api/groups"); } catch (e) { box.innerHTML = `<div class="tr">${esc(e.message)}</div>`; return; }
+  const adm = !S.o || !S.o.me || S.o.me.role === "admin";
+  const scan = g.scan.length ? table(["Group", "Packets heard", "Last heard", ""], g.scan.map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${x.packets}</td><td class="tr">${ago(x.last)}</td><td>${adm ? `<button class="tool" data-addgrp="${esc(x.name)}">Add to Messages</button>` : '<span class="tr">administrator adds it</span>'}</td></tr>`), "") : `<div class="tr">No public groups found yet. The scan tries ${g.names} public names against the last ${g.packets} packets the repeaters could not read.</div>`;
+  const rooms = g.rooms.length ? table(["Room server", "Last heard"], g.rooms.map(r => `<tr><td><b>${esc(r.name)}</b></td><td class="tr">${ago(r.last)}</td></tr>`), "") : '<div class="tr">No room servers heard in the last month.</div>';
+  box.innerHTML = `<h4 style="margin:0 0 6px">Public groups</h4>${scan}<h4 style="margin:12px 0 6px">Rooms</h4>${rooms}<p class="tr" style="margin-top:8px">A room needs its password to join, and the dashboard does not keep room passwords. Private groups with their own key are not read.</p>`;
+}
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-addgrp]"); if (!b) return;
+  const r = await post("/api/groups/add", {name: b.dataset.addgrp});
+  if (r.ok) { await grpLoad(true); await msgLoad(); } else alert(r.error || "could not add it");
+});
 async function msgLoad() {
   const m = S.mg, p = new URLSearchParams({channel: m.channel, region: m.region, dir: m.dir, q: m.q, limit: 150});
   try { m.data = await jget("/api/messages?" + p); } catch (e) { m.err = e.message; }
-  msgUpdate();
+  msgUpdate(); grpLoad();
 }
 const NC_EMOJI = ["😀","😂","😊","😎","🤔","😮","😢","👍","👎","👋","🙏","👏","🎉","❤","🔥","✅","❌","⚠","📡","🔋","📍","☀","🌧","🚗","🏠","📶"];
 const NC_THEMES = [["green", "UMC green", "#2fe27a", "#00d6a3"], ["neon", "Neon night", "#ff4fd8", "#00e5ff"], ["ocean", "Ocean", "#4fb3ff", "#2ee6d6"], ["amber", "Amber terminal", "#ffb000", "#ff7a1a"], ["sunset", "Sunset", "#ff6b6b", "#ffb347"], ["calm", "Calm", "#5d7a6b", "#4a6a8a"]];
@@ -748,7 +763,7 @@ document.addEventListener("click", e => {
 });
 function vMessages(o) {
   S.msgUp = false;
-  return `<div class="panels neonchat" id="ncWrap" data-nc="${ncTheme()}">${panel("Messages", "everything your repeaters hear in your channels, and what you send", `<div class="nc-themes" id="ncThemes">${ncThemeButtons()}</div><div id="msgBar"></div><div id="msgChips" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0"></div><div class="nc-stage"><div class="nc-rain"></div><div id="msgFeed"><div class="nc-empty">Loading…</div></div></div>`, "messages")}</div>`;
+  return `<div class="panels neonchat" id="ncWrap" data-nc="${ncTheme()}">${panel("Messages", "everything your repeaters hear in your channels, and what you send", `<div class="nc-themes" id="ncThemes">${ncThemeButtons()}</div><div id="msgBar"></div><div id="msgChips" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0"></div><div class="nc-stage"><div class="nc-rain"></div><div id="msgFeed"><div class="nc-empty">Loading…</div></div></div>`, "messages")}${panel("Groups and rooms heard", "public groups found by their names, and room servers the repeaters have heard", `<div id="grpBox"><div class="tr">Looking…</div></div>`, "groups", "s12")}</div>`;
 }
 function msgUpdate() {
   const m = S.mg, d = m.data, bar = $("#msgBar"); if (!bar || !d) return; S.msgUp = true;

@@ -457,6 +457,29 @@ class PacketRoutes(unittest.TestCase):
         self.assertEqual(["1A2B", "330D"], [h["n"] for h in rows[0]["route"]]); self.assertEqual(30, rows[0]["size"])
 
 
+class GroupScan(unittest.TestCase):
+    """The scan finds public hashtag groups by their names, and never reads a private channel."""
+    def setUp(self):
+        dash.RECENT_GRP.clear(); dash.CONF.clear(); dash.CONF.update(json.loads(json.dumps(dash.DEFAULTS)))
+
+    def _payload(self, ch, text):
+        raw = dash.MSG.build_group_text(ch, "Sam", text, int(time.time()))
+        return dash.MSG.parse_wire(raw)["payload"]
+
+    def test_a_public_group_heard_is_found_by_its_name_and_a_private_one_is_not(self):
+        import base64, os as _os
+        pub = dash.MSG.Channel("#leeds"); priv = dash.MSG.Channel("secret-room", base64.b64encode(_os.urandom(16)).decode())   # a random key: no name leads to it
+        for i in range(3): dash.RECENT_GRP.append((int(time.time()), self._payload(pub, "hi %d" % i)))
+        dash.RECENT_GRP.append((int(time.time()), self._payload(priv, "secret")))
+        found = dash.scan_public_groups(["leeds", "sheffield", "secret-room"])
+        self.assertEqual(["#leeds"], [g["name"] for g in found]); self.assertEqual(3, found[0]["packets"])
+
+    def test_a_group_already_set_up_is_not_listed_again(self):
+        dash.CONF["messages"]["channels"].append({"name": "#leeds"})
+        dash.RECENT_GRP.append((int(time.time()), self._payload(dash.MSG.Channel("#leeds"), "x")))
+        self.assertEqual([], dash.scan_public_groups(["leeds"]))
+
+
 class AdminHelper(unittest.TestCase):
     def test_password_hash_round_trip(self):
         h = adm.pbkdf2("Correct-horse-9"); self.assertTrue(adm.check_password("Correct-horse-9", h)); self.assertFalse(adm.check_password("Correct-horse-8", h)); self.assertFalse(adm.check_password("x", "garbage"))

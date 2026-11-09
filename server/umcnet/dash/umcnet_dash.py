@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.15"
+VERSION = "2.16"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -573,6 +573,13 @@ def history(keys, seconds):
 
 # ----------------------------------------------------------------------------- settings of the dashboard itself
 DASH_ID = "DA" * 32                          # the id the dashboard publishes its own messages under (a repeater's bridge hands them to its radio)
+SCAN_NAMES = ["yorkshire", "sheffield", "wakefield", "leeds", "bradford", "halifax", "huddersfield", "hull", "york", "doncaster",
+  "rotherham", "barnsley", "harrogate", "scarborough", "lincolnshire", "lincoln", "derbyshire", "nottingham", "northwest", "northeast",
+  "eng-yh", "eng-ne", "uk", "england", "public", "general", "test", "help", "news", "weather", "emergency", "chat", "hamradio",
+  "mesh", "meshcore", "repeater", "repeaters", "solar", "traffic", "events", "club", "net", "scout", "rescue", "hiking", "cycling",
+  "bolton", "manchester", "liverpool", "birmingham", "london", "bristol", "cardiff", "edinburgh", "glasgow", "newcastle", "carlisle",
+  "lancashire", "cheshire", "norfolk", "suffolk", "essex", "kent", "sussex", "surrey", "hampshire", "devon", "cornwall", "wales",
+  "scotland", "ireland", "europe", "dx", "sota", "portable", "mobile", "fixed", "emcomm", "lora", "ham", "ukmesh", "ukrepeaters"]
 MSG_DEFAULTS = {"tx_enabled": True, "sender": "UMC-DASH", "keep_days": 30,
                 "channels": [{"name": "Public", "psk": MSG.PUBLIC_PSK}, {"name": "#yorkshire"}, {"name": "#northwest"}, {"name": "#northeast"}, {"name": "#derbyshire"}, {"name": "#lincolnshire"}, {"name": "#sheffield"}, {"name": "#wakefield"}],
                 "regions": ["yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire", "sheffield", "wakefield"]}
@@ -833,6 +840,7 @@ def decoded_message(row_id, ts, chan, region, sender, text, direction, heard):
     publish_decoded("messages", {"id": row_id, "time": ts, "channel": chan, "region": region, "sender": sender, "text": text, "dir": direction, "heard_by": heard})
 
 # ----------------------------------------------------------------------------- messages (channels and regions)
+RECENT_GRP = collections.deque(maxlen=600)   # (time, payload) of group packets we cannot read yet: the scan tests names against them
 MSGSTAT = {}                                # channel hash -> {"n", "last", "regions"}: messages we cannot read (no key for that channel)
 TX_TIMES = collections.deque(maxlen=20)
 
@@ -863,7 +871,8 @@ def note_message(did, raw, snr, rssi, now):
             return
     r = MSG.decrypt_group(msg_channels(), p["payload"])
     with LOCK:
-        if r is None:                                           # a channel we have no key for: count it, nothing more
+        if r is None:                                           # a channel we have no key for: count it, keep it for the name scan
+            RECENT_GRP.append((int(now), p["payload"]))
             st = MSGSTAT.setdefault("%02X" % p["payload"][0], {"n": 0, "last": 0, "regions": collections.Counter()}); st["n"] += 1; st["last"] = now; st["regions"][region or "-"] += 1
             return
         ch, ts, flags, text = r
@@ -872,6 +881,35 @@ def note_message(did, raw, snr, rssi, now):
         except Exception as e: sys.stderr.write("messages: %s\n" % e); cur = None
         dn = (DEV.get(did) or {}).get("name") or did[:8]
     if cur is not None and cur.rowcount: decoded_message(cur.lastrowid, ts, ch.name, region, sender, body, "rx", [{"name": dn, "hops": entry["h"], "snr": entry["s"], "rssi": entry["r"]}])
+
+def scan_public_groups(names=None):
+    """Find hashtag groups heard locally: for each public name, derive its key, and look for packets it can open.
+    Returns the groups that matched, with how many packets they account for. Nothing is decrypted without its name."""
+    found = {}
+    cands = []
+    for nm in (names or SCAN_NAMES):
+        nm = nm.strip().lstrip("#").lower()
+        if not nm or any(c.get("name", "").lstrip("#").lower() == nm for c in CONF["messages"]["channels"]):
+            continue
+        try: ch = MSG.Channel("#" + nm)
+        except Exception: continue
+        cands.append((nm, ch))
+    with LOCK: packets = list(RECENT_GRP)
+    for t, payload in packets:
+        for nm, ch in cands:
+            if ch.hash != payload[0]: continue
+            if MSG.decrypt_group([ch], payload) is not None:
+                g = found.setdefault("#" + nm, {"name": "#" + nm, "packets": 0, "last": 0})
+                g["packets"] += 1; g["last"] = max(g["last"], t)
+                break
+    return sorted(found.values(), key=lambda g: -g["packets"])
+
+def rooms_heard():
+    """Room servers the repeaters have heard in the last month. Joining one needs its password, which is not kept here."""
+    now = time.time()
+    with LOCK:
+        return sorted([{"key": k, "name": n["name"] or k[:8], "last": n["last"], "lat": n["lat"], "lon": n["lon"]}
+                       for k, n in NODES.items() if n["type"] == 3 and now - n["last"] < 30 * 86400], key=lambda r: -r["last"])
 
 def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
     where, args = [], []
@@ -1508,6 +1546,12 @@ class H(BaseHTTPRequestHandler):
                     try: out["join"] = make_join_code(name, r["password"], CONF["join_iata"], control_key(dev, create=True) if re.match(r"^[0-9A-F]{64}$", dev) else None, CONF["join_bridge"])
                     except ValueError as e: out["join_error"] = str(e)
                 return self.send(200, json.dumps(out))
+            if p == "/api/groups/add":
+                nm = str(body.get("name", "")).strip()
+                if not re.match(r"^#[a-z0-9][a-z0-9-]{0,30}$", nm): return self.send(200, json.dumps({"ok": False, "error": "a group name starts with # and has letters, digits and dashes"}))
+                if any(c.get("name") == nm for c in CONF["messages"]["channels"]): return self.send(200, json.dumps({"ok": True, "note": "already added"}))
+                CONF["messages"]["channels"].append({"name": nm}); conf_save(); audit(who, "group added", nm, "public hashtag group found by the scan")
+                return self.send(200, json.dumps({"ok": True}))
             if p == "/api/messages/send":
                 own = me_view(who)["sender"] or re.sub(r"[^A-Za-z0-9._-]", "", who.upper())[:24] or "USER"
                 sender = (body.get("sender") or None) if role == "admin" else own        # users send under their own name only
@@ -1566,6 +1610,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, csv_text(("device id", "name", "area", "model", "firmware", "radio", "status", "received", "sent", "last data (epoch)", "label"), rows), "text/csv")
             if u.path == "/api/export/config.json": return self.send(200, json.dumps(CONF, indent=1))
             if u.path in ("/", "/index.html"): return self.send(200, open(CFG["static"], "rb").read(), "text/html")
+            if u.path == "/api/groups":
+                return self.send(200, json.dumps({"scan": scan_public_groups(), "rooms": rooms_heard(), "names": len(SCAN_NAMES), "packets": len(RECENT_GRP)}))
             if u.path == "/metrics":
                 return self.send(200, prometheus_text(), ctype="text/plain; version=0.0.4")
             if u.path == "/api/overview":
