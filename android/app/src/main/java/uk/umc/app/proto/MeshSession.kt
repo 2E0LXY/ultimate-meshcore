@@ -103,6 +103,8 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
     /** A route that delivered: how many times it has worked, so the most reliable one can be picked, not just the latest. */
     private data class GoodRoute(val path: List<String>, val deliveredAt: Long, val roundTripMs: Long?, val successes: Int = 1)
     private val goodRoutes = HashMap<String, MutableList<GoodRoute>>()
+    /** Times a route to a contact did not get its acknowledgement: keyed by contact, then by the route's hops. */
+    private val routeFailures = HashMap<String, HashMap<String, Int>>()
     private var nextId = 1L
 
     /** Someone waiting for a particular frame to arrive. */
@@ -473,6 +475,19 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         routes.clear(); routes.addAll(kept)
     }
 
+    private fun rememberRouteFailure(prefix: String, path: List<String>) {
+        val key = path.joinToString(",")
+        val byRoute = routeFailures.getOrPut(prefix) { HashMap() }
+        byRoute[key] = (byRoute[key] ?: 0) + 1
+    }
+
+    /** How reliable a route has been: delivered over all tries, with a little credit for many successes. */
+    private fun routeScore(prefix: String, route: GoodRoute): Double {
+        val failed = routeFailures[prefix]?.get(route.path.joinToString(",")) ?: 0
+        val rate = route.successes.toDouble() / (route.successes + failed)
+        return rate + minOf(route.successes, 10) * 0.01
+    }
+
     private fun routeIsRecent(path: List<String>): Boolean {
         val cutoff = System.currentTimeMillis() / 1000 - 6 * 3600
         return path.all { hop -> contacts.value.any { it.type == ADV_TYPE_REPEATER && it.publicKey.startsWith(hop) && it.lastAdvert >= cutoff } }
@@ -548,6 +563,7 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
             scope.launch {
                 kotlinx.coroutines.delay(maxOf(est * 2, 8000L))
                 if (awaitingAck.remove(ack) != null && current(id)?.status == "pending") {
+                    rememberRouteFailure(prefix, current(id)?.routeHops ?: initialPath)
                     update(id) { it.copy(status = "failed", error = "no delivery confirmation", failure = "ack-timeout") }
                 }
             }
@@ -564,8 +580,10 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
             update(message.id) { it.copy(recovery = "Looking for a known-good route…") }
             val currentPath = routeHops(contact)
             // the most reliable route that is not the one that just failed and was seen in the last six hours
+            // the most reliable route that is not the one that just failed and was seen in the last six hours:
+            // delivered-over-tried rate first, then the most recent delivery
             val good = goodRoutes[prefix]?.filter { it.path != currentPath && routeIsRecent(it.path) }
-                ?.maxWithOrNull(compareBy<GoodRoute> { it.successes }.thenBy { it.deliveredAt })
+                ?.maxWithOrNull(compareBy<GoodRoute> { routeScore(prefix, it) }.thenBy { it.deliveredAt })
             if (good != null) {
                 update(message.id) { it.copy(recovery = "Retrying via previously delivered route ${good.path.joinToString(" → ")}…") }
                 setRoute(contact, good.path)
