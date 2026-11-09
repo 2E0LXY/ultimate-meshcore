@@ -100,7 +100,8 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
 
     private val lock = Mutex()
     private val awaitingAck = HashMap<String, Long>()   // delivery code -> message id
-    private data class GoodRoute(val path: List<String>, val deliveredAt: Long, val roundTripMs: Long?)
+    /** A route that delivered: how many times it has worked, so the most reliable one can be picked, not just the latest. */
+    private data class GoodRoute(val path: List<String>, val deliveredAt: Long, val roundTripMs: Long?, val successes: Int = 1)
     private val goodRoutes = HashMap<String, MutableList<GoodRoute>>()
     private var nextId = 1L
 
@@ -464,9 +465,12 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         if (message.routeKind == "flood" || message.routeKind == null) return
         val prefix = message.conversation.removePrefix("c:")
         val routes = goodRoutes.getOrPut(prefix) { mutableListOf() }
+        val earlier = routes.firstOrNull { it.path == message.routeHops }
         routes.removeAll { it.path == message.routeHops }
-        routes.add(0, GoodRoute(message.routeHops, System.currentTimeMillis(), roundTripMs))
-        while (routes.size > 10) routes.removeLast()
+        routes.add(0, GoodRoute(message.routeHops, System.currentTimeMillis(), roundTripMs, (earlier?.successes ?: 0) + 1))
+        // keep the ten most reliable (then most recent) so a route that worked once long ago does not crowd out a good one
+        val kept = routes.sortedWith(compareByDescending<GoodRoute> { it.successes }.thenByDescending { it.deliveredAt }).take(10)
+        routes.clear(); routes.addAll(kept)
     }
 
     private fun routeIsRecent(path: List<String>): Boolean {
@@ -559,7 +563,9 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         if (!forceFlood) {
             update(message.id) { it.copy(recovery = "Looking for a known-good route…") }
             val currentPath = routeHops(contact)
-            val good = goodRoutes[prefix]?.firstOrNull { it.path != currentPath && routeIsRecent(it.path) }
+            // the most reliable route that is not the one that just failed and was seen in the last six hours
+            val good = goodRoutes[prefix]?.filter { it.path != currentPath && routeIsRecent(it.path) }
+                ?.maxWithOrNull(compareBy<GoodRoute> { it.successes }.thenBy { it.deliveredAt })
             if (good != null) {
                 update(message.id) { it.copy(recovery = "Retrying via previously delivered route ${good.path.joinToString(" → ")}…") }
                 setRoute(contact, good.path)

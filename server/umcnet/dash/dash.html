@@ -389,7 +389,7 @@ function vRepeaters(o) {
   const ids = o.overlap.ids;
   const mat = ids.length > 1 ? table([""].concat(o.overlap.names.map(n => esc(n.slice(0, 14)))), o.overlap.m.map((row, i) => `<tr><td><b>${esc(o.overlap.names[i])}</b></td>${row.map(v => v == null ? `<td class="tr">·</td>` : `<td style="background:rgba(47,226,122,${Math.min(.55, v / Math.max(1, ...o.overlap.m.flat().filter(x => x)) * .55)})">${v}</td>`).join("")}</tr>`)) : `<p class="tr">Needs two repeaters sending packets.</p>`;
   const hb = Object.entries(o.heard_by), hbt = hb.reduce((s, x) => s + x[1], 0);
-  return `<div class="panels">${cards || panel("Repeaters", "", `<div class="empty">No repeater has sent anything since the dashboard started.</div>`, "repeaters")}<div class="pn s12 row"><span class="tr">Save the repeater list:</span> <a href="/api/export/devices.csv">Repeaters (CSV)</a></div>
+  return `<div class="panels">${cards || panel("Repeaters", "", `<div class="empty">No repeater has sent anything since the dashboard started.</div>`, "repeaters")}${panel("Firmware updates", "install the latest version on a repeater from here", o.devices.length ? `<table><thead><tr><th>Repeater</th><th>Running</th><th>Update</th><th></th></tr></thead><tbody>${o.devices.map(d => { const b = (d.settings && d.settings.build) || ""; const v = (b.match(/0\.1\.\d+/) || [d.fw || "?"])[0]; const nm = esc(d.name || d.id.slice(0, 8)); return `<tr><td><b>${nm}</b></td><td>${esc(v)}</td><td class="tr" data-fwstate="${esc(d.id)}">not checked</td><td style="white-space:nowrap"><button class="tool" data-fwcheck="${esc(d.id)}">Check</button> <button class="tool danger" data-fwup="${esc(d.id)}" data-name="${nm}">Update firmware</button></td></tr>`; }).join("")}</tbody></table><p class="tr" style="margin-top:8px">The repeater restarts, keeps its settings and joins again within a few minutes. The T-Deck and the Heltec are not on the broker, so update those over USB.</p>` : `<div class="empty">No repeater has reported yet.</div>`, "fwupdates", "s12")}<div class="pn s12 row"><span class="tr">Save the repeater list:</span> <a href="/api/export/devices.csv">Repeaters (CSV)</a></div>
     ${panel("Who hears the same packets", "packets both repeaters heard, last 15 minutes", mat, "overlap", "s7")}
     ${panel("Heard by how many", hbt + " distinct packets, last 15 minutes", hbt ? D.donut(hb.map(([k, v], i) => ({label: k + (k === "1" ? " repeater" : " repeaters"), value: v, color: ["#2fe27a", "#4aa8ff", "#f2c14e", "#a58bff", "#ff8f5a"][i % 5]})), String(hbt), "packets") : `<div class="empty">Nothing yet.</div>`, "heard", "s5")}</div>`;
 }
@@ -715,6 +715,21 @@ const NC_EMOJI = ["😀","😂","😊","😎","🤔","😮","😢","👍","👎"
 const NC_THEMES = [["green", "UMC green", "#2fe27a", "#00d6a3"], ["neon", "Neon night", "#ff4fd8", "#00e5ff"], ["ocean", "Ocean", "#4fb3ff", "#2ee6d6"], ["amber", "Amber terminal", "#ffb000", "#ff7a1a"], ["sunset", "Sunset", "#ff6b6b", "#ffb347"], ["calm", "Calm", "#5d7a6b", "#4a6a8a"]];
 function ncTheme() { let t = "green"; try { t = localStorage.getItem("umc.chatTheme") || "green"; } catch {} return NC_THEMES.some(x => x[0] === t) ? t : "green"; }
 function ncThemeButtons() { const cur = ncTheme(); return `<span>Theme</span>` + NC_THEMES.map(([k, l, a, b]) => `<button type="button" data-nctheme="${k}" class="${k === cur ? "on" : ""}" title="${l}"><i style="background:linear-gradient(135deg,${a} 50%,${b} 50%)"></i>${l}</button>`).join(""); }
+document.addEventListener("click", async e => {
+  const fc = e.target.closest("[data-fwcheck]"), fu = e.target.closest("[data-fwup]");
+  if (fc || fu) {
+    const btn = fc || fu, dev = fc ? fc.dataset.fwcheck : fu.dataset.fwup, cell = document.querySelector('[data-fwstate="' + dev + '"]');
+    if (fu && !confirm("Update " + fu.dataset.name + " to the latest firmware?\n\nIt restarts, keeps its settings and joins again within a few minutes.")) return;
+    if (cell) cell.textContent = fu ? "updating (about a minute)…" : "checking…";
+    const r = await post("/api/control", {device: dev, cmd: fu ? "update install" : "update check", confirm: true});
+    if (fc) {
+      await new Promise(x => setTimeout(x, 12000));
+      const s = await post("/api/control", {device: dev, cmd: "get update.status", confirm: true});
+      if (cell) cell.textContent = s.ok ? (s.reply || "").replace(/^>\s*/, "") : (s.error || "no answer");
+    } else if (cell) cell.textContent = r.ok ? "update sent: the repeater restarts" : (r.error || "could not start the update");
+    return;
+  }
+});
 document.addEventListener("click", e => {
   const em = e.target.closest("[data-emo]");
   if (em) {
