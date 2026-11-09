@@ -105,6 +105,8 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
     private val goodRoutes = HashMap<String, MutableList<GoodRoute>>()
     /** Times a route to a contact did not get its acknowledgement: keyed by contact, then by the route's hops. */
     private val routeFailures = HashMap<String, HashMap<String, Int>>()
+    /** Auto path: when on, sends use the most reliable known route to a contact. Turn off to keep the route the radio has. */
+    @Volatile var autoPath: Boolean = true
     private var nextId = 1L
 
     /** Someone waiting for a particular frame to arrive. */
@@ -547,7 +549,16 @@ class MeshSession(private val link: Link, private val scope: CoroutineScope) {
         }
         val prefix = conversation.removePrefix("c:")
         val contact = contacts.value.firstOrNull { it.publicKey.startsWith(prefix) }
-        val initialPath = contact?.let { routeHops(it) }.orEmpty()
+        var initialPath = contact?.let { routeHops(it) }.orEmpty()
+        // Auto path: every send uses the most reliable route this radio has seen deliver to this contact, if it is recent
+        // and differs from the stored one. The stored route is switched first, so the radio sends on it.
+        if (autoPath && contact != null && contact.hops != 0) {
+            val best = goodRoutes[prefix]?.filter { routeIsRecent(it.path) }?.maxWithOrNull(compareBy<GoodRoute> { routeScore(prefix, it) }.thenBy { it.deliveredAt })
+            if (best != null && best.path != initialPath) {
+                runCatching { setRoute(contact, best.path) }
+                initialPath = best.path
+            }
+        }
         update(id) { it.copy(routeKind = if (contact == null || contact.hops < 0) "flood" else if (contact.hops == 0) "direct" else "route", routeHops = initialPath) }
         try {
             val f = request(
