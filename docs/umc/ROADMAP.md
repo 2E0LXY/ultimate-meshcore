@@ -15,6 +15,13 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 - ✅ **Repeater memory fixed.** The V4 at Blake ran with Bluetooth on and no idle timeout, down to about 2 KB of free memory, so its update checks failed. Repeaters now switch Bluetooth off after 10 idle minutes by default. Remotely, Bluetooth was switched off on both repeaters and they recovered to over 110 KB free
 - ✅ **Dashboard 2.14:** the mesh issues check summarises nodes quiet across the mesh into one line (it had listed about 300 separately), and checks only our own repeaters one by one for missing positions
 
+## Done in 0.1.43 (T-Deck)
+
+- ✅ **Chat grid.** Opening Messages shows a tile for every channel, room server and person with messages, each with its unread count. Tap a tile to open it; the Chats button returns to the grid
+- ✅ **Unread is counted per conversation.** Opening one chat no longer clears the others
+- ✅ **Correct hop count on received messages.** The raw path-length byte (which also carries the path hash size) was shown, so 4 hops read as 132. Received messages now say "Received via N repeaters · last-hop SNR", "Heard straight from the sender", or "Received by direct route"
+- ✅ **The Reply-to strip no longer overlaps the composer.** It is 16 px with the small face
+
 ## Done in 0.1.42
 
 - ✅ **Every client now reports its real version.** The shared client settings still said 0.1.40 in 0.1.41 builds, so clients on 0.1.41 kept offering an update to 0.1.41. The version is now set in one place for all builds

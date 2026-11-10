@@ -38,6 +38,12 @@ enum SetupEdit { SE_NONE = 0, SE_NAME, SE_SSID, SE_PASSWORD, SE_PIN, SE_REGION, 
 #define BODY_Y HDR_H
 #define BODY_H (SCR_H - HDR_H - TAB_H)
 #define COMPOSE_H 26
+#define CHAT_COLS 4      // the chat grid: 4 x 3 tiles a page
+#define CHAT_ROWS 3
+#define CHAT_CW 78
+#define CHAT_CH 66
+#define CHAT_TILE 40
+#define REPLY_H 16        // the "Reply to" strip above the composer
 
 // ---- colour themes ----
 // Nine schemes, like a phone messenger: the page colour, the two bubble colours and the
@@ -853,7 +859,7 @@ void UITask::loop() {
 
   if (umc_chatlog.revision() != _log_rev) {
     _log_rev = umc_chatlog.revision();
-    if (_tab == TAB_MSGS) umc_chatlog.markRead();
+    if (_tab == TAB_MSGS && !_conversation_picker) markOpenChatRead();
     _dirty = true;
   }
   if (_alert_expiry && millis() > _alert_expiry) {
@@ -1265,7 +1271,7 @@ void UITask::drawMessages() {
   applyTheme();
   const int top = BODY_Y + 2;
   // the list ends where the composer (and the reply bar, when there is one) begins
-  const int list_bottom = SCR_H - TAB_H - COMPOSE_H - (_reply_to[0] ? 12 : 0) - 2;
+  const int list_bottom = SCR_H - TAB_H - COMPOSE_H - (_reply_to[0] ? REPLY_H : 0) - 2;
   const int status_h = 14;                           // full 13px tiny-font advance, plus separation
   const int content_bottom = list_bottom - status_h;
   const int list_h = list_bottom - (top + 17);
@@ -1330,10 +1336,15 @@ void UITask::drawMessages() {
         else if (failed) snprintf(state, sizeof(state), "Failed: no ACK via %s · tap again: flood retry", route);
         else if (waiting) snprintf(state, sizeof(state), "Sent via %s · delivery pending", route);
         else snprintf(state, sizeof(state), "Sent via %s · no recipient ACK", route);
-      } else if (e->hops == 0xFF) {
-        snprintf(state, sizeof(state), "Received by flood%s", e->snr4 ? " · SNR available" : "");
+      } else if (e->hops >= 0xFE) {
+        // a routed (direct) packet: the hop count is not carried, only the last link's SNR
+        snprintf(state, sizeof(state), "Received by direct route · last-hop SNR %.1f dB", e->snr4 / 4.0f);
+      } else if ((e->hops & 63) == 0) {
+        snprintf(state, sizeof(state), "Heard straight from the sender · SNR %.1f dB", e->snr4 / 4.0f);
       } else {
-        snprintf(state, sizeof(state), "Reply returned via %u hop%s · SNR %.1f", (unsigned)e->hops, e->hops == 1 ? "" : "s", e->snr4 / 4.0f);
+        // SNR is measured on the final link only: the repeater that handed it to us
+        const unsigned h = e->hops & 63;
+        snprintf(state, sizeof(state), "Received via %u repeater%s · last-hop SNR %.1f dB", h, h == 1 ? "" : "s", e->snr4 / 4.0f);
       }
       const bool failed = e->outgoing && e->expect_ack && !e->delivered && (millis() - e->sent_ms) > kAckWaitMs;
       textFClip(6, content_bottom, SCR_W - 12, state, failed ? C_BAD : TH.dim, F_TINY);
@@ -1341,46 +1352,140 @@ void UITask::drawMessages() {
   }
   // who we are writing to - drawn last, so a bubble scrolling off the top goes behind it
   fill(0, top, SCR_W, 16, TH.card);
+  if (_conversation_picker) {          // the chat grid covers the conversation and the composer
+    drawConversationPicker(top + 17, SCR_H - TAB_H);
+    return;
+  }
   char hdr[48];
   snprintf(hdr, sizeof(hdr), "To: %s", _to_name);
   textClip(4, top + 4, SCR_W - 72, hdr, TH.text);
-  button(SCR_W - 70, top, 68, 16, "Channels", _conversation_picker);
-  if (_conversation_picker) drawConversationPicker(top + 17, list_bottom);
+  button(SCR_W - 70, top, 68, 16, "Chats", false);
   if (_quick_open) drawQuickPanel();
   if (_emoji_open) drawEmojiPanel();
   drawCompose();
 }
 
-void UITask::drawConversationPicker(int top, int bottom) {
-  fill(0, top, SCR_W, bottom - top, TH.bg);
-  textF(7, top + 4, "CHANNELS / ROOMS", TH.accent, F_SMALL);
-  _picker_rows = 0;
-  int y = top + 20;
+// Every chat that can be opened: channels first, then room servers, then people we have
+// messages from. Rebuilt each time the grid is drawn, so it follows the contact list.
+void UITask::buildChatList() {
+  _chat_n = 0;
   ChannelDetails ch;
-  for (int i = 0; i < MAX_GROUP_CHANNELS && y + 19 <= bottom && _picker_rows < 12; i++) {
+  for (int i = 0; i < MAX_GROUP_CHANNELS && _chat_n < CHAT_MAX; i++) {
     if (!the_mesh.getChannel(i, ch) || !ch.name[0]) continue;
-    const bool active = _to_channel && _to_channel_idx == i;
-    fill(4, y, SCR_W - 8, 18, active ? TH.mine : TH.card);
-    textFClip(10, y + 3, SCR_W - 20, ch.name, active ? TH.mine_text : TH.text, F_SMALL);
-    _picker_y[_picker_rows] = y;
-    _picker_kind[_picker_rows] = 0;
-    _picker_idx[_picker_rows++] = i;
-    y += 20;
+    _chat_kind[_chat_n] = 0;
+    _chat_idx[_chat_n++] = i;
   }
   ContactInfo c;
-  for (int i = 0; i < contactCount() && y + 19 <= bottom && _picker_rows < 12; i++) {
-    if (!contactAt(i, c) || c.type != ADV_TYPE_ROOM) continue;
-    const bool active = !_to_channel && memcmp(c.id.pub_key, _to_key, 6) == 0;
-    fill(4, y, SCR_W - 8, 18, active ? TH.mine : TH.card);
-    char name[42];
-    snprintf(name, sizeof(name), "Room: %s", c.name[0] ? c.name : "unnamed");
-    textFClip(10, y + 3, SCR_W - 20, name, active ? TH.mine_text : TH.text, F_SMALL);
-    _picker_y[_picker_rows] = y;
-    _picker_kind[_picker_rows] = 1;
-    _picker_idx[_picker_rows++] = i;
-    y += 20;
+  for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; i < contactCount() && _chat_n < CHAT_MAX; i++) {
+      if (!contactAt(i, c)) continue;
+      const bool room = c.type == ADV_TYPE_ROOM;
+      if (pass == 0 ? !room : room) continue;
+      if (!room) {
+        const bool open_now = !_to_channel && memcmp(c.id.pub_key, _to_key, 6) == 0;
+        if (c.type != ADV_TYPE_CHAT || (!open_now && !umc_chatlog.hasDirect(c.id.pub_key))) continue;
+      }
+      _chat_kind[_chat_n] = room ? 1 : 2;
+      _chat_idx[_chat_n++] = i;
+    }
   }
-  if (_picker_rows == 0) textF(8, top + 26, "No channels or rooms found", TH.dim, F_SMALL);
+}
+
+// Cell geometry for grid slot n (0-based on the current page).
+static void chatCell(int top, int n, int& x, int& y) {
+  x = (SCR_W - CHAT_COLS * CHAT_CW) / 2 + (n % CHAT_COLS) * CHAT_CW;
+  y = top + 4 + (n / CHAT_COLS) * CHAT_CH;
+}
+
+void UITask::drawConversationPicker(int top, int bottom) {
+  fill(0, top, SCR_W, bottom - top, TH.bg);
+  buildChatList();
+  const int per = CHAT_COLS * CHAT_ROWS, pages = _chat_n > 0 ? (_chat_n + per - 1) / per : 1;
+  if (_chat_page >= pages) _chat_page = pages - 1;
+  // the header strip above belongs to the grid while it is open
+  char hdr[32];
+  if (pages > 1) snprintf(hdr, sizeof(hdr), "Chats  %d/%d", _chat_page + 1, pages);
+  else snprintf(hdr, sizeof(hdr), "Chats");
+  textF(6, top - 15, hdr, TH.accent, F_SMALL);
+  if (pages > 1) {
+    button(SCR_W - 134, top - 17, 30, 16, "<");
+    button(SCR_W - 102, top - 17, 30, 16, ">");
+  }
+  button(SCR_W - 70, top - 17, 68, 16, "Close", true);
+  _chat_top = top;
+  if (_chat_n == 0) {
+    textF(8, top + 20, "No channels or rooms set up", TH.dim, F_SMALL);
+    return;
+  }
+  for (int n = 0; n < per; n++) {
+    const int k = _chat_page * per + n;
+    if (k >= _chat_n) break;
+    int x, y;
+    chatCell(top, n, x, y);
+    const int tx = x + (CHAT_CW - CHAT_TILE) / 2;
+    char name[34] = "";
+    uint16_t col;
+    int unread = 0;
+    bool active;
+    if (_chat_kind[k] == 0) {
+      ChannelDetails ch;
+      the_mesh.getChannel(_chat_idx[k], ch);
+      StrHelper::strncpy(name, ch.name, sizeof(name));
+      unread = umc_chatlog.unreadIn((uint8_t)_chat_idx[k], NULL);
+      active = _to_channel && _to_channel_idx == _chat_idx[k];
+      col = 0x1CBF;                                              // blue: channels
+      gfx()->fillRoundRect(tx, y, CHAT_TILE, CHAT_TILE, 8, col);
+      const int hx = tx + CHAT_TILE / 2, hy = y + CHAT_TILE / 2, u = CHAT_TILE / 10;   // a '#'
+      gfx()->fillRect(hx - 2 * u, hy - 4 * u, u + 1, 8 * u, 0xFFFF);
+      gfx()->fillRect(hx + u, hy - 4 * u, u + 1, 8 * u, 0xFFFF);
+      gfx()->fillRect(hx - 4 * u, hy - 2 * u, 8 * u, u + 1, 0xFFFF);
+      gfx()->fillRect(hx - 4 * u, hy + u, 8 * u, u + 1, 0xFFFF);
+    } else {
+      ContactInfo c;
+      if (!contactAt(_chat_idx[k], c)) continue;
+      StrHelper::strncpy(name, c.name[0] ? c.name : "unnamed", sizeof(name));
+      unread = umc_chatlog.unreadIn(0xFF, c.id.pub_key);
+      active = !_to_channel && memcmp(c.id.pub_key, _to_key, 6) == 0;
+      col = _chat_kind[k] == 1 ? 0x2E6A : 0x9018;               // green rooms, purple people
+      gfx()->fillRoundRect(tx, y, CHAT_TILE, CHAT_TILE, 8, col);
+      drawIcon(tx + (CHAT_TILE - 24) / 2, y + (CHAT_TILE - 24) / 2, _chat_kind[k] == 1 ? IC_HOUSE : IC_FACE, 0xFFFF, 24);
+    }
+    if (active) gfx()->drawRoundRect(tx - 2, y - 2, CHAT_TILE + 4, CHAT_TILE + 4, 10, TH.text);
+    if (unread > 0) {                                            // unread badge, top right
+      char nb[6];
+      snprintf(nb, sizeof(nb), "%d", unread > 99 ? 99 : unread);
+      const int bw = textFWidth(nb, F_TINY) + 8;
+      gfx()->fillRoundRect(tx + CHAT_TILE - bw + 6, y - 4, bw, 14, 7, C_BAD);
+      textF(tx + CHAT_TILE - bw + 10, y - 3, nb, 0xFFFF, F_TINY);
+    }
+    const int lw = textFWidth(name, F_TINY);
+    if (lw <= CHAT_CW - 4) textF(x + (CHAT_CW - lw) / 2, y + CHAT_TILE + 3, name, active ? TH.accent : TH.text, F_TINY);
+    else textFClip(x + 2, y + CHAT_TILE + 3, CHAT_CW - 4, name, active ? TH.accent : TH.text, F_TINY);
+  }
+}
+
+// Opens chat k from the grid and marks it read.
+void UITask::openChat(int k) {
+  if (k < 0 || k >= _chat_n) return;
+  if (_chat_kind[k] == 0) {
+    ChannelDetails ch;
+    if (!the_mesh.getChannel(_chat_idx[k], ch)) return;
+    _to_channel = true;
+    _to_channel_idx = _chat_idx[k];
+    StrHelper::strncpy(_to_name, ch.name, sizeof(_to_name));
+  } else {
+    selectContact(_chat_idx[k]);
+  }
+  _conversation_picker = false;
+  _msg_scroll = 0;
+  _msg_sel = -1;
+  _reply_to[0] = 0;
+  markOpenChatRead();
+  _dirty = true;
+}
+
+void UITask::markOpenChatRead() {
+  umc_chatlog.markConvRead(_to_channel ? _to_channel_idx : 0xFF, _to_channel ? NULL : _to_key);
 }
 
 // The canned replies, over the conversation. Tapping one loads it into the composer so it
@@ -1435,12 +1540,15 @@ void UITask::drawQuickPanel() {
 
 void UITask::drawCompose() {
   if (_reply_to[0]) {
-    const int ry = SCR_H - TAB_H - COMPOSE_H - 12;
-    fill(0, ry, SCR_W, 12, TH.card);
+    const int ry = SCR_H - TAB_H - COMPOSE_H - REPLY_H;
+    fill(0, ry, SCR_W, REPLY_H, TH.card);
+    gfx()->drawFastHLine(0, ry, SCR_W, TH.accent);
     char line[52];
     snprintf(line, sizeof(line), "Reply to: %s", _reply_to);
-    textClip(4, ry + 2, SCR_W - 40, line, TH.accent);
-    button(SCR_W - 34, ry, 32, 12, "x");
+    textFClip(4, ry + 2, SCR_W - 44, line, TH.accent, F_TINY);   // tiny face: fits the strip
+    fill(SCR_W - 34, ry + 1, 32, REPLY_H - 2, TH.bg);
+    gfx()->drawRect(SCR_W - 34, ry + 1, 32, REPLY_H - 2, C_LINE);
+    textF(SCR_W - 22, ry + 2, "x", TH.text, F_TINY);
   }
   const int y = SCR_H - TAB_H - COMPOSE_H;
   fill(0, y, SCR_W, COMPOSE_H, C_CARD);
@@ -3180,7 +3288,7 @@ void UITask::handleTouch(const TouchEvent& ev) {
       homeApp(i, x, y, w, h);
       if (hit(ev, x, y, w, h + 12)) {
         _tab = (Tab)kApps[i].tab;
-        if (_tab == TAB_MSGS) umc_chatlog.markRead();
+        if (_tab == TAB_MSGS) { _conversation_picker = true; _chat_page = 0; }   // start at the chat grid
         if (_tab == TAB_MAP && _follow_self) centreOnSelf();
         _dirty = true;
         return;
@@ -3192,28 +3300,22 @@ void UITask::handleTouch(const TouchEvent& ev) {
     const int top = BODY_Y + 2;
     if (hit(ev, SCR_W - 70, top, 68, 16)) {
       _conversation_picker = !_conversation_picker;
-      _quick_open = false;
+      if (!_conversation_picker) markOpenChatRead();
+      _quick_open = false; _emoji_open = false;
       _dirty = true;
       return;
     }
-    if (_conversation_picker && ev.released) {
-      for (int i = 0; i < _picker_rows; i++) {
-        if (ev.y < _picker_y[i] || ev.y >= _picker_y[i] + 18) continue;
-        if (_picker_kind[i] == 0) {
-          ChannelDetails ch;
-          if (the_mesh.getChannel(_picker_idx[i], ch)) {
-            _to_channel = true;
-            _to_channel_idx = _picker_idx[i];
-            StrHelper::strncpy(_to_name, ch.name, sizeof(_to_name));
-          }
-        } else {
-          selectContact(_picker_idx[i]);
-        }
-        _conversation_picker = false;
-        _dirty = true;
-        return;
+    if (_conversation_picker) {         // the grid owns the whole body while it is open
+      if (!ev.released) return;
+      const int per = CHAT_COLS * CHAT_ROWS, pages = _chat_n > 0 ? (_chat_n + per - 1) / per : 1;
+      if (pages > 1 && hit(ev, SCR_W - 134, top, 30, 16)) { _chat_page = (_chat_page + pages - 1) % pages; _dirty = true; return; }
+      if (pages > 1 && hit(ev, SCR_W - 102, top, 30, 16)) { _chat_page = (_chat_page + 1) % pages; _dirty = true; return; }
+      for (int n = 0; n < per; n++) {
+        int x, y;
+        chatCell(_chat_top, n, x, y);
+        if (hit(ev, x, y - 4, CHAT_CW, CHAT_CH)) { openChat(_chat_page * per + n); return; }
       }
-      if (ev.y >= top + 17) return;
+      return;
     }
     if (hit(ev, SCR_W - 62, SCR_H - TAB_H - COMPOSE_H + 3, 58, 20)) { sendCompose(); return; }
     if (hit(ev, SCR_W - 136, SCR_H - TAB_H - COMPOSE_H + 3, 28, 20)) {
@@ -3259,7 +3361,7 @@ void UITask::handleTouch(const TouchEvent& ev) {
       }
       if (ev.y >= y0) { _quick_open = false; _dirty = true; return; }   // the panel's own header
     }
-    if (_reply_to[0] && hit(ev, SCR_W - 34, SCR_H - TAB_H - COMPOSE_H - 12, 32, 12)) {
+    if (_reply_to[0] && hit(ev, SCR_W - 40, SCR_H - TAB_H - COMPOSE_H - REPLY_H, 40, REPLY_H)) {
       _reply_to[0] = 0;              // stop replying
       _msg_sel = -1;
       _dirty = true;
@@ -3554,7 +3656,8 @@ void UITask::handleKey(char c) {
   }
   if (_tab != TAB_MSGS) {
     _tab = TAB_MSGS;   // typing anywhere jumps to the messages screen
-    umc_chatlog.markRead();
+    _conversation_picker = false;
+    markOpenChatRead();
   }
   if (c == 8 || c == 127) {                 // backspace
     if (_compose_len > 0) {
@@ -3579,6 +3682,8 @@ void UITask::selectContact(int idx) {
   memcpy(_to_key, c.id.pub_key, 6);
   StrHelper::strncpy(_to_name, c.name[0] ? c.name : "contact", sizeof(_to_name));
   _contact_sel = idx;
+  _conversation_picker = false;   // opened from Who: go straight to the conversation
+  markOpenChatRead();
   _dirty = true;
 }
 

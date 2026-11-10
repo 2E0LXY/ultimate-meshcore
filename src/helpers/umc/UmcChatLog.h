@@ -30,7 +30,11 @@ public:
     uint8_t relays;      // channel messages: how many repeaters were heard passing it on
     uint32_t sent_ms;    // when it went out, so a silent message can be called failed
     int8_t snr4;
-    uint8_t hops;        // 0xFF = arrived by flood
+    // Sent: 0xFF = sent by flood, else hops on the stored route.
+    // Received: repeater hops the flood took (0 = heard straight from the sender);
+    // 0xFE = arrived on a direct (routed) path, where the count is not carried.
+    uint8_t hops;
+    bool seen;           // read on this screen (our own messages are always seen)
     uint32_t epoch;      // sender timestamp
     unsigned long ms;
     char from[24];       // sender name (channels and room servers)
@@ -66,7 +70,35 @@ public:
     return e.channel == 0xFF && memcmp(e.key, key_prefix, 6) == 0;
   }
 
-  int unread() const { return _unread; }
+  // Unread across every conversation.
+  int unread() const {
+    int n = 0;
+    for (int i = 0; i < _count; i++) if (!get(i)->seen) n++;
+    return n;
+  }
+  // Unread in one conversation: a channel index, or 0xFF with the contact's key prefix.
+  int unreadIn(uint8_t channel, const uint8_t* key_prefix) const {
+    int n = 0;
+    for (int i = 0; i < _count; i++) {
+      const Entry* e = get(i);
+      if (!e->seen && inConv(*e, channel, key_prefix)) n++;
+    }
+    return n;
+  }
+  // Any message at all in a direct conversation, so the chat picker can offer it.
+  bool hasDirect(const uint8_t* key_prefix) const {
+    for (int i = 0; i < _count; i++) if (isDirect(*get(i), key_prefix)) return true;
+    return false;
+  }
+  // Marks one conversation read. Returns true when anything changed.
+  bool markConvRead(uint8_t channel, const uint8_t* key_prefix) {
+    bool changed = false;
+    for (int i = 0; i < _count; i++) {
+      Entry& e = _ring[(_head - _count + i + kMax * 2) % kMax];
+      if (!e.seen && inConv(e, channel, key_prefix)) { e.seen = true; changed = true; }
+    }
+    return changed;
+  }
 
   // Marks the newest message still waiting on this ACK hash as delivered. Returns true if
   // one was found, so the screen knows to redraw.
@@ -104,9 +136,15 @@ public:
     }
     return false;
   }
-  void markRead() { _unread = 0; }
+  void markRead() {
+    for (int i = 0; i < kMax; i++) _ring[i].seen = true;
+  }
 
 private:
+  static bool inConv(const Entry& e, uint8_t channel, const uint8_t* key_prefix) {
+    if (channel != 0xFF) return e.channel == channel;
+    return e.channel == 0xFF && key_prefix != nullptr && memcmp(e.key, key_prefix, 6) == 0;
+  }
   Entry& next() {
     Entry& e = _ring[_head];
     _head = (_head + 1) % kMax;
@@ -129,11 +167,11 @@ private:
     e.from[sizeof(e.from) - 1] = 0;
     strncpy(e.text, text ? text : "", sizeof(e.text) - 1);
     e.text[sizeof(e.text) - 1] = 0;
-    if (!outgoing) _unread++;
+    e.seen = outgoing;
   }
 
   Entry _ring[kMax] = {};
-  int _head = 0, _count = 0, _unread = 0;
+  int _head = 0, _count = 0;
   uint32_t _rev = 0;
 };
 

@@ -50,6 +50,9 @@ private:
   void drawTabs();
   void drawMessages();
   void drawConversationPicker(int top, int bottom);
+  void buildChatList();
+  void openChat(int k);
+  void markOpenChatRead();
   void drawContacts();
   void drawMap();
   void drawInfo();
@@ -134,10 +137,10 @@ private:
   int _msg_name_top[12] = {0};
   int _msg_name_bottom[12] = {0};
   bool _conversation_picker = false;
-  int _picker_rows = 0;
-  int _picker_y[12] = {0};
-  int _picker_kind[12] = {0};       // 0 channel, 1 room/contact
-  int _picker_idx[12] = {0};
+  static constexpr int CHAT_MAX = 36;
+  int _chat_n = 0, _chat_page = 0, _chat_top = 0;
+  uint8_t _chat_kind[CHAT_MAX] = {0};   // 0 channel, 1 room server, 2 person
+  int _chat_idx[CHAT_MAX] = {0};
   char _reply_to[48] = {0};         // what that message said, quoted in the reply
   char _console_cmd[80] = {0};      // last command typed on the console page
   char _console_out[320] = {0};     // and what it said

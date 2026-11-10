@@ -556,7 +556,7 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
 
 #ifdef UMC_BUILD
   umc_chatlog.addDirect(from.id.pub_key, from.name, text, sender_timestamp, false, (int8_t)(pkt->getSNR() * 4),
-                        pkt->isRouteFlood() ? pkt->path_len : 0xFF, txt_type == TXT_TYPE_CLI_DATA);
+                        pkt->isRouteFlood() ? pkt->getPathHashCount() : 0xFE, txt_type == TXT_TYPE_CLI_DATA);
 #endif
 
   if (_serial->isConnected()) {
@@ -695,10 +695,10 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
     if (cut != NULL && cut - text < (int)sizeof(who)) {
       memcpy(who, text, cut - text);
       umc_chatlog.addChannel(channel_idx, who, cut + 2, timestamp, false, (int8_t)(pkt->getSNR() * 4),
-                             pkt->isRouteFlood() ? pkt->path_len : 0xFF);
+                             pkt->isRouteFlood() ? pkt->getPathHashCount() : 0xFE);
     } else {
       umc_chatlog.addChannel(channel_idx, "", text, timestamp, false, (int8_t)(pkt->getSNR() * 4),
-                             pkt->isRouteFlood() ? pkt->path_len : 0xFF);
+                             pkt->isRouteFlood() ? pkt->getPathHashCount() : 0xFE);
     }
   }
 #endif
