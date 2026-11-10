@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.16"
+VERSION = "2.17"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -1393,7 +1393,9 @@ def diagnostics(sysinfo, accs, cert):
     if quiet:
         add("warn", "%d mesh node%s quiet for over a day" % (len(quiet), "" if len(quiet) == 1 else "s"), ", ".join(sorted(quiet, key=str.lower)[:15]) + (" …" if len(quiet) > 15 else ""))
     for d in DEV.values():
-        if d["id"] in own and d.get("lat") is None and not (CONF.get("locations") or {}).get(d["id"]):
+        sv = (SETTINGS.get(d["id"]) or {}).get("values", {})          # the position the repeater reports for itself (read over the control link)
+        has_pos = d.get("lat") is not None or any(str(sv.get(k, "")).strip(" >") not in ("", "0", "0.0", "(not set)") for k in ("lat",))
+        if d["id"] in own and not has_pos and not (CONF.get("locations") or {}).get(d["id"]):
             add("warn", "No position: %s" % (d["name"] or d["id"][:8]), "this repeater has no position, so it cannot be placed on the map")
     for d in DEV.values():
         nm = d["name"] or d["id"][:12]; mv = (d.get("stats") or {}).get("battery_mv")
