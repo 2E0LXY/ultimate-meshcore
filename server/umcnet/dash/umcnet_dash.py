@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.17"
+VERSION = "2.18"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -579,7 +579,24 @@ SCAN_NAMES = ["yorkshire", "sheffield", "wakefield", "leeds", "bradford", "halif
   "mesh", "meshcore", "repeater", "repeaters", "solar", "traffic", "events", "club", "net", "scout", "rescue", "hiking", "cycling",
   "bolton", "manchester", "liverpool", "birmingham", "london", "bristol", "cardiff", "edinburgh", "glasgow", "newcastle", "carlisle",
   "lancashire", "cheshire", "norfolk", "suffolk", "essex", "kent", "sussex", "surrey", "hampshire", "devon", "cornwall", "wales",
-  "scotland", "ireland", "europe", "dx", "sota", "portable", "mobile", "fixed", "emcomm", "lora", "ham", "ukmesh", "ukrepeaters"]
+  "scotland", "ireland", "europe", "dx", "sota", "portable", "mobile", "fixed", "emcomm", "lora", "ham", "ukmesh", "ukrepeaters",
+  # wider Yorkshire and neighbours
+  "westyorkshire", "southyorkshire", "northyorkshire", "eastyorkshire", "west-yorkshire", "south-yorkshire", "north-yorkshire",
+  "east-yorkshire", "yorks", "pontefract", "castleford", "dewsbury", "batley", "keighley", "ilkley", "otley", "wetherby", "selby",
+  "goole", "ripon", "whitby", "skipton", "settle", "malton", "pickering", "thirsk", "northallerton", "richmond", "catterick",
+  "beverley", "bridlington", "grimsby", "scunthorpe", "chesterfield", "matlock", "buxton", "derby", "mansfield", "worksop",
+  "oldham", "rochdale", "burnley", "blackburn", "preston", "blackpool", "lancaster", "wigan", "stockport", "warrington", "salford",
+  "sunderland", "durham", "middlesbrough", "teesside", "darlington", "gateshead", "leicester", "stoke", "sheffieldmesh", "leedsmesh",
+  "peak", "peakdistrict", "dales", "yorkshiredales", "moors", "pennines", "lakes", "lakedistrict", "cumbria", "northumberland",
+  "midlands", "eastmidlands", "westmidlands", "north", "south", "east", "west", "gb", "britain", "unitedkingdom", "eng",
+  # habits seen on MeshCore networks
+  "local", "random", "offtopic", "off-topic", "bot", "bots", "ping", "pong", "testing", "test1", "test2", "tests", "echo",
+  "admin", "sysop", "ops", "infra", "status", "alerts", "alert", "wx", "aprs", "gps", "telemetry", "sensors", "nodes", "net1",
+  "meshtastic", "mesh-uk", "uk-mesh", "meshuk", "ukmeshcore", "meshcoreuk", "meshcore-uk", "community", "social", "hello",
+  "lobby", "main", "radio", "amateur", "amateurradio", "ham-radio", "hams", "raynet", "rsgb", "scouts", "jota", "foxhunt",
+  "satellite", "sats", "iss", "hf", "vhf", "uhf", "2m", "70cm", "dmr", "ysf", "dstar", "allstar", "echolink", "contest",
+  "sar", "mountainrescue", "lifeboat", "fire", "police", "ambulance", "flood", "storm", "power", "outage", "blackout",
+  "family", "friends", "home", "work", "pub", "beer", "food", "music", "gaming", "tech", "linux", "dev", "makers", "hackspace"]
 MSG_DEFAULTS = {"tx_enabled": True, "sender": "UMC-DASH", "keep_days": 30,
                 "channels": [{"name": "Public", "psk": MSG.PUBLIC_PSK}, {"name": "#yorkshire"}, {"name": "#northwest"}, {"name": "#northeast"}, {"name": "#derbyshire"}, {"name": "#lincolnshire"}, {"name": "#sheffield"}, {"name": "#wakefield"}],
                 "regions": ["yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire", "sheffield", "wakefield"]}
@@ -841,7 +858,7 @@ def decoded_message(row_id, ts, chan, region, sender, text, direction, heard):
 
 # ----------------------------------------------------------------------------- messages (channels and regions)
 RECENT_GRP = collections.deque(maxlen=600)   # (time, payload) of group packets we cannot read yet: the scan tests names against them
-MSGSTAT = {}                                # channel hash -> {"n", "last", "regions"}: messages we cannot read (no key for that channel)
+MSGSTAT = {}                                # channel hash -> deque of (time, region): messages we cannot read, kept 24 h
 TX_TIMES = collections.deque(maxlen=20)
 
 def msg_channels():
@@ -873,7 +890,7 @@ def note_message(did, raw, snr, rssi, now):
     with LOCK:
         if r is None:                                           # a channel we have no key for: count it, keep it for the name scan
             RECENT_GRP.append((int(now), p["payload"]))
-            st = MSGSTAT.setdefault("%02X" % p["payload"][0], {"n": 0, "last": 0, "regions": collections.Counter()}); st["n"] += 1; st["last"] = now; st["regions"][region or "-"] += 1
+            MSGSTAT.setdefault("%02X" % p["payload"][0], collections.deque(maxlen=5000)).append((now, region or "-"))
             return
         ch, ts, flags, text = r
         sender, body = MSG.split_sender(text)
@@ -881,6 +898,39 @@ def note_message(did, raw, snr, rssi, now):
         except Exception as e: sys.stderr.write("messages: %s\n" % e); cur = None
         dn = (DEV.get(did) or {}).get("name") or did[:8]
     if cur is not None and cur.rowcount: decoded_message(cur.lastrowid, ts, ch.name, region, sender, body, "rx", [{"name": dn, "hops": entry["h"], "snr": entry["s"], "rssi": entry["r"]}])
+
+def unreadable_stats(hours=24):
+    """Channels heard in the last day that the dashboard has no key for. Call with LOCK held."""
+    cut = time.time() - hours * 3600
+    out = {}
+    for k in list(MSGSTAT):
+        q = MSGSTAT[k]
+        while q and q[0][0] < cut: q.popleft()
+        if not q: del MSGSTAT[k]; continue
+        out[k] = {"n": len(q), "last": q[-1][0], "regions": dict(collections.Counter(r for _, r in q))}
+    return out
+
+GROUP_SCAN_EVERY = 600
+GROUP_SCAN_MIN = 3          # packets a hashtag name must open before it is added on its own
+
+def group_scan_loop():
+    """Hashtag groups are public by design: the key is derived from the name. Every few minutes the
+    recent unreadable packets are tested against the name list, and any group that opens enough of
+    them is added, so its messages are shown from then on. Private (random-key) channels stay unread."""
+    time.sleep(180)
+    while True:
+        try:
+            if CONF["messages"].get("auto_groups", True):
+                for g in scan_public_groups():
+                    if g["packets"] < GROUP_SCAN_MIN: continue
+                    if any(c.get("name") == g["name"] for c in CONF["messages"]["channels"]): continue
+                    CONF["messages"]["channels"].append({"name": g["name"]}); conf_save()
+                    h = "%02X" % MSG.Channel(g["name"]).hash
+                    with LOCK: MSGSTAT.pop(h, None)
+                    audit("system", "group added", g["name"], "public hashtag group opened %d heard packets" % g["packets"])
+                    event("info", "public group %s found on the mesh and added" % g["name"])
+        except Exception as e: sys.stderr.write("group scan: %s\n" % e)
+        time.sleep(GROUP_SCAN_EVERY)
 
 def scan_public_groups(names=None):
     """Find hashtag groups heard locally: for each public name, derive its key, and look for packets it can open.
@@ -924,7 +974,7 @@ def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
         rows = DB.execute(sql, args + [max(1, min(int(limit), 300))]).fetchall()
         day = int(time.time()) - 86400
         counts = [{"chan": r[0], "region": r[1], "n": r[2]} for r in DB.execute("SELECT chan, region, COUNT(*) FROM messages WHERE seen>? GROUP BY chan, region", (day,)).fetchall()]
-        unread = {k: {"n": v["n"], "last": v["last"], "regions": dict(v["regions"])} for k, v in MSGSTAT.items()}
+        unread = unreadable_stats()
         names = {d["id"]: (d["name"] or d["id"][:8]) for d in DEV.values()}
     out = []
     for r in rows:
@@ -1553,6 +1603,7 @@ class H(BaseHTTPRequestHandler):
                 if not re.match(r"^#[a-z0-9][a-z0-9-]{0,30}$", nm): return self.send(200, json.dumps({"ok": False, "error": "a group name starts with # and has letters, digits and dashes"}))
                 if any(c.get("name") == nm for c in CONF["messages"]["channels"]): return self.send(200, json.dumps({"ok": True, "note": "already added"}))
                 CONF["messages"]["channels"].append({"name": nm}); conf_save(); audit(who, "group added", nm, "public hashtag group found by the scan")
+                with LOCK: MSGSTAT.pop("%02X" % MSG.Channel(nm).hash, None)
                 return self.send(200, json.dumps({"ok": True}))
             if p == "/api/messages/send":
                 own = me_view(who)["sender"] or re.sub(r"[^A-Za-z0-9._-]", "", who.upper())[:24] or "USER"
@@ -1639,7 +1690,7 @@ def export_accounts_soon():
 
 def main():
     db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); settings_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
-    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop, neighbour_loop): threading.Thread(target=fn, daemon=True).start()
+    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop, neighbour_loop, group_scan_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)
     try: srv.serve_forever()

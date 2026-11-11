@@ -777,8 +777,10 @@ function msgUpdate() {
     bar.dataset.sig = sig;
   }
   const bychan = {}; d.counts.forEach(c => bychan[c.chan] = (bychan[c.chan] || 0) + c.n);
-  const unread = Object.entries(d.unreadable || {}).map(([h, v]) => `channel ${h}: ${v.n}`).join(" · ");
-  $("#msgChips").innerHTML = `<span class="tr">last 24 hours:</span>` + (Object.keys(bychan).length ? Object.entries(bychan).map(([c, n]) => `<span class="tag" style="cursor:pointer" data-mfset="${esc(c)}">${esc(c)} ${n}</span>`).join("") : `<span class="tr">nothing yet</span>`) + (unread ? `<span class="tr" title="the dashboard has no key for these channels: add them in Settings">· cannot read: ${esc(unread)}</span>` : "");
+  const ur = Object.entries(d.unreadable || {}).sort((a, b) => b[1].n - a[1].n), urN = ur.reduce((t, x) => t + x[1].n, 0);
+  const urOpen = ($("#msgPriv") || {}).open ? "open" : "";
+  $("#msgChips").innerHTML = `<span class="tr">last 24 hours:</span>` + (Object.keys(bychan).length ? Object.entries(bychan).map(([c, n]) => `<span class="tag" style="cursor:pointer" data-mfset="${esc(c)}">${esc(c)} ${n}</span>`).join("") : `<span class="tr">nothing yet</span>`) +
+    (ur.length ? `<details id="msgPriv" ${urOpen} style="display:inline-block;margin-left:6px"><summary class="tr" style="cursor:pointer" title="encrypted with a key the dashboard does not have. Public #hashtag groups are found and added automatically; private channels need their key in Settings">· private channels: ${ur.length} (${urN} messages)</summary><div class="tr" style="margin-top:4px">${ur.map(([h, v]) => `<span class="tag" title="last heard ${new Date(v.last * 1000).toLocaleTimeString()}">#${esc(h)} ${v.n}</span>`).join(" ")}</div></details>` : "");
   const seen = m.lastId || 0; m.lastId = Math.max(seen, ...d.messages.map(x => x.id), 0);
   const feed = $("#msgFeed"), nearBottom = !feed.dataset.drawn || feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
   const bubbles = d.messages.slice().reverse().map(x => {
