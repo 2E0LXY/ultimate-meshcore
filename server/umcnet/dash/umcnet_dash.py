@@ -125,7 +125,31 @@ def note_network(did, info, snr, rssi, now):
             if rssi is not None and (l["rssi"] is None or int(rssi) > l["rssi"]): l["rssi"] = int(rssi)
         except (ValueError, TypeError): pass
     if sender or info.get("path"):
-        JOURNEYS.append({"t": now, "pkt": info.get("pkt"), "size": info.get("size"), "type": info["type"], "flood": info["flood"], "hops": info["hops"], "from": sender or (info.get("src") or info.get("chan") or ""), "path": [{"h": h, "n": hop_name(h)} for h in info.get("path", [])], "to": did, "snr": snr, "rssi": rssi})
+        JOURNEYS.append({"t": now, "pkt": info.get("pkt"), "size": info.get("size"), "route_type": info.get("route_type"), "scope": info.get("scope"), "type": info["type"], "flood": info["flood"], "hops": info["hops"], "from": sender or (info.get("src") or info.get("chan") or ""), "path": [{"h": h, "n": hop_name(h)} for h in info.get("path", [])], "to": did, "snr": snr, "rssi": rssi})
+
+def scope_names():
+    """Region names a scoped packet's code can be matched against: the Yorkshire set plus any the operator has added."""
+    base = ["yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire", "sheffield", "wakefield", "Sheffield", "Wakefield"]
+    extra = [r for r in (CONF.get("messages", {}).get("regions") or []) if r]
+    return list(dict.fromkeys(base + extra))
+
+def scope_audit(hours=24):
+    """Per repeater: how many floods it heard that were scoped to a region, unscoped, and direct, and which regions."""
+    cut = time.time() - hours * 3600
+    rows = {}
+    for j in list(JOURNEYS):
+        if j.get("t", 0) < cut or j.get("route_type") is None: continue
+        r = rows.setdefault(j["to"], {"repeater": (DEV.get(j["to"]) or {}).get("name") or j["to"][:8], "scoped": 0, "unscoped": 0, "direct": 0, "regions": collections.Counter()})
+        rt = j["route_type"]
+        if rt in (0, 3):
+            r["scoped"] += 1 if rt == 0 else 0; r["direct"] += 1 if rt == 3 else 0
+            if j.get("scope"): r["regions"][j["scope"]] += 1
+        elif rt == 1: r["unscoped"] += 1
+        else: r["direct"] += 1
+    out = []
+    for r in rows.values():
+        out.append({"repeater": r["repeater"], "scoped": r["scoped"], "unscoped": r["unscoped"], "direct": r["direct"], "regions": dict(r["regions"].most_common(8))})
+    return sorted(out, key=lambda x: -(x["unscoped"] + x["scoped"]))
 
 def packet_routes(limit=40):
     """One row per packet: when, type, size, the first repeater that heard it, how many repeaters heard it,
@@ -274,9 +298,13 @@ def on_publish(topic, payload, retained=False):
         try: raw = bytes.fromhex(raw_hex) if raw_hex else b""
         except ValueError: raw = b""
         info = parse_packet(raw) or {}
-        try:
-            info["pkt"] = hashlib.sha1(MSG.parse_wire(raw)["payload"]).hexdigest()[:12] if raw and MSG.parse_wire(raw) else None
-        except Exception: info["pkt"] = None
+        wire = None
+        try: wire = MSG.parse_wire(raw) if raw else None
+        except Exception: wire = None
+        info["pkt"] = hashlib.sha1(wire["payload"]).hexdigest()[:12] if wire else None
+        # routing: 0 = scoped flood, 1 = unscoped flood, 2 = direct, 3 = scoped direct (the MeshCore route types)
+        info["route_type"] = wire["route"] if wire else None
+        info["scope"] = (MSG.find_region(scope_names(), wire) or "?") if wire and wire["route"] in (0, 3) else ""
         info["size"] = len(raw)
         direction = j.get("direction", "rx") if kind == "packets" else "rx"
         # a device that publishes both topics is counted once: count 'packets', and 'raw' only when no packets arrive
@@ -1498,7 +1526,7 @@ def overview():
         sysd = {k: v[0] for k, v in SYS.items()}
         try: msg_last = (DB.execute("SELECT MAX(id) FROM messages").fetchone() or [0])[0] or 0
         except Exception: msg_last = 0
-        res = {"routes": packet_routes(), "msg_last": msg_last, "version": VERSION, "now": now, "started": START, "mqtt": dict(MQTT), "sys": sysd, "system": sysinfo, "cert": cert, "devices": devs, "clients": clients, "accounts": accs,
+        res = {"routes": packet_routes(), "scope": scope_audit(24), "scope_names": scope_names(), "msg_last": msg_last, "version": VERSION, "now": now, "started": START, "mqtt": dict(MQTT), "sys": sysd, "system": sysinfo, "cert": cert, "devices": devs, "clients": clients, "accounts": accs,
                "packets": [dict(p) for p in list(PKTS)[-60:]][::-1], "events": [dict(e) for e in list(EVENTS)[-80:]][::-1], "log": [dict(l) for l in list(LOG)[-60:]][::-1], "count": dict(COUNT),
                "rates": {"messages": rate_per_min("messages"), "packets": rate_per_min("packets"), "unique": rate_per_min("unique")},
                "overlap": {"ids": ids, "names": [DEV[i]["name"] or i[:8] for i in ids], "m": overlap}, "heard_by": dict(sorted(multi.items())), "types": dict(types),
@@ -1665,6 +1693,8 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/", "/index.html"): return self.send(200, open(CFG["static"], "rb").read(), "text/html")
             if u.path == "/api/groups":
                 return self.send(200, json.dumps({"scan": scan_public_groups(), "rooms": rooms_heard(), "names": len(SCAN_NAMES), "packets": len(RECENT_GRP)}))
+            if u.path == "/api/scope":
+                return self.send(200, json.dumps({"audit": scope_audit(24), "names": scope_names()}))
             if u.path == "/metrics":
                 return self.send(200, prometheus_text(), ctype="text/plain; version=0.0.4")
             if u.path == "/api/overview":

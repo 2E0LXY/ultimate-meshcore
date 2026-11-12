@@ -408,11 +408,19 @@ function routesPanel(o) {
   });
   return panel("Packets by route", "each packet once: the route it took, and how many repeaters heard it", table(["Time", "Packet", "Type", "Size", "First heard by", "Heard", "Route", "Sent by"], rows, "No routes yet: packets appear here as the repeaters hear them."));
 }
+// Region scope audit: what each repeater heard, by routing type and region (last 24 hours)
+function scopePanel(o) {
+  const rows = (o.scope || []).map(r => {
+    const regs = Object.entries(r.regions || {}).map(([k, v]) => `<span class="hop">${esc(k)} ${v}</span>`).join(" ") || '<span class="tr">none</span>';
+    return `<tr><td><b>${esc(r.repeater)}</b></td><td>${r.scoped}</td><td>${r.unscoped}</td><td>${r.direct}</td><td style="white-space:normal">${regs}</td></tr>`;
+  });
+  return panel("Region scope audit", "last 24 hours: what each repeater heard, by how it was routed", table(["Repeater", "Scoped floods", "Unscoped floods", "Direct", "Regions"], rows, "No packets heard yet in the last 24 hours.") + '<p class="tr" style="margin-top:8px">Unscoped floods are the ones a bot can send without naming a region. A repeater that denies them still hears them, so this shows how much reaches it, not what it forwards. What it forwards is not visible from the radio data.</p>', "scope", "s12");
+}
 function vTraffic(o) {
   const f = S.pq.toLowerCase(), rows = o.packets.filter(p => !f || JSON.stringify(p).toLowerCase().includes(f)).slice(0, 60).map(p => `<tr><td>${clock(p.t).split(", ").pop()}</td><td>${esc(devName(o, p.dev))}</td><td><span class="tag ${p.dir === "tx" ? "tx" : ""}">${p.dir.toUpperCase()}</span></td><td>${esc(p.type)} <span class="tr">${p.flood ? "flood" : "direct"}</span></td><td><b>${esc(who(o, p))}</b></td><td>${esc(p.via ? resolveHash(o, p.via) : p.hops === 0 ? "direct" : "—")}</td><td>${p.hops}</td><td>${p.rssi ?? ""} / ${p.snr ?? ""}</td><td>${p.len ?? ""}</td></tr>`);
   const ty = Object.entries(o.types).sort((a, b) => b[1] - a[1]), colors = {ADVERT: "#2fe27a", CHAN: "#4aa8ff", RESP: "#e977c5", REQ: "#e977c5", MSG: "#a58bff", ACK: "#f2c14e", PATH: "#ff8f5a", TRACE: "#5be3d8"};
   const l = o.latency;
-  return `<div class="panels">${routesPanel(o)}${panel("Live packets", "newest first", `<div class="row" style="margin-bottom:8px"><input id="pq" placeholder="Filter by name, type, repeater…" value="${esc(S.pq)}" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 10px;width:260px"></div>` + table(["Time", "Heard by", "Dir", "Type", "From", "Via", "Hops", "RSSI / SNR", "Bytes"], rows), "traffic", "s8")}
+  return `<div class="panels">${scopePanel(o)}${routesPanel(o)}${panel("Live packets", "newest first", `<div class="row" style="margin-bottom:8px"><input id="pq" placeholder="Filter by name, type, repeater…" value="${esc(S.pq)}" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 10px;width:260px"></div>` + table(["Time", "Heard by", "Dir", "Type", "From", "Via", "Hops", "RSSI / SNR", "Bytes"], rows), "traffic", "s8")}
     ${panel("Packet types", "since the dashboard started", ty.length ? D.donut(ty.slice(0, 7).map(([k, v]) => ({label: k, value: v, color: colors[k] || "#7fa392"})), String(ty.reduce((s, x) => s + x[1], 0)), "packets") : `<div class="empty">Nothing yet.</div>`, "", "s4")}
     ${panel("Delivery delay", "device clock to this server", l.n ? `<div class="dials">${D.gauge(l.avg, 0, 10, "Average", l.avg + " s", l.n + " messages", level(l.avg, 2, 6))}${D.gauge(l.max, 0, 30, "Slowest", l.max + " s", "", level(l.max, 5, 15))}</div>` : `<div class="empty">No timestamps seen yet.</div>`, "latency", "s4")}</div>`;
 }

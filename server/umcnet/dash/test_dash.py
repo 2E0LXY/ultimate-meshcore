@@ -480,6 +480,17 @@ class GroupScan(unittest.TestCase):
         self.assertEqual([], dash.scan_public_groups(["leeds"]))
 
 
+class ScopeAudit(unittest.TestCase):
+    def test_floods_are_counted_by_scope_per_repeater(self):
+        dash.JOURNEYS.clear(); dash.DEV.clear(); now = time.time()
+        dash.DEV["11" * 32] = {"id": "11" * 32, "name": "TINGLEY", "last": now}
+        for rt, sc in ((0, "yorkshire"), (0, "yorkshire"), (1, ""), (1, ""), (1, ""), (2, "")):
+            dash.JOURNEYS.append({"t": now, "pkt": "x", "route_type": rt, "scope": sc, "to": "11" * 32, "from": "aa", "path": [], "hops": 0, "type": "T"})
+        a = dash.scope_audit(24)
+        self.assertEqual(1, len(a)); r = a[0]
+        self.assertEqual((2, 3, 1), (r["scoped"], r["unscoped"], r["direct"])); self.assertEqual({"yorkshire": 2}, r["regions"])
+
+
 class AdminHelper(unittest.TestCase):
     def test_password_hash_round_trip(self):
         h = adm.pbkdf2("Correct-horse-9"); self.assertTrue(adm.check_password("Correct-horse-9", h)); self.assertFalse(adm.check_password("Correct-horse-8", h)); self.assertFalse(adm.check_password("x", "garbage"))
