@@ -590,3 +590,18 @@ class TrafficStats(unittest.TestCase):
         text = dash.weekly_report()
         for head in ("UMC weekly report", "Busiest nodes", "Own repeaters", "One-way hearing", "Possible deaf repeaters"):
             self.assertIn(head, text)
+
+
+class ValidPosition(unittest.TestCase):
+    def test_unset_zero_pair_is_not_a_position(self):
+        self.assertFalse(dash.valid_position(0.0, 0.0))
+
+    def test_one_zero_coordinate_is_a_position(self):
+        self.assertTrue(dash.valid_position(0.0, -1.5))
+        self.assertTrue(dash.valid_position(53.6, 0.0))
+
+    def test_missing_or_out_of_range_is_refused(self):
+        self.assertFalse(dash.valid_position(None, -1.5))
+        self.assertFalse(dash.valid_position(91, 0))
+        self.assertFalse(dash.valid_position(53.6, 181))
+        self.assertTrue(dash.valid_position(53.6, -1.5))

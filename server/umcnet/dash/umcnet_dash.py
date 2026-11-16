@@ -227,6 +227,12 @@ def network_view(hours=24):
         journeys = [dict(j) for j in list(JOURNEYS)[-80:]][::-1]
     return {"now": now, "hours": hours, "nodes": nodes, "links": links, "journeys": journeys, "confirmed": confirmed_links()}
 
+def valid_position(lat, lon):
+    """A position a repeater really has: both coordinates present and in range. An unset repeater reports 0,0, which is not a place; a single zero is fine."""
+    if lat is None or lon is None: return False
+    if abs(lat) > 90 or abs(lon) > 180: return False
+    return not (lat == 0 and lon == 0)
+
 def locate_loop():
     """Ask each repeater that has a control key where it is, until we know (for the map)."""
     time.sleep(120)
@@ -240,7 +246,7 @@ def locate_loop():
                     r = send_command(dev, "get " + axis, "locator", timeout=10)
                     try: got[axis] = float(str(r.get("reply", "")).lstrip("> ").strip()) if r.get("ok") else None
                     except ValueError: got[axis] = None
-                if got.get("lat") is not None and got.get("lon") is not None and abs(got["lat"]) <= 90 and abs(got["lon"]) <= 180: d["lat"], d["lon"] = got["lat"], got["lon"]
+                if valid_position(got.get("lat"), got.get("lon")): d["lat"], d["lon"] = got["lat"], got["lon"]
         except Exception as e: sys.stderr.write("locate: %s\n" % e)
         time.sleep(1200)
 
