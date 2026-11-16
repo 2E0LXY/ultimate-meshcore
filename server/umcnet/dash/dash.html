@@ -684,11 +684,66 @@ function loadLeaflet() {
     const js = document.createElement("script"); js.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"; js.onload = ok; js.onerror = () => bad(new Error("the map needs this browser to reach the internet")); document.head.appendChild(js);
   });
 }
+// ---- node statistics, link checks, report and export (Network tab)
+let nsNode = "", nsDays = 7, nsBuilt = "";
+const nsSelect = () => {
+  const nodes = ((S.net && S.net.nodes) || []).slice().sort((a, b) => (a.name || a.key).localeCompare(b.name || b.key));
+  return `<select data-ns="node" style="min-width:220px"><option value="">choose a node</option>${nodes.map(x => `<option value="${esc(x.key)}" ${x.key === nsNode ? "selected" : ""}>${esc(x.name || x.key.slice(0, 8))}${x.info ? " (ours)" : ""}</option>`).join("")}</select> `
+    + `<select data-ns="days">${[1, 7, 30].map(d => `<option value="${d}" ${d === nsDays ? "selected" : ""}>${d === 1 ? "last 24 hours" : "last " + d + " days"}</option>`).join("")}</select> `
+    + `<button class="tool" data-nsexport="geojson">Export map (GeoJSON)</button> <button class="tool" data-nsexport="report">Weekly report (text)</button>`;
+};
+function nsFrame() {
+  const w = $("#nsWrap"); if (!w) return null;
+  if (!w.dataset.built) { w.innerHTML = panel("Node statistics", "activity hour by hour, from the traffic history", `<div class="row" id="nsCtl" style="gap:8px;flex-wrap:wrap;margin-bottom:10px"></div><div id="nsBody"></div>`, "nstats", "s12") + panel("Link checks", "our own repeaters, last 48 hours", `<div id="nsChecks"></div>`, "nschecks", "s12"); w.dataset.built = "1"; }
+  const ctl = $("#nsCtl"); const key = ((S.net && S.net.nodes) || []).length + ":" + nsNode + ":" + nsDays;
+  if (ctl && nsBuilt !== key) { ctl.innerHTML = nsSelect(); nsBuilt = key; }
+  return w;
+}
+async function nsLoad() {
+  if (!nsFrame()) return;
+  const body = $("#nsBody");
+  if (!nsNode) body.innerHTML = `<div class="empty">Choose a node to see when it has been heard, and by whom.</div>`;
+  else {
+    let d; try { d = await jget(`/api/node/stats?key=${encodeURIComponent(nsNode)}&days=${nsDays}`); } catch (e) { body.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+    const max = Math.max(1, ...d.series.map(x => x.n)), W = 720, H = 120, bw = W / Math.max(1, d.series.length);
+    const bars = d.series.map((x, i) => { const h = Math.round(x.n / max * (H - 4)); return `<rect x="${(i * bw).toFixed(1)}" y="${H - h}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${h}" fill="#2fe27a"><title>${clock(x.h)}: ${x.n}</title></rect>`; }).join("");
+    const rows = (arr, f) => arr.map(f).join("");
+    body.innerHTML = `<div class="kpis">${kpi("✉", "Packets", d.total, "from " + esc(d.name) + ", " + (nsDays === 1 ? "24 hours" : nsDays + " days"))}</div>`
+      + `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:140px;background:#0a1511;border-radius:8px">${bars}</svg>`
+      + `<div class="panels" style="margin-top:10px">`
+      + panel("Packet types", "", table(["Type", "Packets"], rows(d.types, t => `<tr><td>${esc(t.type)}</td><td>${t.n}</td></tr>`), "None."), "", "s4")
+      + panel("Hops to arrive", "", table(["Hops", "Packets"], rows(d.hops, h => `<tr><td>${h.hops}</td><td>${h.n}</td></tr>`), "None."), "", "s4")
+      + panel("Heard most by", "", table(["Repeater", "Packets"], rows(d.receivers, r => `<tr><td>${esc(r.name)}</td><td>${r.n}</td></tr>`), "None."), "", "s4")
+      + `</div>`;
+  }
+  const c = await jget("/api/links/checks?hours=48").catch(() => null); const cb = $("#nsChecks");
+  if (c && cb) cb.innerHTML = `<div class="panels">`
+    + panel("One-way hearing", "A hears B but B does not hear A", table(["Hears", "Heard", "SNR"], c.one_way.map(x => `<tr><td>${esc(x.hears)}</td><td>${esc(x.heard)}</td><td>${x.snr ?? "—"} dB</td></tr>`), "None."), "", "s6")
+    + panel("Possible deaf repeaters", "transmit well, hear badly", table(["Repeater", "Heard by others", "Hears best", "Gap"], c.deaf.map(x => `<tr><td>${esc(x.name)}</td><td>${x.heard_by_others} dB</td><td>${x.hears_best} dB</td><td>${x.gap} dB</td></tr>`), "None."), "", "s6")
+    + `</div>`;
+}
+async function nsDownload(kind) {
+  const url = kind === "report" ? "/api/report/weekly" : "/api/export/geojson";
+  const r = await fetch(url, {cache: "no-store"}); if (!r.ok) { console.warn("download failed: " + r.status); return; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob());
+  a.download = kind === "report" ? "umc-weekly-report.txt" : "umc-network.geojson"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+document.addEventListener("change", e => {
+  const s = e.target.closest("[data-ns]"); if (!s) return;
+  if (s.dataset.ns === "node") nsNode = s.value; else nsDays = +s.value || 7;
+  nsLoad();
+});
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-nsexport]"); if (!b) return;
+  nsDownload(b.dataset.nsexport);
+});
+
 function vNetwork(o) {
   S.netUp = false; S.map = null; S.layer = null;
   return `<div class="panels">
     ${panel("Network map", "who hears whom, by hops", `<div class="row" id="netCtl" style="margin-bottom:8px"></div><div id="netmap" style="height:580px;border-radius:10px;overflow:hidden;background:#0a1511"><div class="empty">Loading the map…</div></div><div class="lgd" id="netLegend" style="margin-top:8px"></div>`, "network")}
-    <div id="netBody" class="s12" style="grid-column:span 12"></div></div>`;
+    <div id="netBody" class="s12" style="grid-column:span 12"></div></div>
+    <div id="nsWrap" class="panels" style="margin-top:12px"></div>`;
 }
 const pkv = rows => `<table class="pp">${rows.filter(r => r[1] !== "" && r[1] != null && r[1] !== "—").map(([k, v]) => `<tr><td class="tr">${k}</td><td>${v}</td></tr>`).join("")}</table>`;
 function popupHtml(x, n, nodes, now) {
@@ -860,6 +915,7 @@ function netControls() {
     `<select data-nf="recv" data-keep="1"><option value="">all repeaters</option>${recvs.map(n => `<option value="${n.key}" ${f.recv === n.key ? "selected" : ""}>${esc(n.name)}</option>`).join("")}</select> <label><input type="checkbox" data-nf="conn" ${f.conn ? "checked" : ""}> only links to repeaters on this network</label> <label>other nodes heard in the last <select data-nf="hours" data-keep="1">${[[1, "hour"], [6, "6 hours"], [24, "24 hours"], [168, "7 days"], [720, "30 days"]].map(([h, l]) => `<option value="${h}" ${+f.hours === h ? "selected" : ""}>${l}</option>`).join("")}</select></label> <button class="tool" data-act="fit">Fit the map</button>`;
 }
 async function netUpdate() {
+  if ($("#nsWrap")) nsLoad();
   const n = S.net; if (!n || !$("#netmap")) return;
   const nodes = Object.fromEntries(n.nodes.map(x => [x.key, x])), f = S.nf, now = n.now;
   const links = n.links.filter(l => f["h" + Math.min(4, l.hops)] && (!f.recv || l.recv === f.recv) && (!f.conn || (nodes[l.node] && nodes[l.node].connected)) && (!nodes[l.node] || f["t" + nodes[l.node].type] !== false));

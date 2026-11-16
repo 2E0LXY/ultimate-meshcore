@@ -534,3 +534,59 @@ class RequestParsing(unittest.TestCase):
         self.assertEqual(({"a": 1}, None), dash.parse_body(b'{"a":1}'))
         self.assertEqual(({}, None), dash.parse_body(b""))
 
+
+
+class TrafficStats(unittest.TestCase):
+    NODE = "AA" * 32; RX1 = "11" * 32; RX2 = "22" * 32
+
+    def setUp(self):
+        dash.DB.execute("DELETE FROM traffic"); dash.DB.execute("DELETE FROM links")
+        with dash.TRAFFIC_LOCK: dash.TRAFFIC_BUF.clear()
+
+    def test_counts_are_kept_per_hour_node_receiver_type_and_hops(self):
+        now = int(time.time())
+        with dash.TRAFFIC_LOCK:
+            dash.TRAFFIC_BUF[(now // 3600 * 3600, self.NODE, self.RX1, "ADVERT", 1)] += 2
+            dash.TRAFFIC_BUF[(now // 3600 * 3600, self.NODE, self.RX2, "MSG", 3)] += 1
+        dash.traffic_flush()
+        s = dash.node_stats(self.NODE, 1)
+        self.assertEqual(3, s["total"])
+        self.assertEqual({"ADVERT": 2, "MSG": 1}, {t["type"]: t["n"] for t in s["types"]})
+        self.assertEqual([1, 3], [h["hops"] for h in s["hops"]])
+        self.assertEqual(2, s["receivers"][0]["n"])
+
+    def test_repeated_flushes_add_up(self):
+        now = int(time.time()); h = now // 3600 * 3600
+        for _ in range(2):
+            with dash.TRAFFIC_LOCK: dash.TRAFFIC_BUF[(h, self.NODE, self.RX1, "ADVERT", 0)] += 1
+            dash.traffic_flush()
+        self.assertEqual(2, dash.node_stats(self.NODE, 1)["total"])
+
+    def test_the_series_has_one_point_per_hour(self):
+        s = dash.node_stats(self.NODE, 7)
+        self.assertEqual(7 * 24 + 1, len(s["series"]))
+
+    def test_days_are_clamped(self):
+        self.assertEqual(30, dash.node_stats(self.NODE, 999)["days"])
+        self.assertEqual(1, dash.node_stats(self.NODE, 0)["days"])
+
+    def test_one_way_and_deaf_use_only_our_repeaters(self):
+        own = {"A": {"id": "A", "name": "Alpha", "last": 0}, "B": {"id": "B", "name": "Bravo", "last": 0}}
+        saved = dict(dash.DEV); dash.DEV.clear(); dash.DEV.update(own)
+        try:
+            now = int(time.time())
+            dash.DB.executemany("INSERT INTO links VALUES(?,?,?,?,?,?)", [("A", "B", now, now, -5.0, -90), ("B", "A", now, now, -18.0, -100), ("A", "Z", now, now, 3.0, -60)])
+            c = dash.link_checks(48)
+            self.assertEqual([], c["one_way"])                       # both directions heard; Z is not ours and is ignored
+            self.assertEqual(["Bravo"], [x["name"] for x in c["deaf"]])  # B is heard at -5 dB but hears at best -18 dB: a 13 dB gap
+            dash.DB.execute("DELETE FROM links WHERE a='B' AND b='A'")
+            c = dash.link_checks(48)
+            self.assertEqual([("Alpha", "Bravo")], [(x["hears"], x["heard"]) for x in c["one_way"]])
+            self.assertEqual([], c["deaf"])                          # B now hears nothing of ours, so there is no gap to measure
+        finally:
+            dash.DEV.clear(); dash.DEV.update(saved)
+
+    def test_weekly_report_has_its_sections(self):
+        text = dash.weekly_report()
+        for head in ("UMC weekly report", "Busiest nodes", "Own repeaters", "One-way hearing", "Possible deaf repeaters"):
+            self.assertIn(head, text)
