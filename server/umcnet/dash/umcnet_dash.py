@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.18"
+VERSION = "2.19"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -209,7 +209,8 @@ def network_view(hours=24):
                 if conn: nodes.append({"key": k, "name": d["name"] or k[:8], "type": 2, "lat": d.get("lat"), "lon": d.get("lon"), "last": d["last"], "first": d.get("first", 0), "adverts": 0, "connected": True, "online": d.get("status") != "offline", "info": device_info(d, now)})
         for n in nodes:                                       # a connected repeater's position may come from the control channel
             d = DEV.get(n["key"])
-            if d and n["lat"] is None and d.get("lat") is not None: n["lat"], n["lon"] = d["lat"], d["lon"]
+            if d and n["lat"] is None and d.get("lat") is not None and d.get("lon") is not None: n["lat"], n["lon"] = d["lat"], d["lon"]
+            if n["lat"] is None or n["lon"] is None: n["lat"] = n["lon"] = None          # a position is both coordinates or none
         # one station, one dot: a reflashed or replaced station comes back with a new key under the same name; show the newest
         # (and always the repeater that is on this network), not every identity it ever had
         out, names = [], set()
@@ -237,7 +238,7 @@ def locate_loop():
                     r = send_command(dev, "get " + axis, "locator", timeout=10)
                     try: got[axis] = float(str(r.get("reply", "")).lstrip("> ").strip()) if r.get("ok") else None
                     except ValueError: got[axis] = None
-                if got.get("lat") and got.get("lon") and abs(got["lat"]) <= 90 and abs(got["lon"]) <= 180: d["lat"], d["lon"] = got["lat"], got["lon"]
+                if got.get("lat") is not None and got.get("lon") is not None and abs(got["lat"]) <= 90 and abs(got["lon"]) <= 180: d["lat"], d["lon"] = got["lat"], got["lon"]
         except Exception as e: sys.stderr.write("locate: %s\n" % e)
         time.sleep(1200)
 
@@ -1472,7 +1473,8 @@ def diagnostics(sysinfo, accs, cert):
         add("warn", "%d mesh node%s quiet for over a day" % (len(quiet), "" if len(quiet) == 1 else "s"), ", ".join(sorted(quiet, key=str.lower)[:15]) + (" …" if len(quiet) > 15 else ""))
     for d in DEV.values():
         sv = (SETTINGS.get(d["id"]) or {}).get("values", {})          # the position the repeater reports for itself (read over the control link)
-        has_pos = d.get("lat") is not None or any(str(sv.get(k, "")).strip(" >") not in ("", "0", "0.0", "(not set)") for k in ("lat",))
+        def _set(v): return str(v).strip(" >") not in ("", "0", "0.0", "(not set)")
+        has_pos = (d.get("lat") is not None and d.get("lon") is not None) or (_set(sv.get("lat", "")) and _set(sv.get("lon", "")))
         if d["id"] in own and not has_pos and not (CONF.get("locations") or {}).get(d["id"]):
             add("warn", "No position: %s" % (d["name"] or d["id"][:8]), "this repeater has no position, so it cannot be placed on the map")
     for d in DEV.values():
@@ -1564,6 +1566,20 @@ def csv_text(header, rows):
     for r in rows: w.writerow(r)
     return b.getvalue()
 
+def content_length(raw):
+    """The request body length from the header: (n, None) or (0, error). Rejects negative or malformed values."""
+    try: n = int(raw or 0)
+    except (TypeError, ValueError): return 0, "bad content length"
+    if n < 0: return 0, "bad content length"
+    return n, None
+
+def parse_body(raw):
+    """The JSON object a POST carries: (dict, None) or ({}, error). Anything but an object is refused."""
+    try: body = json.loads(raw.decode() or "{}")
+    except (UnicodeDecodeError, ValueError): return {}, "body is not valid JSON"
+    if not isinstance(body, dict): return {}, "body must be a JSON object"
+    return body, None
+
 class H(BaseHTTPRequestHandler):
     server_version = "umcnet-dash"
     def log_message(self, *a): pass
@@ -1574,9 +1590,11 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         try:
             if self.headers.get("X-UMC-Dash") != "1": return self.send(403, '{"error":"missing header"}')
-            n = int(self.headers.get("Content-Length", "0") or 0)
+            n, err = content_length(self.headers.get("Content-Length"))
+            if err: return self.send(400, json.dumps({"error": err}))
             if n > 20000: return self.send(413, '{"error":"too big"}')
-            body = json.loads(self.rfile.read(n).decode() or "{}")
+            body, err = parse_body(self.rfile.read(n))
+            if err: return self.send(400, json.dumps({"error": err}))
             who = (self.headers.get("X-UMC-User") or "admin").strip() or "admin"; p = u.path; role = role_of(who)
             if role != "admin":
                 if p not in OWNER_POSTS: return self.send(403, json.dumps({"ok": False, "error": "only the administrator can do that"}))

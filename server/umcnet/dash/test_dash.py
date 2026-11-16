@@ -1,5 +1,5 @@
 """Tests for the dashboard service and its admin helper. Run: python3 -m unittest -v test_dash   (no broker needed)"""
-import importlib.util, json, os, re, sys, tempfile, time, unittest
+import importlib.util, json, os, re, tempfile, time, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 def load(name, file):
@@ -518,3 +518,19 @@ class AdminHelper(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RequestParsing(unittest.TestCase):
+    def test_content_length_refuses_negative_and_malformed(self):
+        self.assertEqual((0, "bad content length"), dash.content_length("-1"))
+        self.assertEqual((0, "bad content length"), dash.content_length("abc"))
+        self.assertEqual((0, None), dash.content_length(None))
+        self.assertEqual((42, None), dash.content_length("42"))
+
+    def test_body_must_be_a_json_object(self):
+        self.assertEqual(({}, "body must be a JSON object"), dash.parse_body(b"[]"))
+        self.assertEqual(({}, "body must be a JSON object"), dash.parse_body(b"7"))
+        self.assertEqual(({}, "body is not valid JSON"), dash.parse_body(b"{bad"))
+        self.assertEqual(({"a": 1}, None), dash.parse_body(b'{"a":1}'))
+        self.assertEqual(({}, None), dash.parse_body(b""))
+

@@ -1,0 +1,68 @@
+name: UMC Dashboard Release
+
+# Runs when the dashboard version is bumped on main. Tests, then publishes vX.Y.Z (the tag is created server-side).
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - server/umcnet/dash/umcnet_dash.py
+      - server/umcnet/dash/**
+      - .github/workflows/umc-dashboard-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Repo
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        run: |
+          V=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' server/umcnet/dash/umcnet_dash.py | head -1)
+          test -n "$V" || { echo "no VERSION in umcnet_dash.py"; exit 1; }
+          echo "version=v$V" >> "$GITHUB_OUTPUT"
+          echo "Dashboard version v$V"
+
+      - name: Skip if already released
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.ver.outputs.version }}-dashboard" >/dev/null 2>&1; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Set up Python
+        if: steps.exists.outputs.skip == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run dashboard tests
+        if: steps.exists.outputs.skip == 'false'
+        working-directory: server/umcnet/dash
+        run: |
+          python -m pip install --quiet pyflakes
+          python -m pyflakes umcnet_dash.py umcnet_msgs.py umcnet_enrol.py umcnet_admin.py test_dash.py
+          python -m unittest test_dash
+
+      - name: Package dashboard
+        if: steps.exists.outputs.skip == 'false'
+        run: |
+          mkdir -p dist
+          tar -czf "dist/umcnet-dash-${{ steps.ver.outputs.version }}.tar.gz" -C server/umcnet/dash \
+            umcnet_dash.py umcnet_msgs.py umcnet_enrol.py umcnet_admin.py dash.html public.html \
+            install-dash.sh install-ntfy.sh umcnet-dash.service umcnet-admin.service
+
+      - name: Publish release
+        if: steps.exists.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.version }}-dashboard" dist/*.tar.gz \
+            --target "$GITHUB_SHA" --title "UMC dashboard ${{ steps.ver.outputs.version }}" \
+            --generate-notes --prerelease
