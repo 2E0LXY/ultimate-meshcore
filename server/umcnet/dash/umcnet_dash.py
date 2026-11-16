@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.18"
+VERSION = "2.20"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -124,6 +124,8 @@ def note_network(did, info, snr, rssi, now):
             if snr is not None and (l["snr"] is None or float(snr) > l["snr"]): l["snr"] = float(snr)
             if rssi is not None and (l["rssi"] is None or int(rssi) > l["rssi"]): l["rssi"] = int(rssi)
         except (ValueError, TypeError): pass
+    if sender:
+        with TRAFFIC_LOCK: TRAFFIC_BUF[(int(now) // 3600 * 3600, sender, did, str(info["type"]), min(int(info.get("hops") or 0), 15))] += 1
     if sender or info.get("path"):
         JOURNEYS.append({"t": now, "pkt": info.get("pkt"), "size": info.get("size"), "route_type": info.get("route_type"), "scope": info.get("scope"), "type": info["type"], "flood": info["flood"], "hops": info["hops"], "from": sender or (info.get("src") or info.get("chan") or ""), "path": [{"h": h, "n": hop_name(h)} for h in info.get("path", [])], "to": did, "snr": snr, "rssi": rssi})
 
@@ -209,7 +211,8 @@ def network_view(hours=24):
                 if conn: nodes.append({"key": k, "name": d["name"] or k[:8], "type": 2, "lat": d.get("lat"), "lon": d.get("lon"), "last": d["last"], "first": d.get("first", 0), "adverts": 0, "connected": True, "online": d.get("status") != "offline", "info": device_info(d, now)})
         for n in nodes:                                       # a connected repeater's position may come from the control channel
             d = DEV.get(n["key"])
-            if d and n["lat"] is None and d.get("lat") is not None: n["lat"], n["lon"] = d["lat"], d["lon"]
+            if d and n["lat"] is None and d.get("lat") is not None and d.get("lon") is not None: n["lat"], n["lon"] = d["lat"], d["lon"]
+            if n["lat"] is None or n["lon"] is None: n["lat"] = n["lon"] = None          # a position is both coordinates or none
         # one station, one dot: a reflashed or replaced station comes back with a new key under the same name; show the newest
         # (and always the repeater that is on this network), not every identity it ever had
         out, names = [], set()
@@ -224,6 +227,12 @@ def network_view(hours=24):
         journeys = [dict(j) for j in list(JOURNEYS)[-80:]][::-1]
     return {"now": now, "hours": hours, "nodes": nodes, "links": links, "journeys": journeys, "confirmed": confirmed_links()}
 
+def valid_position(lat, lon):
+    """A position a repeater really has: both coordinates present and in range. An unset repeater reports 0,0, which is not a place; a single zero is fine."""
+    if lat is None or lon is None: return False
+    if abs(lat) > 90 or abs(lon) > 180: return False
+    return not (lat == 0 and lon == 0)
+
 def locate_loop():
     """Ask each repeater that has a control key where it is, until we know (for the map)."""
     time.sleep(120)
@@ -237,7 +246,7 @@ def locate_loop():
                     r = send_command(dev, "get " + axis, "locator", timeout=10)
                     try: got[axis] = float(str(r.get("reply", "")).lstrip("> ").strip()) if r.get("ok") else None
                     except ValueError: got[axis] = None
-                if got.get("lat") and got.get("lon") and abs(got["lat"]) <= 90 and abs(got["lon"]) <= 180: d["lat"], d["lon"] = got["lat"], got["lon"]
+                if valid_position(got.get("lat"), got.get("lon")): d["lat"], d["lon"] = got["lat"], got["lon"]
         except Exception as e: sys.stderr.write("locate: %s\n" % e)
         time.sleep(1200)
 
@@ -552,6 +561,7 @@ def db_init():
     DB.execute("CREATE TABLE IF NOT EXISTS samples(ts INTEGER, k TEXT, v REAL)"); DB.execute("CREATE INDEX IF NOT EXISTS s_k ON samples(k, ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, seen INTEGER, chan TEXT, chash TEXT, region TEXT, sender TEXT, text TEXT, pkey TEXT UNIQUE, dir TEXT, hops INTEGER, snr REAL, rssi INTEGER, heard TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS m_seen ON messages(seen)")
     DB.execute("CREATE TABLE IF NOT EXISTS links(a TEXT, b TEXT, first INTEGER, last INTEGER, snr REAL, rssi INTEGER, PRIMARY KEY(a, b))")
+    DB.execute("CREATE TABLE IF NOT EXISTS traffic(h INTEGER, node TEXT, rx TEXT, ptype TEXT, hops INTEGER, n INTEGER, PRIMARY KEY(h, node, rx, ptype, hops))")
     DB.execute("CREATE TABLE IF NOT EXISTS events(ts INTEGER, kind TEXT, client TEXT, user TEXT, ip TEXT, text TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS e_ts ON events(ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS audit(ts INTEGER, who TEXT, action TEXT, target TEXT, detail TEXT, ok INTEGER)"); DB.execute("CREATE INDEX IF NOT EXISTS a_ts ON audit(ts)")
 
@@ -1306,6 +1316,99 @@ def confirmed_links(hours=48):
         rows = DB.execute("SELECT a, b, first, last, snr FROM links WHERE last > ?", (int(time.time()) - hours * 3600,)).fetchall()
     return [{"a": a, "b": b, "first": f, "last": l, "snr": s} for a, b, f, l, s in rows]
 
+# ----------------------------------------------------------------------------- statistics, link checks, report, export
+# Every heard packet with a known sender is counted per hour, per node, per receiving repeater, per type and per hop count.
+# Counts are held in memory and written to the traffic table every minute, so the history survives a restart.
+TRAFFIC_BUF = collections.Counter(); TRAFFIC_LOCK = threading.Lock()
+TRAFFIC_KEEP_DAYS = 400
+
+def traffic_flush():
+    with TRAFFIC_LOCK:
+        items = list(TRAFFIC_BUF.items()); TRAFFIC_BUF.clear()
+    if not items: return
+    with LOCK:
+        DB.executemany("INSERT INTO traffic VALUES(?,?,?,?,?,?) ON CONFLICT(h, node, rx, ptype, hops) DO UPDATE SET n = n + excluded.n",
+                       [(h, node, rx, pt, hp, n) for (h, node, rx, pt, hp), n in items])
+
+def traffic_loop():
+    time.sleep(30)
+    while True:
+        try:
+            traffic_flush()
+            with LOCK: DB.execute("DELETE FROM traffic WHERE h < ?", (int(time.time()) - TRAFFIC_KEEP_DAYS * 86400,))
+        except Exception as e: sys.stderr.write("traffic: %s\n" % e)
+        time.sleep(60)
+
+def node_stats(key, days=7):
+    """Hour-by-hour activity for one node, with its packet types, hop counts and the repeaters that heard it most."""
+    try: days = int(days) if str(days).strip() != "" else 7
+    except (TypeError, ValueError): days = 7
+    days = max(1, min(30, days))
+    now = int(time.time()); start = (now - days * 86400) // 3600 * 3600
+    traffic_flush()
+    with LOCK: rows = DB.execute("SELECT h, rx, ptype, hops, n FROM traffic WHERE node = ? AND h >= ?", (key, start)).fetchall()
+    hourly = collections.Counter(); types = collections.Counter(); hops = collections.Counter(); rxs = collections.Counter()
+    for h, rx, pt, hp, n in rows: hourly[h] += n; types[pt] += n; hops[hp] += n; rxs[rx] += n
+    names = {}
+    for k in set(rxs): names[k] = (DEV.get(k) or {}).get("name") or (NODES.get(k) or {}).get("name") or k[:8]
+    total = sum(hourly.values())
+    return {"key": key, "name": (NODES.get(key) or {}).get("name") or key[:8], "days": days, "total": total,
+            "series": [{"h": h, "n": hourly.get(h, 0)} for h in range(start, now // 3600 * 3600 + 1, 3600)],
+            "types": [{"type": t, "n": n} for t, n in types.most_common()],
+            "hops": [{"hops": hp, "n": n} for hp, n in sorted(hops.items())],
+            "receivers": [{"rx": r, "name": names.get(r, r[:8]), "n": n} for r, n in rxs.most_common(10)]}
+
+def link_checks(hours=48):
+    """Links between our own repeaters only: a one-way hearing, and a repeater that transmits well but hears badly."""
+    own = {d["id"]: (d["name"] or d["id"][:8]) for d in DEV.values()}
+    cut = int(time.time()) - hours * 3600
+    with LOCK: rows = DB.execute("SELECT a, b, snr FROM links WHERE last > ?", (cut,)).fetchall()
+    heard = {}; best_in = {}; best_out = {}
+    for a, b, snr in rows:
+        if a not in own or b not in own: continue
+        heard[(a, b)] = snr
+        if snr is not None:
+            best_in[a] = max(best_in.get(a, -999), snr); best_out[b] = max(best_out.get(b, -999), snr)
+    one_way = [{"hears": own[a], "heard": own[b], "snr": heard[(a, b)]} for (a, b) in heard if (b, a) not in heard]
+    deaf = []
+    for r in own:
+        if r in best_out and r in best_in and best_out[r] - best_in[r] >= 10:
+            deaf.append({"name": own[r], "heard_by_others": best_out[r], "hears_best": best_in[r], "gap": round(best_out[r] - best_in[r], 1)})
+    return {"hours": hours, "one_way": sorted(one_way, key=lambda x: x["hears"]), "deaf": sorted(deaf, key=lambda x: -x["gap"])}
+
+def weekly_report():
+    """A plain-text week: traffic, busiest nodes, repeater state and link problems."""
+    now = time.time(); since = int(now) - 7 * 86400
+    traffic_flush()
+    with LOCK:
+        tot = DB.execute("SELECT COALESCE(SUM(n),0) FROM traffic WHERE h >= ?", (since,)).fetchone()[0]
+        top = DB.execute("SELECT node, SUM(n) FROM traffic WHERE h >= ? GROUP BY node ORDER BY 2 DESC LIMIT 10", (since,)).fetchall()
+        byt = DB.execute("SELECT ptype, SUM(n) FROM traffic WHERE h >= ? GROUP BY ptype ORDER BY 2 DESC", (since,)).fetchall()
+    lc = link_checks(168)
+    lines = ["UMC weekly report", "Period: %s to %s" % (time.strftime("%d %b %Y", time.localtime(since)), time.strftime("%d %b %Y", time.localtime(now))), "",
+             "Packets with a known sender: %d" % tot, "", "By type", *["  %-8s %d" % (t, n) for t, n in byt], "", "Busiest nodes"]
+    lines += ["  %-24s %d" % ((NODES.get(k) or {}).get("name") or k[:8], n) for k, n in top] or ["  none"]
+    lines += ["", "Own repeaters"]
+    for d in DEV.values():
+        seen = time.strftime("%d %b %H:%M", time.localtime(d["last"])) if d.get("last") else "never"
+        lines.append("  %-24s last heard %s" % (d["name"] or d["id"][:8], seen))
+    lines += ["", "One-way hearing (own repeaters, last 7 days)"] + (["  %s hears %s (%s dB), not the other way" % (x["hears"], x["heard"], x["snr"]) for x in lc["one_way"]] or ["  none"])
+    lines += ["", "Possible deaf repeaters (transmit well, hear badly)"] + (["  %s: gap about %s dB" % (x["name"], x["gap"]) for x in lc["deaf"]] or ["  none"])
+    return "\n".join(lines) + "\n"
+
+def geojson_export(hours=None):
+    """Positioned nodes as points and measured links as lines, for GIS tools."""
+    net = network_view(hours or CONF["map_hours"])
+    pos = {n["key"]: n for n in net["nodes"] if n.get("lat") is not None and n.get("lon") is not None}
+    feats = [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [n["lon"], n["lat"]]},
+              "properties": {"key": k, "name": n["name"], "type": n["type"], "online": bool(n.get("online"))}} for k, n in pos.items()]
+    for l in net["links"]:
+        a, b = pos.get(l["recv"]), pos.get(l["node"])
+        if a and b:
+            feats.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[a["lon"], a["lat"]], [b["lon"], b["lat"]]]},
+                          "properties": {"from": a["name"], "to": b["name"], "hops": l["hops"], "packets": l["n"], "snr": l["snr"]}})
+    return {"type": "FeatureCollection", "features": feats}
+
 def settings_loop():
     """Keep every online controlled repeater's editable settings warm for the dashboard."""
     time.sleep(12)
@@ -1472,7 +1575,8 @@ def diagnostics(sysinfo, accs, cert):
         add("warn", "%d mesh node%s quiet for over a day" % (len(quiet), "" if len(quiet) == 1 else "s"), ", ".join(sorted(quiet, key=str.lower)[:15]) + (" …" if len(quiet) > 15 else ""))
     for d in DEV.values():
         sv = (SETTINGS.get(d["id"]) or {}).get("values", {})          # the position the repeater reports for itself (read over the control link)
-        has_pos = d.get("lat") is not None or any(str(sv.get(k, "")).strip(" >") not in ("", "0", "0.0", "(not set)") for k in ("lat",))
+        def _set(v): return str(v).strip(" >") not in ("", "0", "0.0", "(not set)")
+        has_pos = (d.get("lat") is not None and d.get("lon") is not None) or (_set(sv.get("lat", "")) and _set(sv.get("lon", "")))
         if d["id"] in own and not has_pos and not (CONF.get("locations") or {}).get(d["id"]):
             add("warn", "No position: %s" % (d["name"] or d["id"][:8]), "this repeater has no position, so it cannot be placed on the map")
     for d in DEV.values():
@@ -1564,6 +1668,20 @@ def csv_text(header, rows):
     for r in rows: w.writerow(r)
     return b.getvalue()
 
+def content_length(raw):
+    """The request body length from the header: (n, None) or (0, error). Rejects negative or malformed values."""
+    try: n = int(raw or 0)
+    except (TypeError, ValueError): return 0, "bad content length"
+    if n < 0: return 0, "bad content length"
+    return n, None
+
+def parse_body(raw):
+    """The JSON object a POST carries: (dict, None) or ({}, error). Anything but an object is refused."""
+    try: body = json.loads(raw.decode() or "{}")
+    except (UnicodeDecodeError, ValueError): return {}, "body is not valid JSON"
+    if not isinstance(body, dict): return {}, "body must be a JSON object"
+    return body, None
+
 class H(BaseHTTPRequestHandler):
     server_version = "umcnet-dash"
     def log_message(self, *a): pass
@@ -1574,9 +1692,11 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         try:
             if self.headers.get("X-UMC-Dash") != "1": return self.send(403, '{"error":"missing header"}')
-            n = int(self.headers.get("Content-Length", "0") or 0)
+            n, err = content_length(self.headers.get("Content-Length"))
+            if err: return self.send(400, json.dumps({"error": err}))
             if n > 20000: return self.send(413, '{"error":"too big"}')
-            body = json.loads(self.rfile.read(n).decode() or "{}")
+            body, err = parse_body(self.rfile.read(n))
+            if err: return self.send(400, json.dumps({"error": err}))
             who = (self.headers.get("X-UMC-User") or "admin").strip() or "admin"; p = u.path; role = role_of(who)
             if role != "admin":
                 if p not in OWNER_POSTS: return self.send(403, json.dumps({"ok": False, "error": "only the administrator can do that"}))
@@ -1670,6 +1790,11 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/public/api/network": return self.send(200, json.dumps(public_network_view(), default=str))
             if u.path == "/public/api/health": return self.send(200, json.dumps({"ok": True, "mqtt": MQTT["state"]}))
             if u.path == "/api/network": return self.send(200, json.dumps(network_view(float(parse_qs(u.query).get("hours", [CONF["map_hours"]])[0]))))
+            if u.path == "/api/node/stats":
+                q = parse_qs(u.query); return self.send(200, json.dumps(node_stats(str(q.get("key", [""])[0]).upper(), q.get("days", ["7"])[0])))
+            if u.path == "/api/links/checks": return self.send(200, json.dumps(link_checks(int(parse_qs(u.query).get("hours", ["48"])[0]))))
+            if u.path == "/api/report/weekly": return self.send(200, weekly_report(), "text/plain")
+            if u.path == "/api/export/geojson": return self.send(200, json.dumps(geojson_export(), default=str), "application/geo+json")
             if u.path == "/api/messages":
                 q = parse_qs(u.query); g = lambda k, d="": q.get(k, [d])[0]
                 try: return self.send(200, json.dumps(messages_view(g("channel"), g("region"), g("dir"), int(g("before", "0") or 0), int(g("limit", "100") or 100), g("q"))))
@@ -1720,7 +1845,7 @@ def export_accounts_soon():
 
 def main():
     db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); settings_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
-    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop, neighbour_loop, group_scan_loop): threading.Thread(target=fn, daemon=True).start()
+    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop, neighbour_loop, group_scan_loop, traffic_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)
     try: srv.serve_forever()
