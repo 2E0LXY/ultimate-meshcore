@@ -28,7 +28,7 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ## Done in 0.1.40
 
-- ✅ **UK default radio: 869.525 MHz, 250 kHz, SF10, CR5** (the MeshCore UK default channel). 867.500 MHz was the test setting and is removed from the defaults, the presets, the docs and the FAQ. Devices keep the settings they already have; change them with `set radio 869.525,250,10,5` (or the presets in the apps)
+- ✅ **UK default radio: 869.431 MHz, 62.5 kHz, SF8, CR5** (replaces 869.525 MHz, 250 kHz, SF10, CR5). 867.500 MHz was the test setting and is removed from the defaults, the presets, the docs and the FAQ. Devices keep the settings they already have; change them with `set radio 869.431,62.5,8,5` (or the presets in the apps)
 - ✅ **Android chat bubbles follow the backdrop.** Text was dark on dark bubbles over a photo or gradient; it is now white over glass, and the theme's own contrast colour on the plain look
 - ✅ **Dashboard messages take emoji.** An emoji row under the send box adds them at the cursor (130-byte limit kept)
 

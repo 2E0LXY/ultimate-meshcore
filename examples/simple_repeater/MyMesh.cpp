@@ -1275,10 +1275,10 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.node_lon = ADVERT_LON;
   StrHelper::strncpy(_prefs.password, ADMIN_PASSWORD, sizeof(_prefs.password));
 #ifdef UMC_YORKSHIRE_DEFAULTS
-  _prefs.freq = 869.618f;
+  _prefs.freq = 869.431f;
   _prefs.sf = 8;
   _prefs.bw = 62.5f;
-  _prefs.cr = 8;
+  _prefs.cr = 5;
 #else
   _prefs.freq = LORA_FREQ;
   _prefs.sf = LORA_SF;
