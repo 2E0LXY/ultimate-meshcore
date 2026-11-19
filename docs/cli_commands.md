@@ -211,7 +211,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 **Set by build flag:** `LORA_FREQ`, `LORA_BW`, `LORA_SF`, `LORA_CR`
 
-**Default:** `869.525,250,10,5` (the UK default channel: 869.525 MHz, 250 kHz, SF10, CR5; older 867.500 MHz test settings are no longer used)
+**Default:** `869.431,62.5,8,5` (the UK default: 869.431 MHz, 62.5 kHz, SF8, CR5; older 867.500 MHz test settings are no longer used)
 
 **Note:** Requires reboot to apply
 
@@ -256,7 +256,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 **Parameters:**
 - `frequency`: Frequency in MHz
 
-**Default:** `869.525`
+**Default:** `869.431`
 
 **Note:** Requires reboot to apply
 **Serial Only:** `set freq <frequency>`
