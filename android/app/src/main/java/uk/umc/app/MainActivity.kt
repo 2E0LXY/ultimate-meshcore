@@ -78,11 +78,17 @@ fun UmcApp() {
         val self by (session?.self ?: remember { kotlinx.coroutines.flow.MutableStateFlow(null) }).collectAsState()
         val webRole by AppState.webRole.collectAsState()
 
-        // What applies to the connected device: a repeater shows only its web settings; a companion (client) hides them
-        val role = self?.let { if (it.advType == uk.umc.app.proto.ADV_TYPE_REPEATER) "repeater" else if (it.advType == uk.umc.app.proto.ADV_TYPE_CHAT) "companion" else null } ?: webRole
+        // A repeater has no chat, channels, map, radio or GPS of its own: only its web settings (Device) apply.
+        // A companion (client) keeps every tab; Device also works for a client over WiFi, so it stays.
+        val role = if (self != null) {
+            when (self!!.advType) {
+                uk.umc.app.proto.ADV_TYPE_REPEATER -> "repeater"
+                uk.umc.app.proto.ADV_TYPE_CHAT -> "companion"
+                else -> null
+            }
+        } else webRole
         val visibleTabs = when (role) {
             "repeater" -> listOf(Tab.DEVICE)
-            "companion" -> Tab.entries.filter { it != Tab.DEVICE }
             else -> Tab.entries.toList()
         }
         LaunchedEffect(visibleTabs) {
