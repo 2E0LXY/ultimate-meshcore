@@ -221,6 +221,13 @@ Notes:
 - only `LilyGo_TBeam_1W_*` repeater builds use these persisted fan settings
 - accepted range is `0s` to `600s`
 
+## UMC Radio Defaults
+
+- UK default radio: `869.431` MHz, `62.5` kHz, SF `8`, CR `5` (`get radio` returns `869.431,62.5,8,5`)
+- fresh installs apply these defaults on first boot
+- devices with persisted radio settings keep them across upgrade; change them with `set radio 869.431,62.5,8,5`
+- regions: the device should be left with the wildcard `*` region only
+
 ## Web Panel CLI Access
 
 When the repeater web panel is enabled and you are authenticated, the browser CLI panel can run the same CLI commands accepted by the repeater.
