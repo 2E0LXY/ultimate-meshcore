@@ -60,6 +60,7 @@ fun UmcDeviceScreen() {
                                 map["Firmware"] = "${i.optString("fw")} ${i.optString("umc")} (${i.optString("commit")})"
                                 map["Last restart"] = i.optString("reset", "-")
                                 info = map
+                                AppState.webRole.value = i.optString("role").ifBlank { null }
                                 if (password.isNotBlank()) w.login(password)
                                 web = w
                                 push("Signed in to ${i.optString("name")}")

@@ -76,6 +76,18 @@ fun UmcApp() {
         val state by AppState.linkState.collectAsState()
         val session by AppState.session.collectAsState()
         val self by (session?.self ?: remember { kotlinx.coroutines.flow.MutableStateFlow(null) }).collectAsState()
+        val webRole by AppState.webRole.collectAsState()
+
+        // What applies to the connected device: a repeater shows only its web settings; a companion (client) hides them
+        val role = self?.let { if (it.advType == uk.umc.app.proto.ADV_TYPE_REPEATER) "repeater" else if (it.advType == uk.umc.app.proto.ADV_TYPE_CHAT) "companion" else null } ?: webRole
+        val visibleTabs = when (role) {
+            "repeater" -> listOf(Tab.DEVICE)
+            "companion" -> Tab.entries.filter { it != Tab.DEVICE }
+            else -> Tab.entries.toList()
+        }
+        LaunchedEffect(visibleTabs) {
+            if (tab !in visibleTabs) tab = visibleTabs.first()
+        }
 
         LaunchedEffect(toast) {
             toast?.let {
@@ -112,7 +124,7 @@ fun UmcApp() {
                 Column {
                 ShSeparator()
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), tonalElevation = 0.dp) {
-                    Tab.entries.forEach { t ->
+                    visibleTabs.forEach { t ->
                         NavigationBarItem(
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary,

@@ -30,6 +30,8 @@ object AppState {
     val session = MutableStateFlow<MeshSession?>(null)
     val savedDevices = MutableStateFlow<List<LinkTarget>>(emptyList())
     val toast = MutableStateFlow<String?>(null)
+    // role reported by the device signed in over WiFi ("repeater" or "companion"); null when none
+    val webRole = MutableStateFlow<String?>(null)
 
     private var link: Link? = null
     private lateinit var prefs: SharedPreferences
