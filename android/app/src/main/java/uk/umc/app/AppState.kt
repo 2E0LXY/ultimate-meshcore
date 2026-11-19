@@ -89,8 +89,14 @@ object AppState {
         disconnect()
         val ctx = appContext ?: return
         target.value = t
+        webRole.value = null
         rememberDevice(t)
         prefs.edit().putString("last", t.key()).apply()
+        // A repeater does not speak the companion protocol, so ask its web API what it is before choosing tabs
+        if (t.kind == LinkKind.WIFI) scope.launch {
+            runCatching { uk.umc.app.web.UmcWeb(t.address.substringBefore(':')).info().optString("role") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { webRole.value = it }
+        }
 
         val l: Link = when (t.kind) {
             LinkKind.BLUETOOTH -> BleLink(ctx, t.address, scope)
