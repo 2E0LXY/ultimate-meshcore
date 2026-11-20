@@ -22,6 +22,7 @@ class MqttSession(
 ) {
     @Volatile private var closed = false
     @Volatile private var retryDelayS = 1L
+    @Volatile private var everConnected = false
     private val client: Mqtt3AsyncClient = Mqtt3Client.builder()
         .identifier(clientId)
         .serverHost(host)
@@ -30,13 +31,13 @@ class MqttSession(
         .webSocketConfig(MqttWebSocketConfig.builder().serverPath("mqtt").build())
         .automaticReconnect().initialDelay(1, TimeUnit.SECONDS).maxDelay(60, TimeUnit.SECONDS).applyAutomaticReconnect()
         .addConnectedListener {
-            retryDelayS = 1
+            retryDelayS = 1; everConnected = true
             onState("connected", true, false)
             subscribe()
             onConnected()
         }
         .addDisconnectedListener { ctx ->
-            if (!closed) onState("disconnected: " + (ctx.cause.message ?: "connection lost") + " (reconnecting)", false, false)
+            if (!closed) onState("disconnected: " + ctx.cause.javaClass.simpleName + " " + (ctx.cause.message ?: "connection lost") + " (reconnecting)", false, false)
         }
         .buildAsync()
 
@@ -46,6 +47,15 @@ class MqttSession(
         }
         onState("connecting…", false, false)
         connect()
+        // the client can sit silently on a connect that never completes: say so after 20 s instead of showing "connecting…" for ever
+        Thread {
+            var waited = 0
+            while (!closed && !everConnected) {
+                try { Thread.sleep(20_000) } catch (e: InterruptedException) { return@Thread }
+                waited += 20
+                if (!closed && !everConnected) onState("no answer from $host:443 after ${waited}s (still trying)", false, false)
+            }
+        }.also { it.isDaemon = true }.start()
     }
 
     private fun connect() {
