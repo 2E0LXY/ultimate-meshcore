@@ -477,7 +477,7 @@ async function post(url, body) {
 const hold = () => { const a = document.activeElement; return !!(a && a.closest && a.closest("#body") && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.dataset.keep !== "0"); };
 const rep = v => String(v ?? "").replace(/^>\s*/, "").trim();
 const FIELDS = [
-  ["Radio", [["radio", "Frequency, bandwidth, SF, CR", "text", "869.618,62.5,8,8"], ["tx", "Transmit power (dBm)", "number"], ["dutycycle", "Duty cycle (%)", "number"], ["radio.rxgain", "Boosted receive gain", "onoff"], ["agc.reset.interval", "AGC reset (s)", "number"], ["cad", "Channel activity detect", "onoff"]]],
+  ["Radio", [["radio", "Frequency, bandwidth, SF, CR", "text", "869.431,62.5,8,5"], ["tx", "Transmit power (dBm)", "number"], ["dutycycle", "Duty cycle (%)", "number"], ["radio.rxgain", "Boosted receive gain", "onoff"], ["agc.reset.interval", "AGC reset (s)", "number"], ["cad", "Channel activity detect", "onoff"]]],
   ["Forwarding", [["repeat", "Repeat packets", "onoff"], ["loop.detect", "Loop detection", "select:off,minimal,moderate,strict"], ["flood.max", "Max flood hops", "number"], ["flood.max.unscoped", "Max hops, unscoped", "number"], ["flood.max.advert", "Max hops, adverts", "number"], ["group.hops.max", "Max hops, channel messages", "number"], ["multi.acks", "Extra ACKs", "select:0,1"], ["txdelay", "Flood retransmit delay", "number"], ["direct.txdelay", "Direct retransmit delay", "number"]]],
   ["Adverts", [["advert.interval", "Zero-hop advert (min)", "number"], ["flood.advert.interval", "Flood advert (hours)", "number"]]],
   ["Identity", [["name", "Node name", "text"], ["lat", "Latitude", "number"], ["lon", "Longitude", "number"], ["owner.info", "Owner info", "text"]]],
