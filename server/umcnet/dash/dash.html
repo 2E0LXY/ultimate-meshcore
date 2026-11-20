@@ -757,7 +757,7 @@ function popupHtml(x, n, nodes, now) {
     const air = (st.tx_air_secs != null && up > 120) ? `sending ${dur(st.tx_air_secs)} (${(st.tx_air_secs / up * 100).toFixed(1)}%) · receiving ${st.rx_air_secs != null ? dur(st.rx_air_secs) + " (" + (st.rx_air_secs / up * 100).toFixed(1) + "%)" : "—"}` : "";
     const mix = Object.entries(i.types || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${esc(k)} ${v}`).join(" · ");
     const bridge = br.t ? `heard from the others ${br.heard_pm}/min · sent out by radio ${br.passed_pm}/min · held back ${br.dropped_pm}/min <span class="tr">(totals ${br.heard} / ${br.passed} / ${br.dropped})</span>` : (i.bridge_on ? "bridge " + esc(i.bridge_on) : "");
-    return `<div class="pop"><h3>${esc(x.name)} <span class="tag" style="background:#2fe27a;color:#06130d">online</span></h3>` + pkv([
+    return `<div class="pop"><h3>${esc(x.name)} <span class="tag" style="background:${x.online ? "#2fe27a" : "#ff4d4d"};color:#06130d">${x.online ? "online" : "offline"}</span></h3>` + pkv([
       ["Last data", ago(i.last)], ["Seen first", ago(i.first)], ["Board", esc(i.board)], ["Firmware", esc([i.build ? "UMC " + i.build.split(" ")[0] + ((i.build.match(/commit:(\w+)/) || [])[1] ? " (" + i.build.match(/commit:(\w+)/)[1] + ")" : "") : "", i.fw ? "MeshCore " + i.fw : ""].filter(Boolean).join(" · "))], ["Updates", esc(i.update)],
       ["Radio", esc(i.radio)], ["Repeating", esc(i.repeat)], ["Transmit power", i.tx_power ? esc(i.tx_power) + " dBm" : ""], ["Position", pos], ["Area", esc(i.area)], ["Uptime", up != null ? dur(up) : ""],
       ["Battery", st.battery_mv ? (st.battery_mv / 1000).toFixed(2) + " V" : ""], ["Noise floor", st.noise_floor != null ? st.noise_floor + " dBm" : ""], ["Last signal", i.rssi != null ? `${i.rssi} dBm${i.snr != null ? " · SNR " + i.snr + " dB" : ""}` : ""],
@@ -921,7 +921,7 @@ async function netUpdate() {
   const links = n.links.filter(l => f["h" + Math.min(4, l.hops)] && (!f.recv || l.recv === f.recv) && (!f.conn || (nodes[l.node] && nodes[l.node].connected)) && (!nodes[l.node] || f["t" + nodes[l.node].type] !== false));
   if (!$("#netCtl").dataset.built) { $("#netCtl").innerHTML = netControls(); $("#netCtl").dataset.built = "1"; }
   else { const sel = $("#netCtl select"); if (sel && sel.options.length !== n.nodes.filter(x => x.connected).length + 1) $("#netCtl").innerHTML = netControls(); }
-  $("#netLegend").innerHTML = [0, 1, 2, 3, 4].map(h => `<span><i style="background:${HOPC(h)}"></i>${h === 4 ? "4 or more hops" : HOPN(h)}</span>`).join("") + `<span><i style="background:#2fe27a;border:3px solid #f2c14e;border-radius:50%"></i>repeater online on this network</span><span><i style="background:#9fb7ab;border-radius:50%"></i>other repeater</span><span><i style="background:#c9b8ff;border-radius:50%"></i>room server</span><span><i style="background:#7fa392;border-radius:50%"></i>person or sensor</span><span>dashed = not heard for over an hour</span>`;
+  $("#netLegend").innerHTML = [0, 1, 2, 3, 4].map(h => `<span><i style="background:${HOPC(h)}"></i>${h === 4 ? "4 or more hops" : HOPN(h)}</span>`).join("") + `<span><i style="background:#2fe27a;border:3px solid #f2c14e;border-radius:50%"></i>our repeater online</span><span><i style="background:#ff4d4d;border:3px solid #f2c14e;border-radius:50%"></i>our repeater offline</span><span><i style="background:#9fb7ab;border-radius:50%"></i>other repeater</span><span><i style="background:#c9b8ff;border-radius:50%"></i>room server</span><span><i style="background:#7fa392;border-radius:50%"></i>person or sensor</span><span>dashed = not heard for over an hour</span>`;
   const kindOn = x => f["t" + x.type] !== false;
   const hasPos = x => x.lat != null && x.lon != null;          // a half position (lat without lon) would break Leaflet, so it counts as no position
   const placed = n.nodes.filter(x => hasPos(x) && kindOn(x)), unplaced = n.nodes.filter(x => !hasPos(x) && kindOn(x));
@@ -936,9 +936,8 @@ async function netUpdate() {
         .bindTooltip(`<b>${esc(a.name)}</b> hears <b>${esc(b.name)}</b><br>${HOPN(l.hops)} · ${l.n} packet${l.n === 1 ? "" : "s"}${l.snr != null ? " · best SNR " + l.snr + " dB" : ""}<br>last ${dur(now - l.last)} ago`, {sticky: true}).addTo(S.layer);
     });
     placed.forEach(x => {
-      if (x.info && !x.online) return;                                  // one of ours that is not on the network now: not on the map
       const mine = !!x.info;
-      const m = L.circleMarker([x.lat, x.lon], mine ? {radius: 10, color: "#f2c14e", weight: 3.5, fillColor: "#2fe27a", fillOpacity: 1} : {radius: x.type === 2 ? 7 : 5, color: "#0b1511", weight: 1.5, fillColor: x.type === 2 ? "#9fb7ab" : x.type === 3 ? "#c9b8ff" : "#7fa392", fillOpacity: 0.95}).addTo(S.layer);
+      const m = L.circleMarker([x.lat, x.lon], mine ? {radius: 10, color: "#f2c14e", weight: 3.5, fillColor: x.online ? "#2fe27a" : "#ff4d4d", fillOpacity: 1} : {radius: x.type === 2 ? 7 : 5, color: "#0b1511", weight: 1.5, fillColor: x.type === 2 ? "#9fb7ab" : x.type === 3 ? "#c9b8ff" : "#7fa392", fillOpacity: 0.95}).addTo(S.layer);
       if (!mine) m.bindTooltip(`<b>${esc(x.name)}</b><br>${KINDN[x.type] || "node"}<br>last heard ${x.last ? dur(now - x.last) + " ago" : "—"}`, {});
       m.bindPopup(() => popupHtml(x, n, nodes, now), {maxWidth: 440, minWidth: 320, className: "umcpop", autoPanPadding: [30, 30]});
     });
