@@ -126,6 +126,7 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 .nc-msg.tx .nc-text{color:var(--txt-tx);text-shadow:0 0 calc(6px * var(--glow)) color-mix(in srgb,var(--a) 60%,transparent)}
 .nc-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 8px 0;font-size:11.5px;color:var(--muted)}
 .nc-heard i{font-style:normal;opacity:.85}
+.nc-none{color:#ff8f5a}
 .nc-reply{background:transparent;border:1px solid color-mix(in srgb,var(--b) 60%,transparent);color:var(--b2);border-radius:999px;padding:2px 12px;font-size:11.5px;cursor:pointer;box-shadow:0 0 calc(8px * var(--glow)) color-mix(in srgb,var(--b) 25%,transparent)}
 .nc-reply:hover{background:color-mix(in srgb,var(--b) 14%,transparent)}
 .nc-msg.fresh .nc-bubble{animation:ncin .6s ease-out,ncglow 2.4s ease-in-out 3}
@@ -847,11 +848,13 @@ function msgUpdate() {
   const bubbles = d.messages.slice().reverse().map(x => {
     const tx = x.dir === "tx", fresh = seen && x.id > seen;
     const region = x.region ? (x.region === "?" ? "other region" : x.region) : "";
-    const heard = x.heard.length ? x.heard.map(h => `${esc(h.name)} <i>${HOPN(h.hops)}${h.snr != null ? " · " + h.snr + " dB" : ""}</i>`).join(" &nbsp;|&nbsp; ") : (tx ? "waiting to be heard" : "");
+    const aged = Date.now() / 1000 - (x.seen || x.ts) > 30;
+    const heard = x.heard.length ? x.heard.map(h => `${esc(h.name)} <i>${HOPN(h.hops)}${h.snr != null ? " · " + h.snr + " dB" : ""}</i>`).join(" &nbsp;|&nbsp; ") : (tx ? (aged ? "no repeater has heard this" : "waiting to be heard") : "");
+    const tag = tx ? (x.heard.length ? `heard by ${x.heard.length} repeater${x.heard.length === 1 ? "" : "s"}: ` : "") : "heard by ";
     return `<div class="nc-msg ${tx ? "tx" : "rx"}${fresh ? " fresh" : ""}">
       <div class="nc-meta"><b class="nc-who">${esc(x.sender || "?")}</b><span class="nc-chip">${esc(x.chan)}</span>${region ? `<span class="nc-chip reg">${esc(region)}</span>` : ""}<span class="nc-time">${clock(x.seen).split(", ").pop()}</span></div>
       <div class="nc-bubble"><span class="nc-text">${esc(x.text)}</span></div>
-      <div class="nc-foot">${heard ? `<span class="nc-heard">${tx ? "" : "heard by "}${heard}</span>` : ""}${d.tx_enabled && !tx ? `<button class="nc-reply" data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender}))}">Reply</button>` : ""}</div>
+      <div class="nc-foot">${heard ? `<span class="nc-heard${tx && !x.heard.length && aged ? " nc-none" : ""}" title="${tx ? "repeaters that heard this go out. Channel messages have no read receipt, so this shows repeaters, not people" : ""}">${tag}${heard}</span>` : ""}${d.tx_enabled && !tx ? `<button class="nc-reply" data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender}))}">Reply</button>` : ""}</div>
     </div>`;
   });
   feed.innerHTML = bubbles.length ? bubbles.join("") : `<div class="nc-empty">No messages match yet. Messages appear as your repeaters hear them in the channels set up in Settings.</div>`;
