@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.21"
+VERSION = "2.22"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -595,7 +595,7 @@ def sampler_loop():
             now = int(time.time()); vals = snapshot_values()
             DB.executemany("INSERT INTO samples VALUES(?,?,?)", [(now, k, float(v)) for k, v in vals.items()])
             if now % 3600 < 60:
-                cut = now - CONF["keep_days"] * 86400; DB.execute("DELETE FROM samples WHERE ts<?", (cut,)); DB.execute("DELETE FROM events WHERE ts<?", (cut,))
+                cut = now - CONF["keep_days"] * 86400; DB.execute("DELETE FROM samples WHERE ts<?", (cut,)); DB.execute("DELETE FROM events WHERE ts<?", (cut,)); DB.execute("DELETE FROM audit WHERE ts<?", (now - max(90, CONF["keep_days"]) * 86400,))
         except Exception as e:
             sys.stderr.write("sampler: %s\n" % e)
 
@@ -1023,13 +1023,14 @@ def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
     return {"messages": out, "channels": [{"name": x["name"], "hash": "%02X" % MSG.Channel(x["name"], x.get("psk")).hash} for x in c["channels"]], "regions": c["regions"], "counts": counts,
             "unreadable": unread, "tx_enabled": bool(c["tx_enabled"]), "sender": c["sender"]}
 
-def clear_messages(who, chan="", region="", direction=""):
+def clear_messages(who, chan="", region="", direction="", q=""):
     """Delete stored messages (all, or only those matching the filters). Admin only (enforced by the route)."""
     where, args = [], []
     if chan: where.append("chan=?"); args.append(chan)
     if region == "-": where.append("region=''")
     elif region: where.append("region=?"); args.append(region)
     if direction in ("rx", "tx"): where.append("dir=?"); args.append(direction)
+    if q: where.append("(text LIKE ? OR sender LIKE ?)"); args += ["%" + q + "%"] * 2
     with LOCK:
         cur = DB.execute("DELETE FROM messages" + (" WHERE " + " AND ".join(where) if where else ""), args)
         n = cur.rowcount
@@ -1767,8 +1768,13 @@ class H(BaseHTTPRequestHandler):
                 CONF["messages"]["channels"].append({"name": nm}); conf_save(); audit(who, "group added", nm, "public hashtag group found by the scan")
                 with LOCK: MSGSTAT.pop("%02X" % MSG.Channel(nm).hash, None)
                 return self.send(200, json.dumps({"ok": True}))
+            if p in ("/api/audit/clear", "/api/events/clear"):
+                tbl = "audit" if "audit" in p else "events"; days = max(0, min(3650, int(body.get("older_than_days") or 0)))
+                with LOCK: n = DB.execute("DELETE FROM %s WHERE ts<?" % tbl, (int(time.time()) - days * 86400,)).rowcount
+                audit(who, tbl + " cleared", "older than %d days" % days if days else "everything", "%d removed" % n)
+                return self.send(200, json.dumps({"ok": True, "removed": n}))
             if p == "/api/messages/clear":
-                return self.send(200, json.dumps(clear_messages(who, str(body.get("channel", "")), str(body.get("region", "")), str(body.get("dir", "")))))
+                return self.send(200, json.dumps(clear_messages(who, str(body.get("channel", "")), str(body.get("region", "")), str(body.get("dir", "")), str(body.get("q", "")))))
             if p == "/api/messages/send":
                 own = me_view(who)["sender"] or re.sub(r"[^A-Za-z0-9._-]", "", who.upper())[:24] or "USER"
                 sender = (body.get("sender") or None) if role == "admin" else own        # users send under their own name only

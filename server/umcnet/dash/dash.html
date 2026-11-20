@@ -429,11 +429,11 @@ function vDiag(o) {
   const lv = {bad: 0, warn: 1, ok: 2}, dg = o.diagnostics.slice().sort((a, b) => lv[a.level] - lv[b.level]);
   const ips = {}; S.ev.filter(e => e.kind === "auth_fail").forEach(e => { const k = e.ip || "unknown"; ips[k] = (ips[k] || 0) + 1; });
   const ipRows = Object.entries(ips).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([ip, n]) => `<tr><td>${esc(ip)}</td><td>${n}</td></tr>`);
-  const kinds = ["", "connect", "disconnect", "timeout", "auth_fail", "warn"];
+  const kinds = ["", "connect", "disconnect", "timeout", "auth_fail", "warn", "enrol", "denied", "alert", "info"];
   return `<div class="panels">${panel("All checks", dg.filter(d => d.level !== "ok").length + " need attention", `<div class="conn">${dg.map(d => `<div>${dot(d.level)}<b>${esc(d.title)}</b><span>${esc(d.detail)}</span></div>`).join("")}</div>`, "diag", "s7")}
     ${panel("Refused logins by address", "last 24 hours", table(["Address", "Refusals"], ipRows, "None. Nobody has been refused.") + `<p class="tr" style="margin-top:8px">Many refusals from one address is someone guessing passwords. Consider fail2ban or limiting the address in Caddy.</p>`, "events", "s5")}
-    ${panel("Audit log", "everything done from this dashboard, last 7 days", table(["When", "Who", "Action", "On", "Detail"], S.audit.slice(0, 80).map(a => `<tr><td>${clock(a.ts)}</td><td>${esc(a.who)}</td><td>${dot(a.ok ? "ok" : "bad")} ${esc(a.action)}</td><td>${esc(a.target)}</td><td style="white-space:normal">${esc(a.detail)}</td></tr>`), "Nothing has been done from the dashboard yet.") + `<p class="tr" style="margin-top:6px"><a href="/api/export/audit.csv">Download as CSV</a></p>`, "audit")}
-    ${panel("Event history", "kept 14 days", `<div class="rng" style="margin-bottom:8px">${kinds.map(k => `<button data-ek="${k}" class="${S.evKind === k ? "on" : ""}">${k || "all"}</button>`).join(" ")}</div>` + table(["When", "Kind", "Who", "From", "What"], S.ev.slice(0, 150).map(e => `<tr><td>${clock(e.ts)}</td><td><span class="tag ${e.kind === "auth_fail" || e.kind === "warn" ? "tx" : ""}">${esc(e.kind)}</span></td><td>${esc(e.user || e.client)}</td><td>${esc(e.ip)}</td><td>${esc(e.text)}</td></tr>`), "No events in this period."), "events")}</div>`;
+    ${panel("Audit log", "everything done from this dashboard, last 7 days", (isAdm(o) ? `<div class="row" style="margin-bottom:8px"><button class="tool danger" data-clr="audit">Clear audit log older than 30 days</button></div>` : "") + table(["When", "Who", "Action", "On", "Detail"], S.audit.slice(0, 80).map(a => `<tr><td>${clock(a.ts)}</td><td>${esc(a.who)}</td><td>${dot(a.ok ? "ok" : "bad")} ${esc(a.action)}</td><td>${esc(a.target)}</td><td style="white-space:normal">${esc(a.detail)}</td></tr>`), "Nothing has been done from the dashboard yet.") + `<p class="tr" style="margin-top:6px"><a href="/api/export/audit.csv">Download as CSV</a></p>`, "audit")}
+    ${panel("Event history", "kept 14 days", `<div class="rng" style="margin-bottom:8px">${[[3600, "1h"], [86400, "24h"], [604800, "7d"], [1209600, "14d"]].map(([r, l]) => `<button data-er="${r}" class="${(S.evRange || 86400) === r ? "on" : ""}">${l}</button>`).join(" ")} · ${isAdm(o) ? `<button class="tool danger" data-clr="events">Clear events</button> ` : ""}${kinds.map(k => `<button data-ek="${k}" class="${S.evKind === k ? "on" : ""}">${k || "all"}</button>`).join(" ")}</div>` + table(["When", "Kind", "Who", "From", "What"], S.ev.slice(0, 150).map(e => `<tr><td>${clock(e.ts)}</td><td><span class="tag ${e.kind === "auth_fail" || e.kind === "warn" ? "tx" : ""}">${esc(e.kind)}</span></td><td>${esc(e.user || e.client)}</td><td>${esc(e.ip)}</td><td>${esc(e.text)}</td></tr>`), "No events in this period."), "events")}</div>`;
 }
 
 function vBroker(o) {
@@ -464,7 +464,7 @@ function vSystem(o) {
 
 function vLog(o) {
   const f = S.logq.toLowerCase(), rows = o.log.filter(l => !f || l.line.toLowerCase().includes(f)).map(l => `<tr><td style="white-space:nowrap">${clock(l.t).split(", ").pop()}</td><td style="white-space:normal;font-family:ui-monospace,Consolas,monospace;font-size:12px">${esc(l.line)}</td></tr>`);
-  return `<div class="panels">${panel("Downloads", "save a copy of this log", `<div class="row"><a href="/api/export/events.csv">Events (CSV)</a><a href="/api/export/audit.csv">Audit log (CSV)</a></div>`, "", "s12")}${panel("Broker log", "newest first", `<div class="row" style="margin-bottom:8px"><input id="lq" placeholder="Filter…" value="${esc(S.logq)}" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 10px;width:260px"></div>` + table(["Time", "Line"], rows), "log")}</div>`;
+  return `<div class="panels">${panel("Downloads", "save a copy of this log", `${isAdm(o) ? `<div class="row"><a href="/api/export/events.csv">Events (CSV)</a><a href="/api/export/audit.csv">Audit log (CSV)</a></div>` : `<div class="tr">Only the administrator can download logs.</div>`}`, "", "s12")}${panel("Broker log", "newest first", `<div class="row" style="margin-bottom:8px"><input id="lq" placeholder="Filter…" value="${esc(S.logq)}" style="background:#0d2219;color:#e9f7ef;border:1px solid #1b3a30;border-radius:8px;padding:6px 10px;width:260px"></div>` + table(["Time", "Line"], rows), "log")}</div>`;
 }
 
 
@@ -876,8 +876,8 @@ document.addEventListener("click", async e => {
   const t = e.target.closest("[data-mfset]"); if (t) { S.mg.channel = t.dataset.mfset; const sel = $("#mfChan"); if (sel) sel.value = S.mg.channel; msgLoad(); return; }
   const g = e.target.closest('[data-act="gocontrol"]'); if (g) { S.sel = g.dataset.id; S.tab = "control"; draw(); return; }
   if (e.target.id === "msgClear") {
-    const f = {channel: S.mg.channel || "", region: S.mg.region || "", dir: S.mg.dir || ""}, scoped = f.channel || f.region || f.dir;
-    if (!confirm(scoped ? "Delete every stored message matching the current filters?\n\nChannel: " + (f.channel || "all") + "\nRegion: " + (f.region || "all") + "\nDirection: " + (f.dir || "all") + "\n\nThis cannot be undone." : "Delete ALL stored messages on every channel?\n\nThis cannot be undone.")) return;
+    const f = {channel: S.mg.channel || "", region: S.mg.region || "", dir: S.mg.dir || "", q: S.mg.q || ""}, scoped = f.channel || f.region || f.dir || f.q;
+    if (!confirm(scoped ? "Delete every stored message matching the current filters?\n\nChannel: " + (f.channel || "all") + "\nRegion: " + (f.region || "all") + "\nDirection: " + (f.dir || "all") + "\nSearch: " + (f.q || "none") + "\n\nThis cannot be undone." : "Delete ALL stored messages on every channel?\n\nThis cannot be undone.")) return;
     e.target.disabled = true; const r = await post("/api/messages/clear", f); e.target.disabled = false;
     S.mg.sent = r.ok ? `Cleared ${r.removed} message${r.removed === 1 ? "" : "s"}.` : (r.error || "Could not clear"); const rs = $("#msgRes"); if (rs) rs.textContent = S.mg.sent; S.mg.lastId = 0; msgLoad(); return;
   }
@@ -887,6 +887,13 @@ document.addEventListener("click", async e => {
   if (!confirm(`Send this to ${chan}${reg ? " in " + reg : " (no region)"}?\n\n${sender}: ${text}\n\nIt goes out over the air from every repeater on this network that can carry it.`)) return;
   e.target.disabled = true; const r = await post("/api/messages/send", {channel: chan, region: reg, text, sender}); e.target.disabled = false;
   S.mg.sent = r.ok ? `Sent. Handed to ${r.repeaters.join(", ")}.` : (r.error || "Could not send"); $("#msgRes").textContent = S.mg.sent; if (r.ok) { $("#msgText").value = ""; $("#msgCount").textContent = "0/130"; } msgLoad();
+});
+
+document.addEventListener("click", async e => {
+  const r = e.target.closest("[data-er]"); if (r) { S.evRange = +r.dataset.er; await loadEv(); draw(); return; }
+  const c = e.target.closest("[data-clr]"); if (!c) return; const k = c.dataset.clr;
+  if (!confirm(k === "audit" ? "Delete audit log entries older than 30 days?" : "Delete ALL stored events?\n\nThis cannot be undone.")) return;
+  const res = await post("/api/" + k + "/clear", {older_than_days: k === "audit" ? 30 : 0}); alert(res.ok ? "Removed " + res.removed + "." : (res.error || "Could not clear")); await tick();
 });
 
 // Control tab: neighbours with names, read on opening (and again each minute while it is open)
@@ -1002,7 +1009,8 @@ async function loadHist() {
   const keys = ["pkts_pm", "unique_pm", "msgs_pm", "clients", "repeaters", "bytes_rx_1m", "bytes_tx_1m", "pub_rx_1m", "pub_tx_1m", "dropped_1m", "cpu", "mem_pct", "disk_pct"].concat((S.o ? S.o.devices.slice(0, 6) : []).map(d => "dev:" + d.id.slice(0, 16)));
   try { S.hist = await jget("/api/history?range=" + S.range + "&k=" + keys.join(",")); } catch {}
 }
-async function loadEv() { try { S.ev = await jget("/api/events?range=86400" + (S.evKind ? "&kind=" + S.evKind : "")); } catch {} }
+const isAdm = o => !(o && o.me) || o.me.role === "admin";
+async function loadEv() { try { S.ev = await jget("/api/events?range=" + (S.evRange || 86400) + (S.evKind ? "&kind=" + S.evKind : "")); } catch {} }
 async function tick(first) {
   try { S.o = await jget("/api/overview"); S.err = ""; } catch (e) { S.err = e.message; }
   if (S.tab === "network") { try { S.net = await jget("/api/network?hours=" + S.nf.hours); } catch {} }
