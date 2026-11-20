@@ -223,7 +223,7 @@ def network_view(hours=24):
             out.append(n)
         nodes = out
         keep = {n["key"] for n in nodes}
-        links = [{"recv": a, "node": b, "hops": l["hops_min"], "hops_last": l["hops_last"], "n": l["n"], "snr": l["snr"], "rssi": l["rssi"], "first": l["first"], "last": l["last"], "types": dict(l["types"])} for (a, b), l in LINKS.items() if a in keep and b in keep]
+        links = [{"recv": a, "node": b, "hops": l["hops_min"], "hops_last": l["hops_last"], "n": l["n"], "snr": l["snr"], "rssi": l["rssi"], "first": l["first"], "last": l["last"], "types": dict(l["types"])} for (a, b), l in LINKS.items() if a in keep and b in keep and l["last"] >= cutoff]
         journeys = [dict(j) for j in list(JOURNEYS)[-80:]][::-1]
     return {"now": now, "hours": hours, "nodes": nodes, "links": links, "journeys": journeys, "confirmed": confirmed_links()}
 
