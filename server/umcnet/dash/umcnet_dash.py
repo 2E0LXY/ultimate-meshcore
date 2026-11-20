@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.20"
+VERSION = "2.21"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -1023,6 +1023,20 @@ def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
     return {"messages": out, "channels": [{"name": x["name"], "hash": "%02X" % MSG.Channel(x["name"], x.get("psk")).hash} for x in c["channels"]], "regions": c["regions"], "counts": counts,
             "unreadable": unread, "tx_enabled": bool(c["tx_enabled"]), "sender": c["sender"]}
 
+def clear_messages(who, chan="", region="", direction=""):
+    """Delete stored messages (all, or only those matching the filters). Admin only (enforced by the route)."""
+    where, args = [], []
+    if chan: where.append("chan=?"); args.append(chan)
+    if region == "-": where.append("region=''")
+    elif region: where.append("region=?"); args.append(region)
+    if direction in ("rx", "tx"): where.append("dir=?"); args.append(direction)
+    with LOCK:
+        cur = DB.execute("DELETE FROM messages" + (" WHERE " + " AND ".join(where) if where else ""), args)
+        n = cur.rowcount
+        if not where: MSGSTAT.clear(); RECENT_GRP.clear()
+    audit(who, "messages cleared", chan or "all channels", "%d removed%s" % (n, "" if not where else " (filtered)"))
+    return {"ok": True, "removed": n}
+
 def send_message(who, chan, region, text, sender=None):
     c = CONF["messages"]
     if not c["tx_enabled"]: return {"ok": False, "error": "sending is switched off in Settings"}
@@ -1753,6 +1767,8 @@ class H(BaseHTTPRequestHandler):
                 CONF["messages"]["channels"].append({"name": nm}); conf_save(); audit(who, "group added", nm, "public hashtag group found by the scan")
                 with LOCK: MSGSTAT.pop("%02X" % MSG.Channel(nm).hash, None)
                 return self.send(200, json.dumps({"ok": True}))
+            if p == "/api/messages/clear":
+                return self.send(200, json.dumps(clear_messages(who, str(body.get("channel", "")), str(body.get("region", "")), str(body.get("dir", "")))))
             if p == "/api/messages/send":
                 own = me_view(who)["sender"] or re.sub(r"[^A-Za-z0-9._-]", "", who.upper())[:24] or "USER"
                 sender = (body.get("sender") or None) if role == "admin" else own        # users send under their own name only

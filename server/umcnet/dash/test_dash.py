@@ -383,6 +383,16 @@ class Messages(unittest.TestCase):
         other = self.M.build_group_text(self.M.Channel("#nobody-knows"), "X", "secret", int(now)); dash.note_message("01" * 32, other, "1", "-100", now)
         self.assertEqual(1, len(dash.messages_view()["messages"])); self.assertEqual(1, sum(x["n"] for x in dash.messages_view()["unreadable"].values()))   # counted, not shown
 
+    def test_clear_messages_removes_all_or_only_the_filtered_ones(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM messages"); dash.DEV.clear(); now = int(time.time())
+        saved = list(dash.CONF["messages"]["channels"]); self.addCleanup(lambda: (dash.CONF["messages"].__setitem__("channels", saved), dash.DB.execute("DELETE FROM messages")))
+        dash.CONF["messages"]["channels"] = saved + [{"name": "#yorkshire"}, {"name": "#test"}]
+        for i, ch in enumerate(("#yorkshire", "#test")):
+            dash.note_message("01" * 32, self.M.build_group_text(self.M.Channel(ch), "S", "hi %d" % i, now + i), "1", "-90", now + i)
+        self.assertEqual(2, len(dash.messages_view()["messages"]))
+        self.assertEqual(1, dash.clear_messages("admin", chan="#test")["removed"]); self.assertEqual(1, len(dash.messages_view()["messages"]))
+        self.assertEqual(1, dash.clear_messages("admin")["removed"]); self.assertEqual(0, len(dash.messages_view()["messages"]))
+
     def test_settings_for_channels_and_regions_are_validated(self):
         self.assertIsNone(dash.conf_update({"messages": {"channels": [{"name": "Public", "psk": self.M.PUBLIC_PSK}, {"name": "#sheffield"}], "regions": ["yorkshire", "#derbyshire"], "sender": "2E0LXY-DASH"}}))
         self.assertEqual(["yorkshire", "derbyshire"], dash.CONF["messages"]["regions"])
