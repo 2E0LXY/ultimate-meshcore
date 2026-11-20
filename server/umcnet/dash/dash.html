@@ -849,10 +849,10 @@ function msgUpdate() {
   const bubbles = d.messages.slice().reverse().map(x => {
     const tx = x.dir === "tx", fresh = seen && x.id > seen;
     const region = x.region ? (x.region === "?" ? "other region" : x.region) : "";
-    const heard = x.heard.length ? x.heard.map(h => `${esc(h.name)} <i>${HOPN(h.hops)}${h.snr != null ? " · " + h.snr + " dB" : ""}</i>`).join(" &nbsp;|&nbsp; ") : (tx ? "waiting to be heard" : "");
+    const heard = x.heard.length ? x.heard.map(h => `${esc(h.name)} <i>${HOPN(h.hops)}${h.snr != null ? " · " + h.snr + " dB" : ""}</i>`).join(" &nbsp;|&nbsp; ") : "";
     return `<div class="nc-msg ${tx ? "tx" : "rx"}${fresh ? " fresh" : ""}">
       <div class="nc-meta"><b class="nc-who">${esc(x.sender || "?")}</b><span class="nc-chip">${esc(x.chan)}</span>${region ? `<span class="nc-chip reg">${esc(region)}</span>` : ""}<span class="nc-time">${clock(x.seen).split(", ").pop()}</span></div>
-      <div class="nc-bubble"><span class="nc-text">${esc(x.text)}</span></div>
+      <div class="nc-bubble"${d.tx_enabled && !tx ? ` data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender}))}" title="Click to reply" style="cursor:pointer"` : ""}><span class="nc-text">${esc(x.text)}</span></div>
       <div class="nc-foot">${heard ? `<span class="nc-heard">${tx ? "" : "heard by "}${heard}</span>` : ""}${d.tx_enabled && !tx ? `<button class="nc-reply" data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender}))}">Reply</button>` : ""}</div>
     </div>`;
   });
