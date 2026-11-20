@@ -939,7 +939,7 @@ async function netUpdate() {
       if (x.info && !x.online) return;                                  // one of ours that is not on the network now: not on the map
       const mine = !!x.info;
       const m = L.circleMarker([x.lat, x.lon], mine ? {radius: 10, color: "#f2c14e", weight: 3.5, fillColor: "#2fe27a", fillOpacity: 1} : {radius: x.type === 2 ? 7 : 5, color: "#0b1511", weight: 1.5, fillColor: x.type === 2 ? "#9fb7ab" : x.type === 3 ? "#c9b8ff" : "#7fa392", fillOpacity: 0.95}).addTo(S.layer);
-      m.bindTooltip(`<b>${esc(x.name)}</b><br>${KINDN[x.type] || "node"}${mine ? " · online" : ""}<br>last heard ${x.last ? dur(now - x.last) + " ago" : "—"}`, mine ? {permanent: true, direction: "top", offset: [0, -8]} : {});
+      if (!mine) m.bindTooltip(`<b>${esc(x.name)}</b><br>${KINDN[x.type] || "node"}<br>last heard ${x.last ? dur(now - x.last) + " ago" : "—"}`, {});
       m.bindPopup(() => popupHtml(x, n, nodes, now), {maxWidth: 440, minWidth: 320, className: "umcpop", autoPanPadding: [30, 30]});
     });
     if (!S.nf.fitted && placed.length) { S.nf.fitted = true; S.map.fitBounds(placed.map(x => [x.lat, x.lon]), {padding: [40, 40], maxZoom: 12}); }
