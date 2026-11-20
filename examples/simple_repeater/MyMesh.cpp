@@ -2789,6 +2789,8 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     sprintf(reply, "> %s", mqtt.isEndpointEnabled(0x10) ? "on" : "off");
   } else if (strcmp(command, "get mqtt.waev") == 0) {
     sprintf(reply, "> %s", mqtt.isEndpointEnabled(0x20) ? "on" : "off");
+  } else if (strcmp(command, "get mqtt.rflab") == 0) {
+    sprintf(reply, "> %s", mqtt.isEndpointEnabled(0x40) ? "on" : "off");
   } else if (strcmp(command, "get mqtt.letsmesh-eu") == 0 || strcmp(command, "get mqtt.letsmesh.eu") == 0) {
     sprintf(reply, "> %s", mqtt.isEndpointEnabled(0x02) ? "on" : "off");
   } else if (strcmp(command, "get mqtt.letsmesh-us") == 0 || strcmp(command, "get mqtt.letsmesh.us") == 0) {
@@ -2849,6 +2851,12 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     }
   } else if (memcmp(command, "set mqtt.waev ", 14) == 0) {
     if (mqtt.setEndpointEnabled(0x20, memcmp(&command[14], "on", 2) == 0)) {
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Err - max 2 mqtt brokers");
+    }
+  } else if (memcmp(command, "set mqtt.rflab ", 15) == 0) {
+    if (mqtt.setEndpointEnabled(0x40, memcmp(&command[15], "on", 2) == 0)) {
       strcpy(reply, "OK");
     } else {
       strcpy(reply, "Err - max 2 mqtt brokers");

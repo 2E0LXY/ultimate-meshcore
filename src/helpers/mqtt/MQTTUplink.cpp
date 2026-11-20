@@ -152,6 +152,8 @@ const MQTTUplink::BrokerSpec MQTTUplink::kBrokerSpecs[kBrokerCount] = {
      kLetsmeshEuBit, false, 0},
     {"letsmesh-us", "letsmesh-us", "mqtt-us-v1.letsmesh.net", "wss://mqtt-us-v1.letsmesh.net:443/mqtt",
      kLetsmeshUsBit, false, 0},
+    // RF Lab (CoreScope) packet analyser, using MeshCore identity JWT authentication (chain ends at ISRG Root X1).
+    {"rflab", "rflab", "mqtt.rflab.io", "wss://mqtt.rflab.io:443/mqtt", kRfLabBit, false, 0},
     {"custom", "custom", nullptr, nullptr, kCustomBit, true, 0},
 };
 
@@ -219,7 +221,7 @@ bool MQTTUplink::isUnsetIataValue(const char* iata) {
 const char* MQTTUplink::brokerCaCert(const BrokerSpec& spec) {
   // Note: ESP32 targets with the certificate bundle attach it instead of these PEMs;
   // this fallback only applies on builds without CONFIG_MBEDTLS_CERTIFICATE_BUNDLE.
-  if (spec.bit == kEastmeshBit || spec.bit == kMeshmapperBit) {
+  if (spec.bit == kEastmeshBit || spec.bit == kMeshmapperBit || spec.bit == kRfLabBit) {
     // eastmesh.au switched from Let's Encrypt to a Google Trust Services WE1
     // wildcard cert (July 2026); trust both so a switch back doesn't brick uplinks.
     return mqtt_ca_certs::kCombinedPem;  // ISRG Root X1 + GTS WE1

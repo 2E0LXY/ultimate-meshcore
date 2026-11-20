@@ -215,9 +215,10 @@ private:
   static constexpr uint8_t kCustomBit = 0x08;
   static constexpr uint8_t kMeshmapperBit = 0x10;
   static constexpr uint8_t kWaevBit = 0x20;
-  static constexpr uint8_t kBrokerMask = 0x3F;
+  static constexpr uint8_t kRfLabBit = 0x40;
+  static constexpr uint8_t kBrokerMask = 0x7F;
   static constexpr uint8_t kMaxEnabledBrokers = 2;
-  static constexpr size_t kBrokerCount = 6;
+  static constexpr size_t kBrokerCount = 7;
   static const BrokerSpec kBrokerSpecs[kBrokerCount];
   static bool isUnsetIataValue(const char* iata);
   static const char* brokerCaCert(const BrokerSpec& spec);

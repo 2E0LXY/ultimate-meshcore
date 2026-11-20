@@ -431,7 +431,7 @@ const SECTIONS = [
       F("mqtt.packets", "Packets", onoff), F("mqtt.raw", "Raw payloads", onoff), F("mqtt.tx", "Include transmitted", onoff), F("mqtt.status", "Periodic status", Object.assign({get: "get mqtt.statuscfg"}, onoff)),
     ]},
     {title: "Brokers", sub: "At most two brokers can be enabled at once.", fields: [
-      F("mqtt.meshmapper", "MeshMapper (global)", onoff), F("mqtt.waev", "waev", onoff), F("mqtt.eastmesh-au", "EastMesh AU", onoff),
+      F("mqtt.meshmapper", "MeshMapper (global)", onoff), F("mqtt.waev", "waev", onoff), F("mqtt.rflab", "RF Lab", onoff), F("mqtt.eastmesh-au", "EastMesh AU", onoff),
       F("mqtt.letsmesh-eu", "LetsMesh EU", onoff), F("mqtt.letsmesh-us", "LetsMesh US", onoff),
     ]},
     {adv: true, title: "Join code", sub: "Only if you were given a join code instead of approving on the dashboard: paste it here and Save. It sets everything up in one go.", fields: [
