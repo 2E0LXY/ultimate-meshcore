@@ -41,6 +41,32 @@ inline int packetFromRawJson(const char* json, int json_len, uint8_t* out, int o
   return n >= 2 ? n : 0;
 }
 
+// Is this packet addressed to some other repeater? The sender may add "target":"<id>[,<id>...]" to the JSON (the
+// dashboard does, to send a reply through only the repeater that heard the original). No target, or this
+// device's id among the targets, means "for us"; a target list without our id means "not for us".
+inline bool packetIsForOther(const char* json, int json_len, const char* device_id) {
+  static const char kKey[] = "\"target\":\"";
+  const int klen = (int)sizeof(kKey) - 1;
+  if (json == nullptr || device_id == nullptr || json_len <= klen) return false;
+  const int id_len = (int)strlen(device_id);
+  const char* p = nullptr;
+  for (int i = 0; i + klen < json_len; i++) {
+    if (memcmp(json + i, kKey, klen) == 0) {
+      p = json + i + klen;
+      break;
+    }
+  }
+  if (p == nullptr) return false;                                    // not addressed: everyone may take it
+  const char* end = json + json_len;
+  while (p < end && *p != '"') {                                     // walk the comma-separated ids
+    const char* q = p;
+    while (q < end && *q != ',' && *q != '"') q++;
+    if (id_len > 0 && (int)(q - p) == id_len && strncasecmp(p, device_id, id_len) == 0) return false;
+    p = (q < end && *q == ',') ? q + 1 : q;
+  }
+  return true;
+}
+
 // meshcore/<area>/<id>/raw ?
 inline bool topicIsRaw(const char* topic, int topic_len) {
   return topic != nullptr && topic_len >= 5 && memcmp(topic + topic_len - 4, "/raw", 4) == 0;

@@ -831,13 +831,13 @@ function vMessages(o) {
 }
 function msgUpdate() {
   const m = S.mg, d = m.data, bar = $("#msgBar"); if (!bar || !d) return; S.msgUp = true;
-  const sig = JSON.stringify([d.channels.map(c => c.name), d.regions, d.tx_enabled]);
+  const live = ((S.o && S.o.devices) || []).filter(x => x.age < ((S.o.config && S.o.config.stale_minutes) || 15) * 60), sig = JSON.stringify([d.channels.map(c => c.name), d.regions, d.tx_enabled, live.map(x => x.id)]);
   if (bar.dataset.sig !== sig) {
-    const keep = {text: ($("#msgText") || {}).value || "", sender: ($("#msgSender") || {}).value, chan: ($("#msgChan") || {}).value, reg: ($("#msgReg") || {}).value};
+    const keep = {text: ($("#msgText") || {}).value || "", sender: ($("#msgSender") || {}).value, chan: ($("#msgChan") || {}).value, reg: ($("#msgReg") || {}).value, via: ($("#msgVia") || {}).value};
     const opt = (list, cur, first) => (first ? [`<option value="">${first}</option>`] : []).concat(list.map(x => `<option value="${esc(x.v)}" ${x.v === cur ? "selected" : ""}>${esc(x.l)}</option>`)).join("");
     const chans = d.channels.map(c => ({v: c.name, l: c.name})), regs = d.regions.map(r => ({v: r, l: r}));
     bar.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><select id="mfChan" data-mf="channel">${opt(chans, m.channel, "all channels")}</select><select id="mfReg" data-mf="region">${opt([{v: "-", l: "no region (heard everywhere)"}].concat(regs), m.region, "all regions")}</select><select id="mfDir" data-mf="dir"><option value="">heard and sent</option><option value="rx" ${m.dir === "rx" ? "selected" : ""}>heard only</option><option value="tx" ${m.dir === "tx" ? "selected" : ""}>sent only</option></select><input id="mfQ" data-mf="q" placeholder="search" value="${esc(m.q)}" style="min-width:160px">${(S.o && S.o.me && S.o.me.role !== "admin") ? "" : `<button class="tool" id="msgClear" title="delete the stored messages shown by the filters (all messages if no filter is set)">Clear messages</button>`}</div>` +
-      (d.tx_enabled ? `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;padding:10px;border:1px solid #1f4a37;border-radius:10px;background:#0d2219"><b>Send</b><select id="msgChan">${opt(chans, keep.chan)}</select><select id="msgReg">${opt(regs, keep.reg, "no region")}</select>${(() => { const me = S.o && S.o.me, adm = !me || me.role === "admin", own = me && (me.sender || me.name.toUpperCase()); return `<input id="msgSender" value="${esc(adm ? (keep.sender != null && keep.sender !== undefined ? keep.sender : d.sender) : own)}" ${adm ? "" : "readonly"} style="width:130px" title="${adm ? "the name shown before your message" : "your messages go out under your own name"}">`; })()}<input id="msgText" maxlength="130" placeholder="type a message" value="${esc(keep.text)}" style="flex:1;min-width:220px"><span class="tr" id="msgCount">0/130</span><button class="tool" id="msgSend">Send</button></div><div class="tr" id="msgRes" style="margin:4px 2px 4px">${esc(m.sent)}</div><div class="nc-emoji" aria-label="Emoji">${NC_EMOJI.map(e => `<button type="button" data-emo="${e}" title="add ${e}">${e}</button>`).join("")}</div>` : `<div class="tr">Sending is switched off in Settings.</div>`);
+      (d.tx_enabled ? `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;padding:10px;border:1px solid #1f4a37;border-radius:10px;background:#0d2219"><b>Send</b><select id="msgChan">${opt(chans, keep.chan)}</select><select id="msgReg">${opt(regs, keep.reg, "no region")}</select><select id="msgVia" title="which repeater puts it on the air. Needs repeater firmware with targeted sending; older firmware sends from every repeater">${opt(live.map(x => ({v: x.id, l: "via " + (x.name || x.id.slice(0, 8))})), keep.via, "via all repeaters")}</select>${(() => { const me = S.o && S.o.me, adm = !me || me.role === "admin", own = me && (me.sender || me.name.toUpperCase()); return `<input id="msgSender" value="${esc(adm ? (keep.sender != null && keep.sender !== undefined ? keep.sender : d.sender) : own)}" ${adm ? "" : "readonly"} style="width:130px" title="${adm ? "the name shown before your message" : "your messages go out under your own name"}">`; })()}<input id="msgText" maxlength="130" placeholder="type a message" value="${esc(keep.text)}" style="flex:1;min-width:220px"><span class="tr" id="msgCount">0/130</span><button class="tool" id="msgSend">Send</button></div><div class="tr" id="msgRes" style="margin:4px 2px 4px">${esc(m.sent)}</div><div class="nc-emoji" aria-label="Emoji">${NC_EMOJI.map(e => `<button type="button" data-emo="${e}" title="add ${e}">${e}</button>`).join("")}</div>` : `<div class="tr">Sending is switched off in Settings.</div>`);
     bar.dataset.sig = sig;
   }
   const bychan = {}; d.counts.forEach(c => bychan[c.chan] = (bychan[c.chan] || 0) + c.n);
@@ -864,7 +864,7 @@ function msgUpdate() {
     return `<div class="nc-msg ${tx ? "tx" : "rx"}${fresh ? " fresh" : ""}">
       <div class="nc-meta"><b class="nc-who">${esc(x.sender || "?")}</b><span class="nc-chip">${esc(x.chan)}</span>${region ? `<span class="nc-chip reg">${esc(region)}</span>` : ""}<span class="nc-time">${clock(x.seen).split(", ").pop()}</span></div>
       <div class="nc-bubble"><span class="nc-text">${esc(x.text)}</span></div>
-      <div class="nc-foot">${heard ? `<span class="nc-heard${none ? " nc-none" : ""}" title="${tx ? "Channel messages have no read receipt. 'sent by' means that repeater put it on the air; 'heard back' means another repeater picked it up. Neither shows whether a person read it" : ""}">${tag}${heard}</span>` : ""}${d.tx_enabled && !tx ? `<button class="nc-reply" data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender}))}">Reply</button>` : ""}</div>
+      <div class="nc-foot">${heard ? `<span class="nc-heard${none ? " nc-none" : ""}" title="${tx ? "Channel messages have no read receipt. 'sent by' means that repeater put it on the air; 'heard back' means another repeater picked it up. Neither shows whether a person read it" : ""}">${tag}${heard}</span>` : ""}${d.tx_enabled && !tx ? `<button class="nc-reply" data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender, via: ((x.heard || []).filter(h => !h.sent).sort((a, b) => a.hops - b.hops || (b.snr || -99) - (a.snr || -99))[0] || {}).id || ""}))}">Reply</button>` : ""}</div>
     </div>`;
   });
   feed.innerHTML = bubbles.length ? bubbles.join("") : `<div class="nc-empty">No messages match yet. Messages appear as your repeaters hear them in the channels set up in Settings.</div>`;
@@ -875,7 +875,8 @@ document.addEventListener("click", async e => {
   const ed = e.target.closest("[data-uedit]"); if (ed) { const n = ed.dataset.uedit, u = (S.o.web_users || {})[n] || {}; S.uedit = {name: n, role: u.role, devices: u.devices || [], sender: u.sender || ""}; draw(); return; }
   const rm = e.target.closest("[data-uremove]"); if (rm) { if (!confirm("Remove the login " + rm.dataset.uremove + "? They will no longer be able to sign in.")) return; const r = await post("/api/users/remove", {name: rm.dataset.uremove}); if (!r.ok) alert(r.error); await tick(); return; }
   const rp = e.target.closest("[data-reply]"); if (rp) {
-    const x = JSON.parse(rp.dataset.reply), c = $("#msgChan"), g = $("#msgReg"), t = $("#msgText"); if (!c || !t) return;
+    const x = JSON.parse(rp.dataset.reply), c = $("#msgChan"), g = $("#msgReg"), t = $("#msgText"), v = $("#msgVia"); if (!c || !t) return;
+    if (v) v.value = [...v.options].some(o => o.value === x.via) ? x.via : "";
     c.value = x.chan; if (g) g.value = x.region && x.region !== "?" ? x.region : ""; t.value = x.sender ? "@[" + x.sender + "] " : ""; t.focus(); t.setSelectionRange(t.value.length, t.value.length);
     const n = $("#msgCount"); if (n) n.textContent = new TextEncoder().encode(t.value).length + "/130"; window.scrollTo({top: 0, behavior: "smooth"}); return;
   }
@@ -895,10 +896,10 @@ document.addEventListener("click", async e => {
     S.mg.sent = r.ok ? `Cleared ${r.removed} message${r.removed === 1 ? "" : "s"}.` : (r.error || "Could not clear"); const rs = $("#msgRes"); if (rs) rs.textContent = S.mg.sent; S.mg.lastId = 0; msgLoad(); return;
   }
   if (e.target.id !== "msgSend") return;
-  const chan = $("#msgChan").value, reg = $("#msgReg").value, text = $("#msgText").value.trim(), sender = $("#msgSender").value.trim();
+  const via = ($("#msgVia") || {}).value || "", viaName = via ? (($("#msgVia").selectedOptions[0] || {}).textContent || "").replace(/^via /, "") : "", chan = $("#msgChan").value, reg = $("#msgReg").value, text = $("#msgText").value.trim(), sender = $("#msgSender").value.trim();
   if (!text) { S.mg.sent = "Type a message first."; msgUpdate(); $("#msgRes").textContent = S.mg.sent; return; }
-  if (!confirm(`Send this to ${chan}${reg ? " in " + reg : " (no region)"}?\n\n${sender}: ${text}\n\nIt goes out over the air from every repeater on this network that can carry it.`)) return;
-  e.target.disabled = true; const r = await post("/api/messages/send", {channel: chan, region: reg, text, sender}); e.target.disabled = false;
+  if (!confirm(`Send this to ${chan}${reg ? " in " + reg : " (no region)"}?\n\n${sender}: ${text}\n\nIt goes out over the air from ${via ? viaName + " only" : "every repeater on this network that can carry it"}.`)) return;
+  e.target.disabled = true; const r = await post("/api/messages/send", {channel: chan, region: reg, text, sender, via: via ? [via] : []}); e.target.disabled = false;
   S.mg.sent = r.ok ? `Sent. Handed to ${r.repeaters.join(", ")}.` : (r.error || "Could not send"); $("#msgRes").textContent = S.mg.sent; if (r.ok) { $("#msgText").value = ""; $("#msgCount").textContent = "0/130"; } msgLoad();
 });
 

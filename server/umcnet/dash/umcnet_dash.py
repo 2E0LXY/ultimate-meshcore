@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.25"
+VERSION = "2.26"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -1036,7 +1036,7 @@ def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
     for r in rows:
         heard = json.loads(r[12] or "[]")
         out.append({"id": r[0], "ts": r[1], "seen": r[2], "chan": r[3], "chash": r[4], "region": r[5], "sender": r[6], "text": r[7], "dir": r[8], "hops": r[9], "snr": r[10], "rssi": r[11],
-                    "heard": [{"name": names.get(h["d"], h["d"][:8]), "hops": h["h"], "snr": h["s"], "rssi": h["r"], "sent": bool(h.get("x"))} for h in sorted(heard, key=lambda x: (not x.get("x"), x["h"]))]})
+                    "heard": [{"id": h["d"], "name": names.get(h["d"], h["d"][:8]), "hops": h["h"], "snr": h["s"], "rssi": h["r"], "sent": bool(h.get("x"))} for h in sorted(heard, key=lambda x: (not x.get("x"), x["h"]))]})
     c = CONF["messages"]
     return {"messages": out, "channels": [{"name": x["name"], "hash": "%02X" % MSG.Channel(x["name"], x.get("psk")).hash} for x in c["channels"]], "regions": c["regions"], "counts": counts,
             "unreadable": unread, "tx_enabled": bool(c["tx_enabled"]), "sender": c["sender"]}
@@ -1066,7 +1066,7 @@ def purge_log(who, table, days):
     audit(who, table + " cleared", ("older than %d days" % days) if days else "everything", "%d removed" % n)
     return {"ok": True, "removed": n}
 
-def send_message(who, chan, region, text, sender=None):
+def send_message(who, chan, region, text, sender=None, via=None):
     c = CONF["messages"]
     if not c["tx_enabled"]: return {"ok": False, "error": "sending is switched off in Settings"}
     conn = CTL.get("conn")
@@ -1088,9 +1088,14 @@ def send_message(who, chan, region, text, sender=None):
         TX_TIMES.append(now)
     live = [d for d in DEV.values() if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60]
     if not live: return {"ok": False, "error": "no repeater is online to send it"}
+    want = [str(v).upper() for v in (via or []) if v]
+    if want:                                                    # send through only these repeaters (the firmware drops it elsewhere)
+        live = [d for d in live if d["id"].upper() in want]
+        if not live: return {"ok": False, "error": "the repeater you chose is not online"}
+    targets = ",".join(d["id"].upper() for d in live) if want else ""
     raw = MSG.build_group_text(ch, sender, text, int(now), region or None)
     area = CONF["join_iata"]
-    body = json.dumps({"origin": "UMC Dashboard", "origin_id": DASH_ID, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now)), "type": "RAW", "data": raw.hex().upper()}, separators=(",", ":")).encode()
+    body = json.dumps({"origin": "UMC Dashboard", "origin_id": DASH_ID, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now)), "type": "RAW", **({"target": targets} if targets else {}), "data": raw.hex().upper()}, separators=(",", ":")).encode()
     conn.publish("meshcore/%s/%s/raw" % (area, DASH_ID), body)
     pkey = hashlib.sha1(MSG.parse_wire(raw)["payload"]).hexdigest()[:20]
     with LOCK: cur = DB.execute("INSERT OR IGNORE INTO messages(ts,seen,chan,chash,region,sender,text,pkey,dir,hops,snr,rssi,heard) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (int(now), int(now), ch.name, "%02X" % ch.hash, region, sender, text, pkey, "tx", 0, None, None, "[]"))
@@ -1803,7 +1808,7 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/messages/send":
                 own = me_view(who)["sender"] or re.sub(r"[^A-Za-z0-9._-]", "", who.upper())[:24] or "USER"
                 sender = (body.get("sender") or None) if role == "admin" else own        # users send under their own name only
-                return self.send(200, json.dumps(send_message(who, str(body.get("channel", "")), str(body.get("region", "")), str(body.get("text", "")), sender)))
+                return self.send(200, json.dumps(send_message(who, str(body.get("channel", "")), str(body.get("region", "")), str(body.get("text", "")), sender, body.get("via") if isinstance(body.get("via"), list) else None)))
             if p == "/api/enrol/approve":
                 r = enrol_approve(who, body.get("id", ""), body.get("name"), body.get("bridge")); return self.send(200, json.dumps(r))
             if p == "/api/enrol/decline": return self.send(200, json.dumps(enrol_decline(who, body.get("id", ""))))

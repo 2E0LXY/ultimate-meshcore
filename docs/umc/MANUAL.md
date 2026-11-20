@@ -405,6 +405,7 @@ Custom broker: `set mqtt.custom on`, `mqtt.custom.host`, `mqtt.custom.port`, `mq
 | `set mqtt.custom.bridge on` | **Also listen** for the other repeaters' packets and pass them to the mesh as if they had arrived by radio. The mesh drops anything it has already seen, so nothing loops, and forwards the rest by its normal rules (hop limit, regions, duty cycle). Off by default. |
 | `set mqtt.custom.rate <1-120>` | Most packets a minute passed on from the network (default 20). Extras are dropped and counted. |
 | `get mqtt.custom.bridge` | Whether it is on, and how many packets were heard, passed on and dropped. |
+| *Targeted sending* | A packet on the broker can name the repeaters allowed to pass it on (`"target":"<id>[,<id>]"` in its JSON). The dashboard uses this to send a reply through only the repeater that heard the original. A repeater whose id is not in the list ignores the packet; with no target, every bridging repeater takes it, as before. Repeaters running older firmware ignore the target and pass everything on. |
 
 Packets from the network are transmitted over the air, so they count against the repeater's duty cycle on 869 MHz; the rate limit and the mesh's own airtime budget keep that in check. Give each repeater its own broker account bound to its device id (`umcnet-user add <name> repeater --device <id>`), so it can only publish under its own topic.
 

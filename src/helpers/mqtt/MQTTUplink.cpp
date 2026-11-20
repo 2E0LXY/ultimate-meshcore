@@ -1562,6 +1562,7 @@ void MQTTUplink::onNetMessage(const char* topic, int topic_len, const char* data
   if (offset != 0 || data_len != total) return;                       // a message split in pieces: skip it
   if (!umcnet::topicIsRaw(topic, topic_len)) return;
   if (umcnet::topicHasId(topic, topic_len, _device_id)) return;       // our own packet coming back
+  if (umcnet::packetIsForOther(data, data_len, _device_id)) return;   // addressed to another repeater only
   uint8_t tmp[255];
   const int n = umcnet::packetFromRawJson(data, data_len, tmp, (int)sizeof(tmp));
   if (n == 0) return;

@@ -74,6 +74,30 @@ TEST(NetPacket, RecognisesItsOwnId) {
   EXPECT_FALSE(topicHasId(t, (int)strlen(t), nullptr));
 }
 
+TEST(NetPacket, AnUntargetedPacketIsForEveryone) {
+  const char* json = "{\"origin\":\"x\",\"data\":\"AABB\"}";
+  EXPECT_FALSE(packetIsForOther(json, (int)strlen(json), "756C3D39"));
+}
+
+TEST(NetPacket, ATargetedPacketIsOnlyForTheNamedRepeaters) {
+  const char* one = "{\"origin\":\"x\",\"target\":\"756C3D39\",\"data\":\"AABB\"}";
+  EXPECT_FALSE(packetIsForOther(one, (int)strlen(one), "756C3D39"));
+  EXPECT_FALSE(packetIsForOther(one, (int)strlen(one), "756c3d39"));              // case does not matter
+  EXPECT_TRUE(packetIsForOther(one, (int)strlen(one), "E3468538"));
+  const char* two = "{\"target\":\"756C3D39,E3468538\",\"data\":\"AABB\"}";
+  EXPECT_FALSE(packetIsForOther(two, (int)strlen(two), "E3468538"));
+  EXPECT_FALSE(packetIsForOther(two, (int)strlen(two), "756C3D39"));
+  EXPECT_TRUE(packetIsForOther(two, (int)strlen(two), "12735777"));
+  EXPECT_TRUE(packetIsForOther(two, (int)strlen(two), "756C3D3"));                // a prefix is not a match
+}
+
+TEST(NetPacket, AnEmptyOrMalformedTargetIsNotForUs) {
+  const char* empty = "{\"target\":\"\",\"data\":\"AABB\"}";
+  EXPECT_TRUE(packetIsForOther(empty, (int)strlen(empty), "756C3D39"));
+  EXPECT_FALSE(packetIsForOther(nullptr, 0, "756C3D39"));
+  EXPECT_FALSE(packetIsForOther("{}", 2, nullptr));
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

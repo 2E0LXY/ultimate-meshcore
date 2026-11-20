@@ -408,6 +408,23 @@ class Messages(unittest.TestCase):
         other = self.M.build_group_text(self.M.Channel("#yorkshire"), "Sam", "not ours", now); dash.note_sent("01" * 32, other, now)   # an unrelated packet is ignored
         self.assertEqual(1, len(dash.messages_view()["messages"]))
 
+    def test_a_message_can_be_sent_through_chosen_repeaters_only(self):
+        class Conn:
+            up = True
+            def __init__(s): s.out = []
+            def publish(s, topic, body, *a, **k): s.out.append((topic, body))
+        dash.db_init(); dash.DB.execute("DELETE FROM messages"); dash.DEV.clear(); now = time.time(); old = dash.CTL.get("conn"); c = Conn(); dash.CTL["conn"] = c
+        saved = list(dash.CONF["messages"]["channels"]); tx = dash.CONF["messages"]["tx_enabled"]
+        def undo(): dash.CTL["conn"] = old; dash.CONF["messages"].update(channels=saved, tx_enabled=tx); dash.DB.execute("DELETE FROM messages")
+        self.addCleanup(undo); dash.CONF["messages"]["tx_enabled"] = True; dash.CONF["messages"]["channels"] = saved + [{"name": "#yorkshire"}]
+        for i, n in enumerate(("A", "B")): d = dash.device(("%02X" % (i + 1)) * 32, "LBA"); d["name"] = "Repeater " + n; d["last"] = now
+        a = "01" * 32
+        raws = lambda: [x[1] for x in c.out if x[0].endswith("/raw")]
+        r = dash.send_message("admin", "#yorkshire", "", "hello", "TEST"); self.assertTrue(r["ok"]); self.assertEqual(2, len(r["repeaters"])); self.assertNotIn(b"target", raws()[-1])
+        r = dash.send_message("admin", "#yorkshire", "", "hello2", "TEST", [a.lower()]); self.assertEqual(["Repeater A"], r["repeaters"])
+        self.assertEqual(a, json.loads(raws()[-1])["target"])
+        r = dash.send_message("admin", "#yorkshire", "", "hello3", "TEST", ["ff" * 32]); self.assertFalse(r["ok"])
+
     def test_purging_logs_keeps_recent_rows_and_never_wipes_the_audit_log(self):
         dash.db_init(); now = int(time.time()); dash.DB.execute("DELETE FROM events"); dash.DB.execute("DELETE FROM audit")
         dash.DB.executemany("INSERT INTO events VALUES(?,?,?,?,?,?)", [(now - 40 * 86400, "info", "", "", "", "old"), (now, "info", "", "", "", "new")])
