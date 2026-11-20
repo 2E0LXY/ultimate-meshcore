@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.26"
+VERSION = "2.27"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -747,6 +747,20 @@ def make_join_code(user, password, iata="LBA", key_hex=None, bridge=True, host=N
     if len(code) > 140: raise ValueError("that code is too long for the repeater's console")
     return code
 
+def make_setup_code(host, user, password, client_id, area):
+    """What the phone app reads: umcclient1: + base64url (no padding) of compact JSON (same as umcnet-user)."""
+    if not re.match(r"^[a-z0-9][a-z0-9-]{1,23}$", user or ""): raise ValueError("the account name is 2 to 24 lowercase letters, digits and dashes")
+    if not (8 <= len(password or "") <= 40) or not all(0x21 <= ord(c) <= 0x7e for c in password): raise ValueError("the password must be 8 to 40 printable characters with no spaces")
+    if not re.match(r"^[0-9A-F]{64}$", client_id or ""): raise ValueError("the client id is 64 capital hex characters")
+    if not re.match(r"^[A-Z0-9]{3}$", area or ""): raise ValueError("the area code is three capital letters or digits")
+    if not re.match(r"^[A-Za-z0-9.-]{3,253}$", host or ""): raise ValueError("the host is not valid")
+    j = json.dumps({"h": host, "u": user, "p": password, "i": client_id, "a": area}, separators=(",", ":"))
+    return "umcclient1:" + base64.urlsafe_b64encode(j.encode()).decode().rstrip("=")
+
+def client_id_of(output, fallback=""):
+    m = re.search(r"client id: ([0-9A-F]{64})", output or "")
+    return m.group(1) if m else fallback
+
 def audit(who, action, target, detail, ok=True):
     try:
         DB.execute("INSERT INTO audit(ts,who,action,target,detail,ok) VALUES(?,?,?,?,?,?)", (int(time.time()), who, action, target, str(detail)[:400], 1 if ok else 0))
@@ -1178,28 +1192,32 @@ def enrol_hello(payload, retained=False):
         send_alert("A repeater is asking to join", "%s (id %s...) is asking to join UMC Net. Open the dashboard, Accounts tab, to approve or decline it." % (info["name"] or "A repeater", dev[:8]), "info", "enrol")
     elif int(now) % 5 == 0: enrol_save()
 
-def enrol_approve(who, dev, name=None, bridge=None):
+def enrol_approve(who, dev, name=None, bridge=None, role="repeater"):
     dev = str(dev).upper()
+    if role not in ("repeater", "client"): return {"ok": False, "error": "role: repeater or client"}
     conn = CTL.get("conn")
     if not conn or not conn.up: return {"ok": False, "error": "the control link to the broker is down, so the answer could not be sent"}
     with LOCK: p = ENROL["pending"].get(dev)
     if not p: return {"ok": False, "error": "that request is no longer waiting"}
     existing = next((a for a in accounts() if a["device"] == dev), None)
+    if existing and existing["role"] != role: return {"ok": False, "error": "that id already has a %s account (%s); remove it first to approve it as a %s" % (existing["role"], existing["name"], role)}
     if existing: slug = existing["name"]; r = admin_call(op="user_passwd", name=slug)
     else:
-        slug = enrol_slug(name or p.get("name"), dev); r = admin_call(op="user_add", name=slug, role="repeater", device=dev)
+        slug = enrol_slug(name or p.get("name"), dev); r = admin_call(op="user_add", name=slug, role=role, device=dev)
     if not r.get("ok") or not r.get("password"):
         audit(who, "enrol approve", dev[:12], r.get("error") or r.get("output") or "failed", False)
         return {"ok": False, "error": r.get("error") or r.get("output") or "could not make the account"}
-    try: code = make_join_code(slug, r["password"], CONF["join_iata"], control_key(dev, create=True), CONF["join_bridge"] if bridge is None else bool(bridge))
+    try:
+        if role == "client": code = make_setup_code(CFG["host"], slug, r["password"], dev, CONF["join_iata"])       # no control key, no bridge settings
+        else: code = make_join_code(slug, r["password"], CONF["join_iata"], control_key(dev, create=True), CONF["join_bridge"] if bridge is None else bool(bridge))
     except ValueError as e: return {"ok": False, "error": str(e)}
     conn.publish("umcnet/v1/enrol/grant/" + dev, ENR.make_grant(dev, code).encode(), retain=True)
     with LOCK:
         ENROL["pending"].pop(dev, None)
         ENROL["approved"][dev] = {"account": slug, "name": p.get("name", ""), "at": time.time(), "delivered": False}
     enrol_save(); export_accounts_soon()
-    audit(who, "enrol approve", dev[:12], "account %s, remote control key included" % slug)
-    return {"ok": True, "account": slug}
+    audit(who, "enrol approve", dev[:12], "account %s as client" % slug if role == "client" else "account %s, remote control key included" % slug)
+    return {"ok": True, "account": slug, "role": role}
 
 def enrol_decline(who, dev):
     dev = str(dev).upper()
@@ -1793,6 +1811,13 @@ class H(BaseHTTPRequestHandler):
                     dev = str(body.get("device", "")).upper()
                     try: out["join"] = make_join_code(name, r["password"], CONF["join_iata"], control_key(dev, create=True) if re.match(r"^[0-9A-F]{64}$", dev) else None, CONF["join_bridge"])
                     except ValueError as e: out["join_error"] = str(e)
+                if op in ("add", "passwd") and r.get("ok") and r.get("password"):
+                    acc = next((a for a in accounts() if a["name"] == name), None)
+                    if (op == "add" and body.get("role") == "client") or (op == "passwd" and acc and acc["role"] == "client"):
+                        cid = client_id_of(r.get("output"), acc["device"] if acc else "")
+                        out["client_id"] = cid
+                        try: out["setup"] = make_setup_code(CFG["host"], name, r["password"], cid, CONF["join_iata"])
+                        except ValueError as e: out["setup_error"] = str(e)
                 return self.send(200, json.dumps(out))
             if p == "/api/groups/add":
                 nm = str(body.get("name", "")).strip()
@@ -1810,7 +1835,7 @@ class H(BaseHTTPRequestHandler):
                 sender = (body.get("sender") or None) if role == "admin" else own        # users send under their own name only
                 return self.send(200, json.dumps(send_message(who, str(body.get("channel", "")), str(body.get("region", "")), str(body.get("text", "")), sender, body.get("via") if isinstance(body.get("via"), list) else None)))
             if p == "/api/enrol/approve":
-                r = enrol_approve(who, body.get("id", ""), body.get("name"), body.get("bridge")); return self.send(200, json.dumps(r))
+                r = enrol_approve(who, body.get("id", ""), body.get("name"), body.get("bridge"), str(body.get("role", "repeater"))); return self.send(200, json.dumps(r))
             if p == "/api/enrol/decline": return self.send(200, json.dumps(enrol_decline(who, body.get("id", ""))))
             if p == "/api/enrol/forget": return self.send(200, json.dumps(enrol_forget(who, body.get("id", ""))))
             if p == "/api/join":

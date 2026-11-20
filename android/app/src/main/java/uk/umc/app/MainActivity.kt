@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         AppState.init(this)
+        uk.umc.app.net.UmcNet.init(this)
         createNotificationChannel()
         setContent { UmcApp() }
     }
@@ -71,6 +72,7 @@ fun UmcApp() {
         var openChat by remember { mutableStateOf<String?>(null) }
         var showConnect by remember { mutableStateOf(false) }
         var showLook by remember { mutableStateOf(false) }
+        var showNet by remember { mutableStateOf(false) }
         val snackbar = remember { SnackbarHostState() }
         val toast by AppState.toast.collectAsState()
         val state by AppState.linkState.collectAsState()
@@ -119,8 +121,8 @@ fun UmcApp() {
                                 indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
                                 unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant, unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             ),
-                            selected = tab == t && openChat == null && !showConnect && !showLook,
-                            onClick = { tab = t; openChat = null; showConnect = false; showLook = false },
+                            selected = tab == t && openChat == null && !showConnect && !showLook && !showNet,
+                            onClick = { tab = t; openChat = null; showConnect = false; showLook = false; showNet = false },
                             icon = { Icon(t.icon, contentDescription = t.label) },
                             label = { Text(t.label, style = MaterialTheme.typography.labelSmall) },
                         )
@@ -131,7 +133,8 @@ fun UmcApp() {
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when {
-                    showConnect -> ConnectScreen()
+                    showNet -> UmcNetScreen { showNet = false }
+                    showConnect -> ConnectScreen(onUmcNet = { showNet = true })
                     openChat != null -> ChatScreen(openChat!!) { openChat = null }
                     showLook -> LookScreen()
                     else -> when (tab) {

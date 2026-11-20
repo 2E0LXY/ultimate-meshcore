@@ -3,13 +3,17 @@
 
   umcnet-user add <name> <role> [--device <64 hex>] [--password P]   create or reset an account
   umcnet-user add <name> repeater --pending [--password P]           a repeater that waits for approval
+  umcnet-user add <name> client [--device <64 hex>] [--password P]    a phone app: prints the password and its client id
+  umcnet-user client <name> [--password P | --reset] [--host H] [--area IATA]
+                                                                      show a client's id; with a password, also its setup code
   umcnet-user device <name> <64 hex>                                  set a repeater's device id (and approve it)
   umcnet-user state <name> approved|pending|blocked                   let it in, hold it, or shut it out
   umcnet-user passwd <name>                                           give an account a new password
   umcnet-user remove <name>
   umcnet-user list
 
-Roles: admin (everything), repeater (publishes what it hears, takes commands), client (listens),
+Roles: admin (everything), repeater (publishes what it hears, takes commands), client (an internet client such as the
+phone app: listens, and writes packets only under its own client id),
 viewer (listens only), monitor (the dashboard: reads the broker's statistics and everything under meshcore/),
 controller (the dashboard's control channel: sends commands to repeaters and reads their answers),
 enrol (the public account a repeater with no account of its own knocks with: it can only send a request and read encrypted answers).
@@ -26,7 +30,7 @@ publishes, so analysers and maps can read them too:
 key in capitals (shown at boot as "Repeater ID", and by `get public.key`). A repeater may only
 write under its own id, and may read everyone's raw packets and status.
 """
-import json, os, re, secrets, shutil, subprocess, sys
+import base64, json, os, re, secrets, shutil, subprocess, sys
 
 HOME = "/opt/umcnet"
 USERS = os.path.join(HOME, "users.json")
@@ -36,6 +40,17 @@ ROLES = ("admin", "repeater", "client", "viewer", "monitor", "controller", "enro
 STATES = ("approved", "pending", "blocked")
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,23}$")
 DEVICE = re.compile(r"^[0-9A-F]{64}$")
+DEFAULT_HOST, DEFAULT_AREA = "net.2e0lxy.uk", "LBA"
+
+
+def new_client_id():
+    return secrets.token_bytes(32).hex().upper()
+
+
+def setup_code(host, user, password, client_id, area):
+    """What the phone app reads (typed or scanned): umcclient1: + base64url, no padding, of compact JSON."""
+    j = json.dumps({"h": host, "u": user, "p": password, "i": client_id, "a": area}, separators=(",", ":"))
+    return "umcclient1:" + base64.urlsafe_b64encode(j.encode()).decode().rstrip("=")
 
 
 def load():
@@ -107,6 +122,8 @@ def acl_for(name, info):
     elif role == "monitor":
         out += ["topic read $SYS/#", "topic read meshcore/#", "topic read umcnet/v1/+/messages", "topic read umcnet/v1/+/adverts", "topic read umcnet/v1/+/nodes/#"]
     else:   # client and viewer listen
+        if role == "client" and dev:                    # a client may also send packets and its own status, under its own id only
+            out += [f"topic write meshcore/+/{dev}/raw", f"topic write meshcore/+/{dev}/status"]
         out += ["topic read meshcore/+/+/raw",
                 "topic read meshcore/+/+/packets",
                 "topic read meshcore/+/+/status", "topic read umcnet/v1/+/messages", "topic read umcnet/v1/+/adverts", "topic read umcnet/v1/+/nodes/#"]
@@ -136,8 +153,21 @@ def opt(argv, flag):
     return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else None
 
 
+def show_client(users, name, pw, argv):
+    """Print a client's id (making one if an older account has none) and, when the password is known, its setup code."""
+    info = users[name]
+    if not DEVICE.match(info.get("device", "")):
+        info["device"] = new_client_id()
+        save(users)
+        write_acl(users)
+        reload_broker()
+    print(f"{name} client id: {info['device']}")
+    if pw:
+        print(f"{name} setup code: " + setup_code(opt(argv, "--host") or DEFAULT_HOST, name, pw, info["device"], (opt(argv, "--area") or DEFAULT_AREA).upper()))
+
+
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("add", "remove", "list", "device", "export", "state", "passwd", "sync"):
+    if len(argv) < 2 or argv[1] not in ("add", "remove", "list", "device", "export", "state", "passwd", "sync", "client"):
         print(__doc__)
         return 2
     users = load()
@@ -179,6 +209,18 @@ def main(argv):
         pw = secrets.token_urlsafe(15)
         passwd("-b", PASSWD, name, pw)
         print(f"{name} password: {pw}")
+        if users[name].get("role") == "client":
+            show_client(users, name, pw, argv)
+    elif argv[1] == "client":
+        if users.get(name, {}).get("role") != "client":
+            print("client: an existing account with the client role")
+            return 2
+        pw = opt(argv, "--password")
+        if "--reset" in argv:
+            pw = secrets.token_urlsafe(15)
+            passwd("-b", PASSWD, name, pw)
+            print(f"{name} password: {pw}")
+        show_client(users, name, pw, argv)
     else:
         role = argv[3] if len(argv) > 3 else ""
         if role not in ROLES:
@@ -194,8 +236,15 @@ def main(argv):
             open(PASSWD, "a").close()
             own(PASSWD)
         passwd("-b", PASSWD, name, pw)
+        if role == "client":
+            if dev and not DEVICE.match(dev):
+                print("--device: 64 hexadecimal digits")
+                return 2
+            dev = dev or new_client_id()
         users[name] = {"role": role, **({"device": dev} if dev else {}), **({"state": "pending"} if role == "repeater" and not dev else {})}
         print(f"{name} ({role}) password: {pw}")
+        if role == "client":
+            show_client(users, name, pw, argv)
     save(users)
     write_acl(users)
     own(PASSWD)

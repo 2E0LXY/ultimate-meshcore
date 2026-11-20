@@ -19,6 +19,18 @@ A repeater that was joined by a join code or by typing the settings is unaffecte
 remain on the repeater's page under **Advanced**. **Remove** (Accounts tab) takes a repeater off the network at any time. A repeater
 you **Decline** is ignored until you press **Forget**. Requests can be switched off in **Settings**.
 
+## Phone apps and other internet clients
+
+A client (the phone app) enrols the same way. It makes its own Ed25519 identity; the public key (64 capital hex digits) is its
+**client id**. It publishes the same signed `hello` as the public `enrol` account and reads `umcnet/v1/enrol/grant/<ID>`.
+On the dashboard's Accounts tab press **Approve as client** (instead of **Approve as repeater**). That makes a `client` account bound
+to the id (it may write only `meshcore/+/<ID>/raw` and `meshcore/+/<ID>/status`, and read as a viewer does; no remote-control key, no bridge
+settings) and the grant carries a setup code in place of a join code:
+
+`umcclient1:` + base64url (no padding) of compact JSON `{"h":"<host>","u":"<account>","p":"<password>","i":"<client id>","a":"<area>"}`
+
+The app connects with MQTT over WebSocket to `wss://<host>/mqtt`. The `hello` format is the same as for repeaters.
+
 ## How it works
 
 ```

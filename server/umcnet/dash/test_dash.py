@@ -7,6 +7,103 @@ def load(name, file):
 os.environ["DASH_DATA"] = tempfile.mkdtemp()
 dash = load("umcnet_dash", "umcnet_dash.py")
 adm = load("umcnet_admin", "umcnet_admin.py")
+import base64, importlib.machinery
+_ldr = importlib.machinery.SourceFileLoader("umcnet_user", os.path.join(HERE, "..", "umcnet-user"))
+_spec = importlib.util.spec_from_loader("umcnet_user", _ldr); usr = importlib.util.module_from_spec(_spec); _ldr.exec_module(usr)
+
+
+class ClientAccount(unittest.TestCase):
+    ID = "0123456789ABCDEF" * 4
+
+    def decode(self, code):
+        self.assertTrue(code.startswith("umcclient1:"))
+        b = code[len("umcclient1:"):]
+        self.assertNotIn("=", b)
+        return json.loads(base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)))
+
+    def test_client_id_is_64_uppercase_hex_and_random(self):
+        a, b = usr.new_client_id(), usr.new_client_id()
+        self.assertRegex(a, r"^[0-9A-F]{64}$"); self.assertNotEqual(a, b)
+
+    def test_acl_writes_only_under_its_own_id(self):
+        acl = usr.acl_for("phone", {"role": "client", "device": self.ID}).splitlines()
+        self.assertEqual("user phone", acl[0])
+        self.assertEqual(["topic write meshcore/+/%s/raw" % self.ID, "topic write meshcore/+/%s/status" % self.ID], [l for l in acl if l.startswith("topic write")])
+        self.assertFalse([l for l in acl if "readwrite" in l or "umcnet/v1" in l and "write" in l])
+        for l in ("topic read meshcore/+/+/raw", "topic read meshcore/+/+/packets", "topic read meshcore/+/+/status"): self.assertIn(l, acl)
+
+    def test_blocked_client_gets_nothing_and_viewer_stays_read_only(self):
+        self.assertEqual("user phone", usr.acl_for("phone", {"role": "client", "device": self.ID, "state": "blocked"}))
+        self.assertNotIn("topic write", usr.acl_for("v", {"role": "viewer", "device": self.ID}))
+        self.assertNotIn("topic write", usr.acl_for("phone", {"role": "client"}))      # no id, no writing
+
+    def test_setup_code_round_trip_in_both_implementations(self):
+        for fn in (usr.setup_code, dash.make_setup_code):
+            c = fn("net.2e0lxy.uk", "phone-1", "Zq9_-Aa8Bb7Cc6Dd5Ee4", self.ID, "LBA")
+            self.assertEqual({"h": "net.2e0lxy.uk", "u": "phone-1", "p": "Zq9_-Aa8Bb7Cc6Dd5Ee4", "i": self.ID, "a": "LBA"}, self.decode(c))
+        self.assertEqual(usr.setup_code("net.2e0lxy.uk", "phone-1", "Zq9_-Aa8Bb7Cc6Dd5Ee4", self.ID, "LBA"), dash.make_setup_code("net.2e0lxy.uk", "phone-1", "Zq9_-Aa8Bb7Cc6Dd5Ee4", self.ID, "LBA"))
+
+    def test_dash_refuses_bad_setup_inputs(self):
+        for args in (("net.2e0lxy.uk", "phone-1", "short", self.ID, "LBA"), ("net.2e0lxy.uk", "phone-1", "longenough1", self.ID.lower(), "LBA"),
+                     ("net.2e0lxy.uk", "phone-1", "longenough1", self.ID, "lba"), ("bad host", "phone-1", "longenough1", self.ID, "LBA")):
+            with self.assertRaises(ValueError): dash.make_setup_code(*args)
+
+    def test_client_id_is_read_from_the_tool_output(self):
+        self.assertEqual(self.ID, dash.client_id_of("phone (client) password: abc\nphone client id: %s\nphone setup code: umcclient1:x" % self.ID))
+        self.assertEqual("", dash.client_id_of("nothing"))
+
+    def test_password_is_still_found_in_the_tool_output(self):
+        out = "phone (client) password: Abc_123xyz\nphone client id: %s\n" % self.ID
+        self.assertEqual("Abc_123xyz", re.search(r"password: (\S+)", out)[1])
+
+
+class EnrolAsClient(unittest.TestCase):
+    """Approving a pending request as a client: a client account bound to the id, and a grant that opens to the setup code."""
+    def setUp(self):
+        sp = importlib.util.spec_from_file_location("umcnet_enrol2", os.path.join(HERE, "umcnet_enrol.py"))
+        self.E = importlib.util.module_from_spec(sp); sp.loader.exec_module(self.E)
+        self.prv, self.pub = self.E.ed_keypair(os.urandom(32)); self.dev = self.pub.hex().upper()
+        self.pub_msgs = []; self.calls = []; self.accts = []
+        class Conn:
+            up = True
+            def publish(s, t, p, retain=False): outer.pub_msgs.append((t, p, retain))
+        outer = self
+        self._ck = dash.control_key
+        self._saved = (dash.admin_call, dash.accounts, dash.CTL.get("conn"), dash.enrol_save, dash.export_accounts_soon, dash.audit)
+        def fake_admin(**req):
+            self.calls.append(req); return {"ok": True, "password": "Zq9_-Aa8Bb7Cc6Dd5Ee4", "output": ""}
+        dash.admin_call = fake_admin; dash.accounts = lambda: self.accts; dash.CTL["conn"] = Conn()
+        dash.enrol_save = lambda: None; dash.export_accounts_soon = lambda: None; dash.audit = lambda *a, **k: None
+        dash.ENROL["pending"][self.dev] = {"id": self.dev, "name": "My Phone", "first": 1, "last": 1, "count": 1}
+
+    def tearDown(self):
+        dash.admin_call, dash.accounts, conn, dash.enrol_save, dash.export_accounts_soon, dash.audit = self._saved
+        dash.control_key = self._ck; dash.CTL["conn"] = conn; dash.ENROL["pending"].pop(self.dev, None); dash.ENROL["approved"].pop(self.dev, None)
+
+    def test_client_approval_makes_a_client_account_and_a_setup_code_grant(self):
+        r = dash.enrol_approve("admin", self.dev, role="client")
+        self.assertTrue(r["ok"]); self.assertEqual("client", r["role"])
+        self.assertEqual([{"op": "user_add", "name": r["account"], "role": "client", "device": self.dev}], self.calls)
+        (topic, payload, retain), = self.pub_msgs
+        self.assertEqual("umcnet/v1/enrol/grant/" + self.dev, topic); self.assertTrue(retain)
+        code = self.E.open_grant(self.prv, self.dev, payload.decode())
+        self.assertTrue(code.startswith("umcclient1:"))
+        b = code[len("umcclient1:"):]
+        self.assertEqual({"h": dash.CFG["host"], "u": r["account"], "p": "Zq9_-Aa8Bb7Cc6Dd5Ee4", "i": self.dev, "a": dash.CONF["join_iata"]}, json.loads(base64.urlsafe_b64decode(b + "=" * (-len(b) % 4))))
+        self.assertNotIn(self.dev, dash.ENROL["pending"]); self.assertEqual(r["account"], dash.ENROL["approved"][self.dev]["account"])
+        acl = usr.acl_for(r["account"], {"role": "client", "device": self.dev})
+        self.assertIn("topic write meshcore/+/%s/raw" % self.dev, acl)
+
+    def test_repeater_approval_is_unchanged(self):
+        dash.control_key = lambda dev, create=False: "00" * 32
+        r = dash.enrol_approve("admin", self.dev)
+        self.assertTrue(r["ok"]); self.assertEqual("repeater", self.calls[0]["role"])
+        self.assertTrue(self.E.open_grant(self.prv, self.dev, self.pub_msgs[0][1].decode()).startswith("UMC1."))
+
+    def test_an_existing_account_of_the_other_role_is_not_overwritten(self):
+        self.accts.append({"name": "hill", "role": "repeater", "device": self.dev})
+        self.assertFalse(dash.enrol_approve("admin", self.dev, role="client")["ok"]); self.assertEqual([], self.calls)
+        self.assertFalse(dash.enrol_approve("admin", self.dev, role="admin")["ok"])
 
 
 class Signing(unittest.TestCase):

@@ -31,7 +31,7 @@ import uk.umc.app.link.WifiFinder
 
 @SuppressLint("MissingPermission")
 @Composable
-fun ConnectScreen() {
+fun ConnectScreen(onUmcNet: () -> Unit = {}) {
     val context = LocalContext.current
     val saved by AppState.savedDevices.collectAsState()
     val state by AppState.linkState.collectAsState()
@@ -143,6 +143,11 @@ fun ConnectScreen() {
                     }) { Text("Connect") }
                 },
             )
+        }
+        item {
+            SectionCard("UMC Net (internet)", "Send and read channel messages through the internet network, with no radio attached.") {
+                ShButton(onClick = onUmcNet) { Text("Open UMC Net") }
+            }
         }
         item {
             SectionCard("WiFi", "Ultimate MeshCore clients and repeaters on the same WiFi are found by themselves.") {

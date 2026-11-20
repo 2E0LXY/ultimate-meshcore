@@ -205,6 +205,9 @@ def handle(req):
                     args += ["--device", dev]
                 else:
                     args += ["--pending"]
+            elif role == "client" and dev:             # otherwise umcnet-user makes the client id
+                if not DEVICE.match(dev): return {"ok": False, "error": "the client id is 64 hexadecimal characters"}
+                args += ["--device", dev]
             return tool(*args)
         if op == "user_remove": return tool("remove", name)
         if op == "user_passwd": return tool("passwd", name)
