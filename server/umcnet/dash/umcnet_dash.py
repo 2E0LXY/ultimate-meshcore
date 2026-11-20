@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.24"
+VERSION = "2.25"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -323,6 +323,9 @@ def on_publish(topic, payload, retained=False):
             d["types"][info.get("type") or ("T%s" % j.get("packet_type", "?"))] += 1; d["bytes"] += len(raw)
             try: d["rssi"] = int(j["RSSI"]) if "RSSI" in j else d["rssi"]; d["snr"] = float(j["SNR"]) if "SNR" in j else d["snr"]
             except (ValueError, TypeError): pass
+            if direction == "tx" and raw:
+                try: note_sent(did, raw, now)
+                except Exception as e: sys.stderr.write("sent: %s\n" % e)
             if direction == "rx" and raw:
                 note_network(did, info, j.get("SNR"), j.get("RSSI"), now)
                 try: note_message(did, raw, j.get("SNR"), j.get("RSSI"), now)
@@ -906,6 +909,21 @@ def msg_channels():
         except Exception: pass
     return out
 
+def note_sent(did, raw, now):
+    """A repeater reports that it transmitted a packet. If that is a message sent from this dashboard, record the repeater
+    as having put it on the air (flag "x"): this is the confirmation that it left an antenna, as opposed to being heard back."""
+    if did == DASH_ID or not DB: return
+    p = MSG.parse_wire(raw)
+    if not p or p["ptype"] != 5 or len(p["payload"]) < 19: return
+    pkey = hashlib.sha1(p["payload"]).hexdigest()[:20]
+    with LOCK:
+        row = DB.execute("SELECT id, heard FROM messages WHERE pkey=? AND dir='tx'", (pkey,)).fetchone()
+        if not row: return
+        heard = json.loads(row[1] or "[]")
+        if any(e["d"] == did and e.get("x") for e in heard): return
+        heard.append({"d": did, "h": 0, "s": None, "r": None, "t": int(now), "x": 1})
+        DB.execute("UPDATE messages SET heard=? WHERE id=?", (json.dumps(heard, separators=(",", ":")), row[0]))
+
 def note_message(did, raw, snr, rssi, now):
     """A repeater heard a packet: if it is a group text, record it (once, with every repeater that heard it)."""
     if did == DASH_ID or not DB: return
@@ -918,7 +936,7 @@ def note_message(did, raw, snr, rssi, now):
     with LOCK:
         row = DB.execute("SELECT id, heard, region, hops, snr FROM messages WHERE pkey=?", (pkey,)).fetchone()
         if row:
-            heard = json.loads(row[1] or "[]"); old = next((e for e in heard if e["d"] == did), None)
+            heard = json.loads(row[1] or "[]"); old = next((e for e in heard if e["d"] == did and not e.get("x")), None)
             if old is None: heard.append(entry)
             elif entry["h"] < old["h"]: old.update(entry)
             hops = min(row[3] if row[3] is not None else 99, entry["h"]); snrs = [x for x in (row[4], entry["s"]) if x is not None]
@@ -1018,7 +1036,7 @@ def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
     for r in rows:
         heard = json.loads(r[12] or "[]")
         out.append({"id": r[0], "ts": r[1], "seen": r[2], "chan": r[3], "chash": r[4], "region": r[5], "sender": r[6], "text": r[7], "dir": r[8], "hops": r[9], "snr": r[10], "rssi": r[11],
-                    "heard": [{"name": names.get(h["d"], h["d"][:8]), "hops": h["h"], "snr": h["s"], "rssi": h["r"]} for h in sorted(heard, key=lambda x: x["h"])]})
+                    "heard": [{"name": names.get(h["d"], h["d"][:8]), "hops": h["h"], "snr": h["s"], "rssi": h["r"], "sent": bool(h.get("x"))} for h in sorted(heard, key=lambda x: (not x.get("x"), x["h"]))]})
     c = CONF["messages"]
     return {"messages": out, "channels": [{"name": x["name"], "hash": "%02X" % MSG.Channel(x["name"], x.get("psk")).hash} for x in c["channels"]], "regions": c["regions"], "counts": counts,
             "unreadable": unread, "tx_enabled": bool(c["tx_enabled"]), "sender": c["sender"]}

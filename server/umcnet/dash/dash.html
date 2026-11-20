@@ -849,12 +849,22 @@ function msgUpdate() {
     const tx = x.dir === "tx", fresh = seen && x.id > seen;
     const region = x.region ? (x.region === "?" ? "other region" : x.region) : "";
     const aged = Date.now() / 1000 - (x.seen || x.ts) > 30;
-    const heard = x.heard.length ? x.heard.map(h => `${esc(h.name)} <i>${HOPN(h.hops)}${h.snr != null ? " · " + h.snr + " dB" : ""}</i>`).join(" &nbsp;|&nbsp; ") : (tx ? (aged ? "no repeater has heard this" : "waiting to be heard") : "");
-    const tag = tx ? (x.heard.length ? `heard by ${x.heard.length} repeater${x.heard.length === 1 ? "" : "s"}: ` : "") : "heard by ";
+    const one = h => `${esc(h.name)} <i>${HOPN(h.hops)}${h.snr != null ? " · " + h.snr + " dB" : ""}</i>`;
+    const sentBy = x.heard.filter(h => h.sent), hrd = x.heard.filter(h => !h.sent);
+    const tag = tx ? "" : "heard by ", n = hrd.length;
+    let heard = "", none = false;
+    if (tx) {
+      const parts = [];
+      if (sentBy.length) parts.push(`sent by ${sentBy.map(h => esc(h.name)).join(", ")}`);
+      if (n) parts.push(`heard back by ${n} repeater${n === 1 ? "" : "s"}: ${hrd.map(one).join(" &nbsp;|&nbsp; ")}`);
+      else if (sentBy.length && aged) parts.push("not heard back by another repeater (it may still have reached people)");
+      else if (!sentBy.length) { parts.push(aged ? "no repeater has confirmed sending this" : "waiting for a repeater to send it"); none = aged; }
+      heard = parts.join(" · ");
+    } else heard = hrd.map(one).join(" &nbsp;|&nbsp; ");
     return `<div class="nc-msg ${tx ? "tx" : "rx"}${fresh ? " fresh" : ""}">
       <div class="nc-meta"><b class="nc-who">${esc(x.sender || "?")}</b><span class="nc-chip">${esc(x.chan)}</span>${region ? `<span class="nc-chip reg">${esc(region)}</span>` : ""}<span class="nc-time">${clock(x.seen).split(", ").pop()}</span></div>
       <div class="nc-bubble"><span class="nc-text">${esc(x.text)}</span></div>
-      <div class="nc-foot">${heard ? `<span class="nc-heard${tx && !x.heard.length && aged ? " nc-none" : ""}" title="${tx ? "repeaters that heard this go out. Channel messages have no read receipt, so this shows repeaters, not people" : ""}">${tag}${heard}</span>` : ""}${d.tx_enabled && !tx ? `<button class="nc-reply" data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender}))}">Reply</button>` : ""}</div>
+      <div class="nc-foot">${heard ? `<span class="nc-heard${none ? " nc-none" : ""}" title="${tx ? "Channel messages have no read receipt. 'sent by' means that repeater put it on the air; 'heard back' means another repeater picked it up. Neither shows whether a person read it" : ""}">${tag}${heard}</span>` : ""}${d.tx_enabled && !tx ? `<button class="nc-reply" data-reply="${esc(JSON.stringify({chan: x.chan, region: x.region, sender: x.sender}))}">Reply</button>` : ""}</div>
     </div>`;
   });
   feed.innerHTML = bubbles.length ? bubbles.join("") : `<div class="nc-empty">No messages match yet. Messages appear as your repeaters hear them in the channels set up in Settings.</div>`;

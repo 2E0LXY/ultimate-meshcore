@@ -393,6 +393,21 @@ class Messages(unittest.TestCase):
         self.assertEqual(1, dash.clear_messages("admin", chan="#test")["removed"]); self.assertEqual(1, len(dash.messages_view()["messages"]))
         self.assertEqual(1, dash.clear_messages("admin")["removed"]); self.assertEqual(0, len(dash.messages_view()["messages"]))
 
+    def test_a_repeaters_transmit_report_confirms_a_dashboard_message_was_sent(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM messages"); dash.DEV.clear(); now = int(time.time())
+        saved = list(dash.CONF["messages"]["channels"]); self.addCleanup(lambda: (dash.CONF["messages"].__setitem__("channels", saved), dash.DB.execute("DELETE FROM messages")))
+        dash.CONF["messages"]["channels"] = saved + [{"name": "#yorkshire"}]
+        raw = self.M.build_group_text(self.M.Channel("#yorkshire"), "UMC-DASH", "out", now)
+        pkey = __import__("hashlib").sha1(self.M.parse_wire(raw)["payload"]).hexdigest()[:20]
+        dash.DB.execute("INSERT INTO messages(ts,seen,chan,chash,region,sender,text,pkey,dir,hops,snr,rssi,heard) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (now, now, "#yorkshire", "00", "", "UMC-DASH", "out", pkey, "tx", 0, None, None, "[]"))
+        dash.device("01" * 32, "LBA")["name"] = "Repeater A"
+        dash.note_sent("01" * 32, raw, now); dash.note_sent("01" * 32, raw, now + 1)          # twice: recorded once
+        h = dash.messages_view()["messages"][0]["heard"]; self.assertEqual([("Repeater A", True)], [(x["name"], x["sent"]) for x in h])
+        dash.note_message("02" * 32, raw, "4.0", "-90", now + 2)                                 # a second repeater hears it back
+        h = dash.messages_view()["messages"][0]["heard"]; self.assertEqual([True, False], [x["sent"] for x in h])
+        other = self.M.build_group_text(self.M.Channel("#yorkshire"), "Sam", "not ours", now); dash.note_sent("01" * 32, other, now)   # an unrelated packet is ignored
+        self.assertEqual(1, len(dash.messages_view()["messages"]))
+
     def test_purging_logs_keeps_recent_rows_and_never_wipes_the_audit_log(self):
         dash.db_init(); now = int(time.time()); dash.DB.execute("DELETE FROM events"); dash.DB.execute("DELETE FROM audit")
         dash.DB.executemany("INSERT INTO events VALUES(?,?,?,?,?,?)", [(now - 40 * 86400, "info", "", "", "", "old"), (now, "info", "", "", "", "new")])
