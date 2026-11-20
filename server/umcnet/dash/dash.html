@@ -149,7 +149,7 @@ body{margin:0;background:#050d0a;color:#e9f7ef;font:14px/1.45 system-ui,-apple-s
 const D = {uid: 0};
 const $ = s => document.querySelector(s), esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const S = {o: null, hist: {}, range: 3600, tab: "overview", ev: [], evKind: "", logq: "", pq: "", t: 0, err: "", sel: "", vals: {}, log: [], audit: [], setup: "", created: null, msg: "", busy: false};
-const TABS = [["overview", "Overview"], ["network", "Network"], ["messages", "Messages"], ["repeaters", "Repeaters"], ["control", "Control"], ["clients", "Clients"], ["accounts", "Accounts"], ["traffic", "Traffic"], ["diagnostics", "Diagnostics"], ["broker", "Broker"], ["system", "System"], ["log", "Log"], ["users", "Users"], ["settings", "Settings"]];
+const TABS = [["overview", "Overview"], ["network", "Network"], ["nodes", "Nodes"], ["messages", "Messages"], ["repeaters", "Repeaters"], ["control", "Control"], ["clients", "Clients"], ["accounts", "Accounts"], ["traffic", "Traffic"], ["diagnostics", "Diagnostics"], ["broker", "Broker"], ["system", "System"], ["log", "Log"], ["users", "Users"], ["settings", "Settings"]];
 const bytes = n => n == null ? "—" : n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? (n / 1e3).toFixed(1) + " kB" : Math.round(n) + " B";
 const dur = s => { s = Math.round(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d}d ${h}h ${m}m` : h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; };
 const ago = t => !t ? "never" : dur(Math.max(0, Date.now() / 1000 - t)) + " ago";
@@ -977,7 +977,42 @@ document.addEventListener("click", async e => {
 });
 document.addEventListener("click", e => { if (e.target.closest('[data-act="fit"]') && S.net && S.map) { const p = S.net.nodes.filter(x => x.lat != null); if (p.length) S.map.fitBounds(p.map(x => [x.lat, x.lon]), {padding: [40, 40], maxZoom: 12}); } });
 
-const VIEWS = {users: vUsers, network: vNetwork, messages: vMessages, overview: (o) => pendBanner(o) + vOverview(o), repeaters: vRepeaters, control: vControl, clients: vClients, accounts: vAccounts, settings: vSettings, traffic: vTraffic, diagnostics: vDiag, broker: vBroker, system: vSystem, log: vLog};
+// Nodes: every station heard lately, as cards. Added = one this dashboard controls (it has a control channel);
+// Discovered = heard on the mesh only. Filters, search and sort are client-side; "Hide stale" hides nodes not heard for 7 days.
+const NODE_TYPE = {1: ["Client", "#2fe27a", '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>'],
+                   2: ["Repeater", "#ff9b3d", '<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.5 5.5a9 9 0 0 0 0 13M18.5 5.5a9 9 0 0 1 0 13"/>'],
+                   3: ["Room server", "#b58cff", '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21l4-4h4"/>'],
+                   4: ["Sensor", "#4aa8ff", '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/>']};
+async function loadNodes() { try { S.nodes = await jget("/api/network?hours=168"); } catch {} }
+function vNodes(o) {
+  const all = (S.nodes && S.nodes.nodes) || [], f = S.nodeFilter || "all", q = (S.nodeQ || "").trim().toLowerCase(), sort = S.nodeSort || "last";
+  const isAdded = n => !!n.info, cut = Date.now() / 1000 - 7 * 86400;
+  let list = all.filter(n => (f === "all" || (f === "added") === isAdded(n)) && (!S.nodeStale || (n.last || 0) >= cut)
+    && (!q || (n.name || "").toLowerCase().includes(q) || n.key.toLowerCase().includes(q)));
+  const by = {name: (a, b) => (a.name || "").localeCompare(b.name || ""), adverts: (a, b) => (b.adverts || 0) - (a.adverts || 0), last: (a, b) => (b.last || 0) - (a.last || 0)};
+  list.sort(by[sort] || by.last);
+  const nAdded = all.filter(isAdded).length, pill = (k, l, n) => `<button data-nf2="${k}" class="${f === k ? "on" : ""}">${l} (${n})</button>`;
+  const cards = list.map(n => {
+    const t = NODE_TYPE[n.type] || NODE_TYPE[2], badge = isAdded(n) ? '<span class="tag" style="background:#4aa8ff26;color:#4aa8ff">Added</span>' : '<span class="tag" style="background:#2fe27a26;color:#2fe27a">Discovered</span>';
+    return `<div class="ncard"><svg class="nicon" viewBox="0 0 24 24" fill="none" stroke="${t[1]}" stroke-width="1.8" stroke-linecap="round" aria-label="${esc(t[0])}">${t[2]}</svg>
+      <div class="nbody"><div class="nname" title="${esc(n.name)}">${esc(n.name)}</div><code class="nkey">${esc(n.key.slice(0, 12))}</code>
+      <div class="nseen">Last heard ${esc(ago(n.last))}${n.adverts ? " · " + n.adverts + " adverts" : ""}</div></div>${badge}</div>`;
+  }).join("");
+  const css = `<style>.ngrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+    .ncard{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid #ffffff14;border-radius:10px;background:#0a1a12aa}
+    .nicon{width:28px;height:28px;flex:0 0 28px;margin-top:2px}.nbody{flex:1;min-width:0}
+    .nname{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.nkey{font-size:11px;color:var(--muted)}
+    .nseen{font-size:12px;color:var(--muted);margin-top:4px}
+    .nbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}.nbar button.on{outline:1px solid var(--g)}</style>`;
+  return `${css}<div class="panels">${panel("Nodes", "stations heard lately, from the mesh and this dashboard", `
+    <div class="nbar">${pill("all", "All", all.length)}${pill("added", "Added", nAdded)}${pill("disc", "Discovered", all.length - nAdded)}
+      <input id="nq" placeholder="Search name or key…" value="${esc(S.nodeQ || "")}" style="flex:1;min-width:180px">
+      <select id="nsort"><option value="last" ${sort === "last" ? "selected" : ""}>Last heard</option><option value="name" ${sort === "name" ? "selected" : ""}>Name</option><option value="adverts" ${sort === "adverts" ? "selected" : ""}>Adverts</option></select>
+      <button data-nstale class="${S.nodeStale ? "on" : ""}">Hide stale (7 d+)</button>
+      <button id="nsync">Sync</button></div>
+    <div class="ngrid">${cards || '<div class="nseen">No nodes match.</div>'}</div>`)}</div>`;
+}
+const VIEWS = {users: vUsers, network: vNetwork, nodes: vNodes, messages: vMessages, overview: (o) => pendBanner(o) + vOverview(o), repeaters: vRepeaters, control: vControl, clients: vClients, accounts: vAccounts, settings: vSettings, traffic: vTraffic, diagnostics: vDiag, broker: vBroker, system: vSystem, log: vLog};
 function draw() {
   const o = S.o; if (!o) return;
   const active = document.activeElement && document.activeElement.id;
@@ -1002,18 +1037,23 @@ async function loadEv() { try { S.ev = await jget("/api/events?range=86400" + (S
 async function tick(first) {
   try { S.o = await jget("/api/overview"); S.err = ""; } catch (e) { S.err = e.message; }
   if (S.tab === "network") { try { S.net = await jget("/api/network?hours=" + S.nf.hours); } catch {} }
+  if (S.tab === "nodes") await loadNodes();
   if (S.tab === "messages") await msgLoad();
   if (S.tab === "control") ctlAuto();
   if (first || Date.now() - S.t > 30000) { S.t = Date.now(); await loadHist(); if (S.tab === "diagnostics" || first) await loadEv(); }
   if (!hold()) draw();
 }
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-t]"); if (t) { S.tab = t.dataset.t; location.hash = S.tab; S.netUp = false; if (S.tab === "network") { try { S.net = await jget("/api/network"); } catch {} } if (S.tab === "diagnostics") await loadEv(); if (S.tab === "diagnostics" || S.tab === "control") await loadAudit(); draw(); return; }
+  const nf = e.target.closest("[data-nf2]"); if (nf) { S.nodeFilter = nf.dataset.nf2; draw(); return; }
+  if (e.target.closest("[data-nstale]")) { S.nodeStale = !S.nodeStale; draw(); return; }
+  if (e.target.closest("#nsync")) { await loadNodes(); draw(); return; }
+  const t = e.target.closest("[data-t]"); if (t) { S.tab = t.dataset.t; location.hash = S.tab; S.netUp = false; if (S.tab === "nodes") await loadNodes(); if (S.tab === "network") { try { S.net = await jget("/api/network"); } catch {} } if (S.tab === "diagnostics") await loadEv(); if (S.tab === "diagnostics" || S.tab === "control") await loadAudit(); draw(); return; }
   const r = e.target.closest("#rng button"); if (r) { S.range = +r.dataset.r; document.querySelectorAll("#rng button").forEach(b => b.classList.toggle("on", b === r)); await loadHist(); draw(); return; }
   const k = e.target.closest("[data-ek]"); if (k) { S.evKind = k.dataset.ek; await loadEv(); draw(); return; }
   if (e.target.closest("#refresh")) { S.t = 0; tick(); }
 });
-document.addEventListener("input", e => { if (e.target.id === "pq") { S.pq = e.target.value; draw(); } else if (e.target.id === "bq") { S.bq = e.target.value; draw(); } else if (e.target.id === "lq") { S.logq = e.target.value; draw(); } });
+document.addEventListener("change", e => { if (e.target.id === "nsort") { S.nodeSort = e.target.value; draw(); } });
+document.addEventListener("input", e => { if (e.target.id === "nq") { S.nodeQ = e.target.value; const p = e.target.selectionStart; draw(); const n = $("#nq"); if (n) { n.focus(); n.setSelectionRange(p, p); } } else if (e.target.id === "pq") { S.pq = e.target.value; draw(); } else if (e.target.id === "bq") { S.bq = e.target.value; draw(); } else if (e.target.id === "lq") { S.logq = e.target.value; draw(); } });
 document.addEventListener("mousemove", e => {
   const c = e.target.closest(".chart"), tip = c && c.querySelector(".tip"); document.querySelectorAll(".tip").forEach(t => { if (t !== tip) t.style.display = "none"; }); if (!c) return;
   const m = JSON.parse(c.dataset.m), svg = c.querySelector("svg"), rc = svg.getBoundingClientRect(), x = (e.clientX - rc.left) / rc.width * m.W, t = m.x0 + (x - m.L) / ((m.W - m.L - m.R) || 1) * (m.x1 - m.x0);
