@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.22"
+VERSION = "2.23"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -1038,6 +1038,16 @@ def clear_messages(who, chan="", region="", direction="", q=""):
     audit(who, "messages cleared", chan or "all channels", "%d removed%s" % (n, "" if not where else " (filtered)"))
     return {"ok": True, "removed": n}
 
+def purge_log(who, table, days):
+    """Delete audit or event rows older than `days`. The audit log can never be wiped completely (days >= 1)."""
+    if table not in ("audit", "events"): return {"ok": False, "error": "unknown log"}
+    try: days = int(days or 0)
+    except (TypeError, ValueError): return {"ok": False, "error": "days must be a number"}
+    if not 0 <= days <= 3650 or (table == "audit" and days < 1): return {"ok": False, "error": "days must be 1 to 3650" if table == "audit" else "days must be 0 to 3650"}
+    with LOCK: n = (DB.execute("DELETE FROM %s WHERE ts<?" % table, (int(time.time()) - days * 86400,)) if days else DB.execute("DELETE FROM %s" % table)).rowcount
+    audit(who, table + " cleared", ("older than %d days" % days) if days else "everything", "%d removed" % n)
+    return {"ok": True, "removed": n}
+
 def send_message(who, chan, region, text, sender=None):
     c = CONF["messages"]
     if not c["tx_enabled"]: return {"ok": False, "error": "sending is switched off in Settings"}
@@ -1769,10 +1779,7 @@ class H(BaseHTTPRequestHandler):
                 with LOCK: MSGSTAT.pop("%02X" % MSG.Channel(nm).hash, None)
                 return self.send(200, json.dumps({"ok": True}))
             if p in ("/api/audit/clear", "/api/events/clear"):
-                tbl = "audit" if "audit" in p else "events"; days = max(0, min(3650, int(body.get("older_than_days") or 0)))
-                with LOCK: n = DB.execute("DELETE FROM %s WHERE ts<?" % tbl, (int(time.time()) - days * 86400,)).rowcount
-                audit(who, tbl + " cleared", "older than %d days" % days if days else "everything", "%d removed" % n)
-                return self.send(200, json.dumps({"ok": True, "removed": n}))
+                return self.send(200, json.dumps(purge_log(who, "audit" if "audit" in p else "events", body.get("older_than_days"))))
             if p == "/api/messages/clear":
                 return self.send(200, json.dumps(clear_messages(who, str(body.get("channel", "")), str(body.get("region", "")), str(body.get("dir", "")), str(body.get("q", "")))))
             if p == "/api/messages/send":

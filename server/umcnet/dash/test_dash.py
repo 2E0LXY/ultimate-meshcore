@@ -393,6 +393,16 @@ class Messages(unittest.TestCase):
         self.assertEqual(1, dash.clear_messages("admin", chan="#test")["removed"]); self.assertEqual(1, len(dash.messages_view()["messages"]))
         self.assertEqual(1, dash.clear_messages("admin")["removed"]); self.assertEqual(0, len(dash.messages_view()["messages"]))
 
+    def test_purging_logs_keeps_recent_rows_and_never_wipes_the_audit_log(self):
+        dash.db_init(); now = int(time.time()); dash.DB.execute("DELETE FROM events"); dash.DB.execute("DELETE FROM audit")
+        dash.DB.executemany("INSERT INTO events VALUES(?,?,?,?,?,?)", [(now - 40 * 86400, "info", "", "", "", "old"), (now, "info", "", "", "", "new")])
+        dash.DB.execute("INSERT INTO audit VALUES(?,?,?,?,?,1)", (now - 40 * 86400, "x", "old", "", ""))
+        self.assertEqual({"ok": True, "removed": 1}, dash.purge_log("admin", "events", 30)); self.assertEqual(1, dash.DB.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+        self.assertEqual(1, dash.purge_log("admin", "audit", 30)["removed"])
+        for bad in (0, -1, "x", 99999): self.assertFalse(dash.purge_log("admin", "audit", bad)["ok"], bad)
+        self.assertFalse(dash.purge_log("admin", "samples", 5)["ok"])
+        self.assertEqual(1, dash.purge_log("admin", "events", 0)["removed"])
+
     def test_settings_for_channels_and_regions_are_validated(self):
         self.assertIsNone(dash.conf_update({"messages": {"channels": [{"name": "Public", "psk": self.M.PUBLIC_PSK}, {"name": "#sheffield"}], "regions": ["yorkshire", "#derbyshire"], "sender": "2E0LXY-DASH"}}))
         self.assertEqual(["yorkshire", "derbyshire"], dash.CONF["messages"]["regions"])
