@@ -38,8 +38,8 @@ android {
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        // HiveMQ MQTT client (Netty) and BouncyCastle bring duplicate metadata files
-        resources.excludes += listOf("META-INF/INDEX.LIST", "META-INF/io.netty.versions.properties", "META-INF/DEPENDENCIES", "META-INF/versions/**", "META-INF/LICENSE*", "META-INF/NOTICE*")
+        // BouncyCastle brings duplicate metadata files
+        resources.excludes += listOf("META-INF/INDEX.LIST", "META-INF/DEPENDENCIES", "META-INF/versions/**", "META-INF/LICENSE*", "META-INF/NOTICE*")
     }
 }
 
@@ -56,7 +56,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
-    implementation("com.hivemq:hivemq-mqtt-client:1.3.3")            // UMC Net: MQTT 3.1.1 over WebSocket
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")             // UMC Net: WebSocket transport for the hand-written MQTT 3.1.1 codec
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")         // UMC Net enrolment: Ed25519 and X25519 (lightweight API)
     implementation("androidx.security:security-crypto:1.1.0-alpha06") // UMC Net: encrypted storage for the login and keys
     debugImplementation("androidx.compose.ui:ui-tooling")
