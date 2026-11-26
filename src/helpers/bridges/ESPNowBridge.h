@@ -42,8 +42,19 @@
 class ESPNowBridge : public BridgeBase {
 private:
   static ESPNowBridge *_instance;
+  #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+
+  static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len);
+
+  static void send_cb(const wifi_tx_info_t *info, esp_now_send_status_t status);
+
+  #else
+
   static void recv_cb(const uint8_t *mac, const uint8_t *data, int32_t len);
+
   static void send_cb(const uint8_t *mac, esp_now_send_status_t status);
+
+  #endif
 
   /**
    * ESP-NOW Protocol Structure:

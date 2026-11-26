@@ -9,17 +9,21 @@
 ESPNowBridge *ESPNowBridge::_instance = nullptr;
 
 // Static callback wrappers
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+void ESPNowBridge::recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (_instance) _instance->onDataRecv(info->src_addr, data, len);
+}
+void ESPNowBridge::send_cb(const wifi_tx_info_t *info, esp_now_send_status_t status) {
+  if (_instance) _instance->onDataSent(info ? info->des_addr : nullptr, status);
+}
+#else
 void ESPNowBridge::recv_cb(const uint8_t *mac, const uint8_t *data, int32_t len) {
-  if (_instance) {
-    _instance->onDataRecv(mac, data, len);
-  }
+  if (_instance) _instance->onDataRecv(mac, data, len);
 }
-
 void ESPNowBridge::send_cb(const uint8_t *mac, esp_now_send_status_t status) {
-  if (_instance) {
-    _instance->onDataSent(mac, status);
-  }
+  if (_instance) _instance->onDataSent(mac, status);
 }
+#endif
 
 ESPNowBridge::ESPNowBridge(NodePrefs *prefs, mesh::PacketManager *mgr, mesh::RTCClock *rtc)
     : BridgeBase(prefs, mgr, rtc), _rx_buffer_pos(0) {
