@@ -30,6 +30,19 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Point Gradle at the runner's Android SDK
         run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+      - name: Prepare release signing
+        env:
+          UMC_KEYSTORE_B64: ${{ secrets.UMC_KEYSTORE_B64 }}
+          UMC_KEYSTORE_PASSWORD: ${{ secrets.UMC_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$UMC_KEYSTORE_B64" ]; then
+            printf '%s' "$UMC_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/umc-release.jks"
+            echo "UMC_KEYSTORE_FILE=$RUNNER_TEMP/umc-release.jks" >> "$GITHUB_ENV"
+            echo "UMC_KEYSTORE_PASSWORD=$UMC_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "Release signing: stable UMC key."
+          else
+            echo "::warning::UMC_KEYSTORE_B64 is not set: this build is debug-signed, and updates over a differently signed install will fail."
+          fi
       - name: Build APK
         working-directory: android
         run: ./gradlew :app:assembleRelease --no-daemon

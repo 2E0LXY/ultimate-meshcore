@@ -28,6 +28,23 @@ You need JDK 17 and the Android SDK (API 35). Gradle downloads the rest.
 
 Releases are built by [`.github/workflows/umc-android.yml`](../.github/workflows/umc-android.yml) and signed with the standard debug key so they install by sideloading; sign with your own key before publishing to a store.
 
+## Updating
+
+The app checks the `app-latest` release on start and every 6 hours. When the published build differs from the installed one, a flashing **Update available** button appears left of the menu. Tap it: the APK downloads (progress shows on the button) and installs through the system installer. **Check for update** and the current build (version + commit) are in the menu. Debug builds (`GIT_SHA` = `dev`) never show the button.
+
+First use asks once for "Install unknown apps" for this app; allow it, then press the button again.
+
+Updates only install over the same signing key. CI signs releases with a stable key when these repo secrets exist:
+
+| Secret | Value |
+| --- | --- |
+| `UMC_KEYSTORE_B64` | base64 of the `.jks` keystore (`base64 -w0 umc.jks`) |
+| `UMC_KEYSTORE_PASSWORD` | store and key password (key alias `umc`) |
+
+Create the key once: `keytool -genkeypair -v -keystore umc.jks -alias umc -keyalg RSA -keysize 2048 -validity 10000`. Without the secrets the build falls back to the debug key, and CI logs a warning.
+
+Builds made before the stable key (debug-signed) need **one uninstall** before the first stable build, which loses the UMC Net enrolment on that phone. After that, in-app updates work. `versionCode` is `100 + CI run number`, so each build is newer than the last.
+
 ## Permissions
 
 - **Bluetooth (scan and connect)** — to find and talk to radios. Android 11 and older ask for location instead, which is how Android gates Bluetooth scanning; the app does not use your position.

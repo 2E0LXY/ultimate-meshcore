@@ -29,6 +29,7 @@ class MainActivity : ComponentActivity() {
         AppState.init(this)
         uk.umc.app.net.UmcNet.init(this)
         createNotificationChannel()
+        Updater.start(this)
         setContent { UmcApp() }
     }
 
@@ -58,6 +59,7 @@ fun UmcApp() {
         var destName by rememberSaveable { mutableStateOf(Dest.HOME.name) }
         var openChat by rememberSaveable { mutableStateOf<String?>(null) }
         var menuOpen by remember { mutableStateOf(false) }
+        val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
         val dest = Dest.entries.firstOrNull { it.name == destName } ?: Dest.HOME
         fun go(d: Dest) { destName = d.name; openChat = null }
         val snackbar = remember { SnackbarHostState() }
@@ -101,6 +103,7 @@ fun UmcApp() {
                         }
                     },
                     actions = {
+                        UpdateChip()
                         Box {
                             IconButton(onClick = { menuOpen = true }) { Icon(Lucide.Menu, contentDescription = "Menu") }
                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -111,6 +114,15 @@ fun UmcApp() {
                                         onClick = { menuOpen = false; go(d) },
                                     )
                                 }
+                                DropdownMenuItem(
+                                    text = { Text("Check for update") },
+                                    onClick = { menuOpen = false; Updater.checkNow(appContext) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Build ${BuildConfig.VERSION_NAME}+${BuildConfig.GIT_SHA}", style = MaterialTheme.typography.labelSmall) },
+                                    onClick = {},
+                                    enabled = false,
+                                )
                             }
                         }
                     },

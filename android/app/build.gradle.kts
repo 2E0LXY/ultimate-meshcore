@@ -4,6 +4,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Stable signing: CI supplies UMC_KEYSTORE_FILE / UMC_KEYSTORE_PASSWORD (alias "umc"). Without them
+// the build falls back to the debug key, so local and fork builds never break.
+val umcKeystore: java.io.File? = System.getenv("UMC_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }?.let { java.io.File(it) }?.takeIf { it.exists() }
+val umcKeystorePassword: String = System.getenv("UMC_KEYSTORE_PASSWORD") ?: ""
+// Ordered version codes from the CI run number, so each build can update the last one.
+val umcRunNumber: Int? = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+val umcGitSha: String = System.getenv("GITHUB_SHA")?.trim()?.take(7)?.takeIf { it.isNotEmpty() } ?: "dev"
+
 android {
     namespace = "uk.umc.app"
     compileSdk = 35
@@ -12,16 +20,28 @@ android {
         applicationId = "uk.umc.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
+        versionCode = if (umcRunNumber != null) 100 + umcRunNumber else 16
         versionName = "0.1.15"
+        buildConfigField("String", "GIT_SHA", "\"$umcGitSha\"")
+    }
+
+    signingConfigs {
+        create("umc") {
+            if (umcKeystore != null) {
+                storeFile = umcKeystore
+                storePassword = umcKeystorePassword
+                keyAlias = "umc"
+                keyPassword = umcKeystorePassword
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Sideloaded builds are signed with the debug key so they install straight from
-            // the release page; publish through a store with your own key instead.
-            signingConfig = signingConfigs.getByName("debug")
+            // Stable key when CI provides it, so every build can update the last. Otherwise the
+            // debug key (a throwaway on CI: such builds cannot update over a differently signed install).
+            signingConfig = if (umcKeystore != null) signingConfigs.getByName("umc") else signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -35,6 +55,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
