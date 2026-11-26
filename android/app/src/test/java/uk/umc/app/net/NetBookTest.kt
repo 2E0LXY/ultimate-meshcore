@@ -41,7 +41,7 @@ class NetBookTest {
 
     // ---- broker JSON
     @Test fun topics() {
-        assertEquals(listOf("meshcore/LBA/+/raw", "meshcore/LBA/+/status", "meshcore/LBA/+/packets"), Protocol.subscriptions("LBA"))
+        assertEquals(listOf("meshcore/LBA/+/raw", "meshcore/LBA/+/status", "meshcore/LBA/+/packets", "umcnet/v1/LBA/replay/$ID"), Protocol.subscriptions("LBA", ID))
         assertEquals("meshcore/LBA/$ID/raw", Protocol.publishTopic("LBA", ID))
         assertEquals("raw", Protocol.parseTopic("meshcore/LBA/${A.lowercase()}/raw")!!.kind); assertEquals(A, Protocol.parseTopic("meshcore/LBA/${A.lowercase()}/raw")!!.deviceId)
         assertNull(Protocol.parseTopic("meshcore/LBA/short/raw"))
@@ -126,5 +126,40 @@ class NetBookTest {
         assertFalse(Repeater(A, "x", "offline", 999_999).online(1_000_000))
         assertTrue(Repeater(A, "x", "unknown", 999_000).online(1_000_000)); assertFalse(Repeater(A, "x", "unknown", 100).online(1_000_000))
         assertEquals("AAAAAAAA", Repeater(A, "", "online", 0).label)
+    }
+
+    // ---- store-and-forward catch-up
+    @Test fun replayTopicsAndRequest() {
+        assertEquals("umcnet/v1/LBA/replay/req/$ID", Protocol.replayRequestTopic("LBA", ID))
+        assertEquals("umcnet/v1/LBA/replay/$ID", Protocol.replayTopic("LBA", ID))
+        assertEquals("""{"since":1700000000}""", Protocol.buildReplayRequest(1700000000))
+        assertEquals(1700000000L - 100, Protocol.replaySince(1700000000L - 100, 1700000000L + 100))     // recent: keep
+        assertEquals(1700003600L - 3600, Protocol.replaySince(5, 1700003600L))                          // older than an hour: clamp
+        assertEquals(1700000000L - 3600, Protocol.replaySince(0, 1700000000L))                          // unknown
+    }
+
+    @Test fun parsesAReplayedPacket() {
+        val j = """{"origin_id":"${A.lowercase()}","timestamp":1700000123,"type":"RAW","data":"$WIRE_PATH1","direction":"rx","snr":4.5,"rssi":-98,"replay":1}"""
+        val r = Protocol.parseReplay(j.toByteArray())!!
+        assertEquals("raw", r.kind); assertTrue(r.replay); assertEquals(A, r.deviceId); assertEquals("rx", r.direction)
+        assertEquals(1700000123L, r.timestampS); assertEquals(4.5, r.snr!!, 0.0); assertEquals(-98, r.rssi); assertArrayEquals(hex(WIRE_PATH1), r.raw)
+        val tx = Protocol.parseReplay("""{"origin_id":"$B","timestamp":1,"data":"$WIRE_PATH1","direction":"tx","snr":null,"rssi":null,"replay":1}""".toByteArray())!!
+        assertEquals("tx", tx.direction); assertNull(tx.snr); assertNull(tx.rssi)
+    }
+
+    @Test fun parsesReplayDoneAndRejectsJunk() {
+        val d = Protocol.parseReplay("""{"done":1,"n":7}""".toByteArray())!!
+        assertEquals("done", d.kind); assertEquals(7, d.count); assertTrue(d.replay); assertNull(d.raw)
+        assertNull(Protocol.parseReplay("nonsense".toByteArray()))
+        assertNull(Protocol.parseReplay("""{"origin_id":"short","data":"00"}""".toByteArray()))
+        assertNull(Protocol.parseReplay("""{"origin_id":"$A","timestamp":1}""".toByteArray()))
+    }
+
+    @Test fun replayedPacketMergesWithOneAlreadyHeld() {
+        val book = NetBook(); val ch = listOf(york); val regions = listOf("yorkshire")
+        assertTrue(book.onHeard(A, hex(WIRE_PATH1), 1.0, null, 5_000, ch, regions))
+        assertTrue(book.onHeard(B, hex(WIRE_PATH1), 2.0, null, 4_000, ch, regions))      // replay from another repeater, at its own time: merges
+        assertFalse(book.onHeard(A, hex(WIRE_PATH1), 1.0, null, 4_000, ch, regions))     // replay of one we hold: no change
+        val m = book.messages().single(); assertEquals(2, m.heard.size); assertEquals(5_000L, m.seenMs)
     }
 }

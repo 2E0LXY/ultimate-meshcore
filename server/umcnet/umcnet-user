@@ -114,6 +114,7 @@ def acl_for(name, info):
         out += ["topic write umcnet/v1/+/dev/+/cmd", "topic read umcnet/v1/+/dev/+/resp",
                 "topic read umcnet/v1/enrol/hello", "topic write umcnet/v1/enrol/grant/#",
                 "topic write meshcore/+/%s/raw" % ("DA" * 32),
+                "topic read umcnet/v1/+/replay/req/+", "topic write umcnet/v1/+/replay/#",      # catch-up for clients: hear requests, answer on the client's own topic
                 "topic write umcnet/v1/+/messages", "topic write umcnet/v1/+/adverts", "topic write umcnet/v1/+/nodes/#"]      # messages sent from the dashboard (handed to the repeaters' bridges)      # zero-touch enrolment: hear requests, answer them
     elif role == "enrol":
         # the public doorbell a new repeater knocks with: it may send its signed request and read the answers,
@@ -124,6 +125,7 @@ def acl_for(name, info):
     else:   # client and viewer listen
         if role == "client" and dev:                    # a client may also send packets and its own status, under its own id only
             out += [f"topic write meshcore/+/{dev}/raw", f"topic write meshcore/+/{dev}/status"]
+            out += [f"topic read umcnet/v1/+/replay/{dev}", f"topic write umcnet/v1/+/replay/req/{dev}"]      # catch-up: ask, and read the answer, under its own id only
         out += ["topic read meshcore/+/+/raw",
                 "topic read meshcore/+/+/packets",
                 "topic read meshcore/+/+/status", "topic read umcnet/v1/+/messages", "topic read umcnet/v1/+/adverts", "topic read umcnet/v1/+/nodes/#"]

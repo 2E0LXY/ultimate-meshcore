@@ -24,7 +24,7 @@ you **Decline** is ignored until you press **Forget**. Requests can be switched 
 A client (the phone app) enrols the same way. It makes its own Ed25519 identity; the public key (64 capital hex digits) is its
 **client id**. It publishes the same signed `hello` as the public `enrol` account and reads `umcnet/v1/enrol/grant/<ID>`.
 On the dashboard's Accounts tab press **Approve as client** (instead of **Approve as repeater**). That makes a `client` account bound
-to the id (it may write only `meshcore/+/<ID>/raw` and `meshcore/+/<ID>/status`, and read as a viewer does; no remote-control key, no bridge
+to the id (it may write only `meshcore/+/<ID>/raw`, `meshcore/+/<ID>/status` and `umcnet/v1/+/replay/req/<ID>`, and read as a viewer does; no remote-control key, no bridge
 settings) and the grant carries a setup code in place of a join code:
 
 `umcclient1:` + base64url (no padding) of compact JSON `{"h":"<host>","u":"<account>","p":"<password>","i":"<client id>","a":"<area>"}`
@@ -54,6 +54,16 @@ repeater                         broker (public `enrol` account)                
 * The dashboard's `controller` account reads `hello` and writes `grant/#`. Format and crypto: `src/helpers/mqtt/Enrol.h` and
   `server/umcnet/dash/umcnet_enrol.py`, tested against each other with the same vector (`test/test_enrol`, `test_dash.py`), and the
   whole flow against a real broker in `server/umcnet/dash/e2e_enrol.py`.
+
+## Catch-up for clients
+
+A client that was offline can ask the dashboard for the last hour of channel messages (dashboard 2.28 or later; run `umcnet-user sync`
+or re-run `install-dash.sh` so the access lists gain the new topics).
+
+* The dashboard keeps every group packet its repeaters hear or send for an hour, whether or not it holds the channel key.
+* On connecting, the client publishes `{"since": <unix seconds>}` to `umcnet/v1/<area>/replay/req/<ID>` (`<ID>` is its 64 capital hex digit client id). `since` is never taken as older than one hour ago.
+* The dashboard answers on `umcnet/v1/<area>/replay/<ID>`: up to 500 packets, oldest first, each `{"origin_id","timestamp","type":"RAW","data":"<hex>","direction":"rx|tx","snr","rssi","replay":1}`, then `{"done":1,"n":<count>}`. Not retained.
+* One request per client id every 20 seconds; extra requests are ignored. A client may write only its own request topic and read only its own replay topic. Replays are never sent on `meshcore/.../raw`, so no repeater re-transmits them.
 
 ## Safety
 

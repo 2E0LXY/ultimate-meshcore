@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.27"
+VERSION = "2.28"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -409,7 +409,7 @@ CTL_STATUS = {}
 def control_loop():
     if not os.path.exists(CFG["ctl_pass_file"]):
         CTL_STATUS.update(state="not set up", error="no control account yet: run install-dash.sh again"); return
-    CTL["conn"] = MqttConn(CFG["ctl_user"], CFG["ctl_pass_file"], ["umcnet/v1/+/dev/+/resp", "umcnet/v1/enrol/hello"], on_control_reply, CTL_STATUS)
+    CTL["conn"] = MqttConn(CFG["ctl_user"], CFG["ctl_pass_file"], ["umcnet/v1/+/dev/+/resp", "umcnet/v1/enrol/hello", "umcnet/v1/+/replay/req/+"], on_control_reply, CTL_STATUS)
     CTL["conn"].run()
 
 # ----------------------------------------------------------------------------- broker log: who connects, who is refused
@@ -563,6 +563,7 @@ def db_init():
     DB.execute("PRAGMA journal_mode=WAL"); DB.execute("PRAGMA synchronous=NORMAL")
     DB.execute("CREATE TABLE IF NOT EXISTS samples(ts INTEGER, k TEXT, v REAL)"); DB.execute("CREATE INDEX IF NOT EXISTS s_k ON samples(k, ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, seen INTEGER, chan TEXT, chash TEXT, region TEXT, sender TEXT, text TEXT, pkey TEXT UNIQUE, dir TEXT, hops INTEGER, snr REAL, rssi INTEGER, heard TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS m_seen ON messages(seen)")
+    DB.execute("CREATE TABLE IF NOT EXISTS grp_buf(pkey TEXT, did TEXT, seen INTEGER, dir TEXT, snr REAL, rssi INTEGER, raw TEXT, PRIMARY KEY(pkey, did, dir))"); DB.execute("CREATE INDEX IF NOT EXISTS g_seen ON grp_buf(seen)")
     DB.execute("CREATE TABLE IF NOT EXISTS links(a TEXT, b TEXT, first INTEGER, last INTEGER, snr REAL, rssi INTEGER, PRIMARY KEY(a, b))")
     DB.execute("CREATE TABLE IF NOT EXISTS traffic(h INTEGER, node TEXT, rx TEXT, ptype TEXT, hops INTEGER, n INTEGER, PRIMARY KEY(h, node, rx, ptype, hops))")
     DB.execute("CREATE TABLE IF NOT EXISTS events(ts INTEGER, kind TEXT, client TEXT, user TEXT, ip TEXT, text TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS e_ts ON events(ts)")
@@ -596,6 +597,7 @@ def sampler_loop():
             if int(time.time()) % 3600 < 60: messages_housekeeping()
             if int(time.time()) % 600 < 60: nodes_housekeeping()
             now = int(time.time()); vals = snapshot_values()
+            grp_prune(now)
             DB.executemany("INSERT INTO samples VALUES(?,?,?)", [(now, k, float(v)) for k, v in vals.items()])
             if now % 3600 < 60:
                 cut = now - CONF["keep_days"] * 86400; DB.execute("DELETE FROM samples WHERE ts<?", (cut,)); DB.execute("DELETE FROM events WHERE ts<?", (cut,)); DB.execute("DELETE FROM audit WHERE ts<?", (now - max(90, CONF["keep_days"]) * 86400,))
@@ -923,6 +925,58 @@ def msg_channels():
         except Exception: pass
     return out
 
+REPLAY_WINDOW = 3600        # catch-up for clients: the last hour of group packets, at most 500, oldest first
+REPLAY_MAX = 500
+REPLAY_GAP = 20             # seconds between requests from one client id
+REPLAY_PACE = 0.015         # seconds between publishes
+REPLAY_LAST = {}
+
+def grp_store(pkey, did, raw, snr, rssi, now, direction):
+    """Keep a group packet for an hour so a client that was offline can be caught up (see replay_serve)."""
+    try: s = float(snr) if snr not in (None, "") else None
+    except (TypeError, ValueError): s = None
+    try: r = int(rssi) if rssi not in (None, "") else None
+    except (TypeError, ValueError): r = None
+    DB.execute("INSERT OR IGNORE INTO grp_buf(pkey,did,seen,dir,snr,rssi,raw) VALUES(?,?,?,?,?,?,?)", (pkey, did, int(now), direction, s, r, raw.hex().upper()))
+
+def grp_prune(now=None):
+    with LOCK: DB.execute("DELETE FROM grp_buf WHERE seen<?", (int(now or time.time()) - REPLAY_WINDOW - 400,))
+
+def replay_serve(conn, area, cid, since, now=None, pace=None):
+    """Publish the buffered packets newer than since (never older than an hour) to umcnet/v1/<area>/replay/<cid>, oldest first, then a done marker.
+    Never on meshcore/.../raw: the repeaters' bridges would put them back on the air."""
+    now = int(now or time.time()); since = max(int(since), now - REPLAY_WINDOW); pace = REPLAY_PACE if pace is None else pace
+    topic = "umcnet/v1/%s/replay/%s" % (area, cid)
+    with LOCK:
+        grp_prune(now)
+        rows = DB.execute("SELECT did,seen,dir,snr,rssi,raw FROM grp_buf WHERE seen>=? ORDER BY seen DESC LIMIT ?", (since, REPLAY_MAX)).fetchall()
+    rows.reverse(); n = 0
+    try:
+        for did, seen, d, snr, rssi, raw in rows:
+            conn.publish(topic, json.dumps({"origin_id": did, "timestamp": seen, "type": "RAW", "data": raw, "direction": d, "snr": snr, "rssi": rssi, "replay": 1}, separators=(",", ":")).encode())
+            n += 1
+            if pace: time.sleep(pace)
+        conn.publish(topic, json.dumps({"done": 1, "n": n}, separators=(",", ":")).encode())
+    except Exception as e: sys.stderr.write("replay: %s\n" % e)
+    return n
+
+def replay_request(topic, payload, retained=False, now=None):
+    """A client asks for the catch-up. Its id is taken from the topic (the broker's access list lets it write only its own)."""
+    m = re.match(r"^umcnet/v1/([A-Za-z0-9]{1,8})/replay/req/([0-9A-F]{64})$", topic)
+    if not m or retained: return False
+    try: j = json.loads(payload.decode("utf-8", "replace")); since = j["since"]
+    except Exception: return False
+    if not isinstance(since, (int, float)) or isinstance(since, bool) or since != since or abs(since) > 1e12: return False
+    conn = CTL.get("conn"); now = time.time() if now is None else now
+    if conn is None or not DB: return False
+    area, cid = m.groups()
+    with LOCK:
+        if now - REPLAY_LAST.get(cid, 0) < REPLAY_GAP: return False
+        REPLAY_LAST[cid] = now
+        for k in [k for k, t in REPLAY_LAST.items() if now - t > 3600]: del REPLAY_LAST[k]
+    t = threading.Thread(target=replay_serve, args=(conn, area, cid, since, now), daemon=True, name="replay"); t.start()
+    return t
+
 def note_sent(did, raw, now):
     """A repeater reports that it transmitted a packet. If that is a message sent from this dashboard, record the repeater
     as having put it on the air (flag "x"): this is the confirmation that it left an antenna, as opposed to being heard back."""
@@ -931,6 +985,7 @@ def note_sent(did, raw, now):
     if not p or p["ptype"] != 5 or len(p["payload"]) < 19: return
     pkey = hashlib.sha1(p["payload"]).hexdigest()[:20]
     with LOCK:
+        grp_store(pkey, did, raw, None, None, now, "tx")
         row = DB.execute("SELECT id, heard FROM messages WHERE pkey=? AND dir='tx'", (pkey,)).fetchone()
         if not row: return
         heard = json.loads(row[1] or "[]")
@@ -948,6 +1003,7 @@ def note_message(did, raw, snr, rssi, now):
     regions = CONF["messages"]["regions"]
     region = (MSG.find_region(regions, p) or "?") if p["codes"] else ""
     with LOCK:
+        grp_store(pkey, did, raw, snr, rssi, now, "rx")         # before the decrypt: the phone has keys the dashboard may not
         row = DB.execute("SELECT id, heard, region, hops, snr FROM messages WHERE pkey=?", (pkey,)).fetchone()
         if row:
             heard = json.loads(row[1] or "[]"); old = next((e for e in heard if e["d"] == did and not e.get("x")), None)
@@ -1262,6 +1318,7 @@ def enrol_view():
 
 def on_control_reply(topic, payload, retained=False):
     if topic == "umcnet/v1/enrol/hello": return enrol_hello(payload, retained)
+    if "/replay/req/" in topic: replay_request(topic, payload, retained); return
     m = re.match(r"^umcnet/v1/[^/]+/dev/([0-9A-Fa-f]{64})/resp$", topic)
     if not m or retained: return
     try: j = json.loads(payload.decode("utf-8", "replace"))

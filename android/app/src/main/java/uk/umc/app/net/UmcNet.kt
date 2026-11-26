@@ -170,14 +170,61 @@ object UmcNet {
     private fun startAccount() {
         val a = account.value ?: return
         stopSession()
-        val s = MqttSession(a.host, a.user, a.password, a.clientId, Protocol.subscriptions(a.area),
+        val s = MqttSession(a.host, a.user, a.password, a.clientId, Protocol.subscriptions(a.area, a.clientId),
             onMessage = { topic, payload, retained -> onBroker(topic, payload, retained) },
-            onState = { t, c, _ -> status.value = t; connected.value = c })
+            onState = { t, c, _ -> status.value = t; connected.value = c },
+            onConnected = { requestReplay(a) })
         session = s; s.start()
+    }
+
+    // ---------------------------------------------------------------- catch-up (store and forward)
+
+    @Volatile private var lastSeenS = 0L
+    @Volatile private var replayNew = 0
+
+    private fun noteSeen(tsS: Long) {
+        if (tsS > lastSeenS) { lastSeenS = tsS; prefs?.edit()?.putLong("lastSeen", tsS)?.apply() }
+    }
+
+    /** After every (re)connect: ask for what the repeaters heard while we were away, at most the last hour. */
+    private fun requestReplay(a: UmcAccount) {
+        val nowS = System.currentTimeMillis() / 1000
+        if (lastSeenS == 0L) lastSeenS = prefs?.getLong("lastSeen", 0L) ?: 0L
+        // the message list is in memory only: if it is empty (app restarted) we hold nothing, so ask for the whole hour
+        val seen = if (book.messages().isEmpty()) 0L else lastSeenS
+        replayNew = 0
+        session?.publish(Protocol.replayRequestTopic(a.area, a.clientId), Protocol.buildReplayRequest(Protocol.replaySince(seen, nowS)).toByteArray(Charsets.UTF_8))
+    }
+
+    private fun onReplay(payload: ByteArray) {
+        val me = identity?.id ?: return
+        val r = Protocol.parseReplay(payload) ?: return
+        if (r.kind == "done") {
+            val n = replayNew; replayNew = 0
+            if (n > 0) {
+                val prev = status.value; val text = "caught up: $n message${if (n == 1) "" else "s"} from the last hour"
+                status.value = text
+                scope.launch { delay(8_000L); if (status.value == text) status.value = if (connected.value) "connected" else prev }
+            }
+            return
+        }
+        val raw = r.raw ?: return
+        if (r.deviceId == me || r.originId == me) return
+        val nowMs = System.currentTimeMillis()
+        val tsMs = r.timestampS * 1000
+        if (r.timestampS <= 0 || nowMs - tsMs > Protocol.REPLAY_WINDOW_S * 1000) return      // older than an hour (or no time): ignore
+        val at = minOf(tsMs, nowMs)
+        // no repeaters-map update: a replayed packet says nothing about who is online now
+        val changed = if (r.direction == "tx") book.onSent(r.deviceId, raw, at)
+                      else book.onHeard(r.deviceId, raw, r.snr, r.rssi, at, decoded(), AppState.regions.value)
+        noteSeen(r.timestampS)
+        if (changed) { replayNew++; messages.value = book.messages() }
     }
 
     private fun onBroker(topic: String, payload: ByteArray, retained: Boolean) {
         val me = identity?.id ?: return
+        val a = account.value
+        if (a != null && topic == Protocol.replayTopic(a.area, a.clientId)) { onReplay(payload); return }
         val t = Protocol.parseTopic(topic) ?: return
         if (t.deviceId == me) return                                     // our own packets echoed back
         val r = Protocol.parseReport(topic, payload) ?: return
@@ -191,7 +238,7 @@ object UmcNet {
         val raw = r.raw ?: return
         val changed = if (r.direction == "tx") book.onSent(r.deviceId, raw, now)
                       else book.onHeard(r.deviceId, raw, r.snr, r.rssi, now, decoded(), AppState.regions.value)
-        if (changed) messages.value = book.messages()
+        if (changed) { messages.value = book.messages(); noteSeen(now / 1000) }
     }
 
     // ---------------------------------------------------------------- channels

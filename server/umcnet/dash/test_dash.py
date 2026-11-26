@@ -28,8 +28,11 @@ class ClientAccount(unittest.TestCase):
     def test_acl_writes_only_under_its_own_id(self):
         acl = usr.acl_for("phone", {"role": "client", "device": self.ID}).splitlines()
         self.assertEqual("user phone", acl[0])
-        self.assertEqual(["topic write meshcore/+/%s/raw" % self.ID, "topic write meshcore/+/%s/status" % self.ID], [l for l in acl if l.startswith("topic write")])
-        self.assertFalse([l for l in acl if "readwrite" in l or "umcnet/v1" in l and "write" in l])
+        self.assertEqual(["topic write meshcore/+/%s/raw" % self.ID, "topic write meshcore/+/%s/status" % self.ID, "topic write umcnet/v1/+/replay/req/%s" % self.ID], [l for l in acl if l.startswith("topic write")])
+        self.assertIn("topic read umcnet/v1/+/replay/%s" % self.ID, acl)
+        self.assertFalse([l for l in acl if "readwrite" in l or "umcnet/v1" in l and "write" in l and "replay/req/%s" % self.ID not in l])
+        ctl = usr.acl_for("controller", {"role": "controller"}).splitlines()
+        self.assertIn("topic read umcnet/v1/+/replay/req/+", ctl); self.assertIn("topic write umcnet/v1/+/replay/#", ctl)
         for l in ("topic read meshcore/+/+/raw", "topic read meshcore/+/+/packets", "topic read meshcore/+/+/status"): self.assertIn(l, acl)
 
     def test_blocked_client_gets_nothing_and_viewer_stays_read_only(self):
@@ -504,6 +507,69 @@ class Messages(unittest.TestCase):
         h = dash.messages_view()["messages"][0]["heard"]; self.assertEqual([True, False], [x["sent"] for x in h])
         other = self.M.build_group_text(self.M.Channel("#yorkshire"), "Sam", "not ours", now); dash.note_sent("01" * 32, other, now)   # an unrelated packet is ignored
         self.assertEqual(1, len(dash.messages_view()["messages"]))
+
+    def test_clients_are_caught_up_with_the_last_hour(self):
+        class Conn:
+            up = True
+            def __init__(s): s.out = []
+            def publish(s, topic, body, *a, **k): s.out.append((topic, json.loads(body)))
+        dash.db_init(); dash.DB.execute("DELETE FROM grp_buf"); dash.DB.execute("DELETE FROM messages"); dash.DEV.clear(); dash.REPLAY_LAST.clear(); now = int(time.time())
+        old = dash.CTL.get("conn"); c = Conn(); dash.CTL["conn"] = c; pace = dash.REPLAY_PACE; dash.REPLAY_PACE = 0
+        def undo(): dash.CTL["conn"] = old; dash.REPLAY_PACE = pace; dash.MSGSTAT.clear(); dash.RECENT_GRP.clear(); dash.DB.execute("DELETE FROM grp_buf"); dash.REPLAY_LAST.clear()
+        self.addCleanup(undo)
+        cid = "AB" * 32; req = "umcnet/v1/LBA/replay/req/" + cid; rtopic = "umcnet/v1/LBA/replay/" + cid
+        def ask(since, t=None, topic=req, body=None):
+            th = dash.replay_request(topic, body if body is not None else json.dumps({"since": since}).encode(), now=t or now)
+            if th: th.join(5)
+            return th
+        # fill: an rx packet for a channel the dash has no key for, and a tx report
+        other = self.M.build_group_text(self.M.Channel("#nobody-knows"), "X", "secret", now)
+        dash.note_message("01" * 32, other, "4.5", "-91", now - 30)
+        mine = self.M.build_group_text(self.M.Channel("#yorkshire"), "UMC-DASH", "out", now)
+        dash.note_sent("02" * 32, mine, now - 20)
+        rows = dash.DB.execute("SELECT did,dir,snr,rssi,raw FROM grp_buf ORDER BY seen").fetchall()
+        self.assertEqual([("01" * 32, "rx", 4.5, -91, other.hex().upper()), ("02" * 32, "tx", None, None, mine.hex().upper())], rows)
+        dash.note_message("01" * 32, other, "4.5", "-91", now - 10)                      # the same packet again: kept once, earliest time
+        self.assertEqual(2, dash.DB.execute("SELECT COUNT(*) FROM grp_buf").fetchone()[0])
+        self.assertEqual(now - 30, dash.DB.execute("SELECT seen FROM grp_buf WHERE dir='rx'").fetchone()[0])
+        # an old row is excluded even when since asks for more, and pruned
+        dash.DB.execute("INSERT INTO grp_buf VALUES('old','03',?, 'rx', NULL, NULL, 'AA')", (now - 3700,)); dash.DB.execute("INSERT INTO grp_buf VALUES('older','03',?, 'rx', NULL, NULL, 'AA')", (now - 4100,))
+        self.assertTrue(ask(0))
+        self.assertEqual([rtopic] * 3, [t for t, _ in c.out]); self.assertTrue(all("/raw" not in t and not t.startswith("meshcore") for t, _ in c.out))
+        a, b, done = [m for _, m in c.out]
+        self.assertEqual({"origin_id": "01" * 32, "timestamp": now - 30, "type": "RAW", "data": other.hex().upper(), "direction": "rx", "snr": 4.5, "rssi": -91, "replay": 1}, a)
+        self.assertEqual(("02" * 32, "tx", None, None), (b["origin_id"], b["direction"], b["snr"], b["rssi"])); self.assertEqual({"done": 1, "n": 2}, done)
+        self.assertEqual(0, dash.DB.execute("SELECT COUNT(*) FROM grp_buf WHERE pkey='older'").fetchone()[0])
+        # rate limit: a second request inside 20 s is ignored, after 20 s it is served
+        c.out.clear(); self.assertFalse(ask(0, now + 5)); self.assertEqual([], c.out)
+        self.assertTrue(ask(now - 25, now + 21)); self.assertEqual({"done": 1, "n": 1}, c.out[-1][1]); self.assertEqual(2, len(c.out))     # since filters; only the tx one is newer
+        # another client is not limited by this one
+        c.out.clear(); other_id = "CD" * 32; self.assertTrue(ask(0, now + 22, "umcnet/v1/LBA/replay/req/" + other_id)); self.assertEqual("umcnet/v1/LBA/replay/" + other_id, c.out[0][0])
+
+    def test_the_catch_up_serves_the_newest_500_oldest_first(self):
+        class Conn:
+            up = True
+            def __init__(s): s.out = []
+            def publish(s, topic, body, *a, **k): s.out.append(json.loads(body))
+        dash.db_init(); dash.DB.execute("DELETE FROM grp_buf"); now = int(time.time()); c = Conn()
+        dash.DB.executemany("INSERT INTO grp_buf VALUES(?,?,?,?,?,?,?)", [("p%d" % i, "01" * 32, now - 3000 + i, "rx", None, None, "AA") for i in range(600)])
+        self.addCleanup(lambda: dash.DB.execute("DELETE FROM grp_buf"))
+        self.assertEqual(500, dash.replay_serve(c, "LBA", "AB" * 32, now - 99999, now, pace=0))
+        ts = [m["timestamp"] for m in c.out[:-1]]; self.assertEqual(ts, sorted(ts)); self.assertEqual((now - 3000 + 100, now - 3000 + 599), (ts[0], ts[-1])); self.assertEqual({"done": 1, "n": 500}, c.out[-1])
+
+    def test_bad_catch_up_requests_are_ignored(self):
+        dash.db_init(); dash.REPLAY_LAST.clear(); old = dash.CTL.get("conn")
+        class Conn:
+            up = True
+            def publish(s, *a, **k): raise AssertionError("nothing should be sent")
+        dash.CTL["conn"] = Conn(); self.addCleanup(lambda: (dash.CTL.__setitem__("conn", old), dash.REPLAY_LAST.clear()))
+        cid = "AB" * 32; good = json.dumps({"since": 1}).encode()
+        for topic, body in (("umcnet/v1/LBA/replay/req/" + cid.lower(), good), ("umcnet/v1/LBA/replay/req/ABCD", good), ("umcnet/v1/L/BA/replay/req/" + cid, good), ("umcnet/v1/LBA/replay/req/" + cid + "/x", good),
+                            ("umcnet/v1/LBA/replay/req/" + cid, b"not json"), ("umcnet/v1/LBA/replay/req/" + cid, b"[1]"), ("umcnet/v1/LBA/replay/req/" + cid, b"{}"),
+                            ("umcnet/v1/LBA/replay/req/" + cid, b'{"since":"1"}'), ("umcnet/v1/LBA/replay/req/" + cid, b'{"since":true}'), ("umcnet/v1/LBA/replay/req/" + cid, b"\xff\xfe")):
+            self.assertFalse(dash.replay_request(topic, body), (topic, body))
+        self.assertFalse(dash.replay_request("umcnet/v1/LBA/replay/req/" + cid, good, retained=True)); self.assertEqual({}, dash.REPLAY_LAST)
+        dash.on_control_reply("umcnet/v1/LBA/replay/req/" + cid, b"junk")                 # through the dispatcher too: no error
 
     def test_a_message_can_be_sent_through_chosen_repeaters_only(self):
         class Conn:

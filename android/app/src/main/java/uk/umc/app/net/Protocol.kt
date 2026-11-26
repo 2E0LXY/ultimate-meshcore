@@ -10,12 +10,25 @@ object Protocol {
     private val TOPIC = Regex("^meshcore/([^/]+)/([0-9A-Fa-f]{64})/(raw|packets|status)$")
     fun parseTopic(t: String): Topic? = TOPIC.matchEntire(t)?.let { Topic(it.groupValues[1], it.groupValues[2].uppercase(), it.groupValues[3]) }
 
-    fun subscriptions(area: String) = listOf("meshcore/$area/+/raw", "meshcore/$area/+/status", "meshcore/$area/+/packets")
+    fun subscriptions(area: String, clientId: String) =
+        listOf("meshcore/$area/+/raw", "meshcore/$area/+/status", "meshcore/$area/+/packets", replayTopic(area, clientId))
     fun publishTopic(area: String, clientId: String) = "meshcore/$area/$clientId/raw"
+
+    /** Store-and-forward catch-up: we publish a request on [replayRequestTopic]; the dashboard answers on [replayTopic]. */
+    const val REPLAY_WINDOW_S = 3600L
+    fun replayRequestTopic(area: String, clientId: String) = "umcnet/v1/$area/replay/req/$clientId"
+    fun replayTopic(area: String, clientId: String) = "umcnet/v1/$area/replay/$clientId"
+    fun buildReplayRequest(since: Long) = MiniJson.obj("since" to since)
+    /** The "since" to ask for: our newest held packet time, but never more than an hour back. */
+    fun replaySince(lastSeenS: Long, nowS: Long) = maxOf(lastSeenS, nowS - REPLAY_WINDOW_S)
 
     /** What a repeater reported: a packet it heard ("rx") or sent ("tx"), or its status. */
     class Report(val kind: String, val deviceId: String, val name: String, val status: String?, val direction: String,
-                 val raw: ByteArray?, val snr: Double?, val rssi: Int?, val originId: String)
+                 val raw: ByteArray?, val snr: Double?, val rssi: Int?, val originId: String,
+                 /** True for a replayed (catch-up) packet; [timestampS] is then its own time, unix seconds (0 if absent). */
+                 val replay: Boolean = false, val timestampS: Long = 0L,
+                 /** For kind "done": the dashboard's count of replayed packets. */
+                 val count: Int = 0)
 
     private fun num(v: Any?): Double? = when (v) { is Number -> v.toDouble(); is String -> v.trim().toDoubleOrNull(); else -> null }
 
@@ -28,6 +41,19 @@ object Protocol {
         val dir = if (t.kind == "packets") ((j["direction"] as? String) ?: "rx") else "rx"
         return Report(t.kind, t.deviceId, (j["origin"] as? String).orEmpty(), j["status"] as? String, dir, raw,
             num(j["SNR"]), num(j["RSSI"])?.toInt(), (j["origin_id"] as? String).orEmpty().uppercase())
+    }
+
+    /** Reads one message from the replay topic. A packet comes back as kind "raw" with replay = true and deviceId = the repeater (origin_id);
+     *  the final {"done":1,"n":N} comes back as kind "done". Null if it is neither. */
+    fun parseReplay(payload: ByteArray): Report? {
+        val j = MiniJson.parseObject(String(payload, Charsets.UTF_8)) ?: return null
+        if (num(j["done"]) != null) return Report("done", "", "", null, "rx", null, null, null, "", true, 0L, num(j["n"])?.toInt() ?: 0)
+        val id = (j["origin_id"] as? String).orEmpty().uppercase()
+        if (!Regex("^[0-9A-F]{64}$").matches(id)) return null
+        val raw = (j["data"] as? String)?.let { MsgCodec.fromHex(it) } ?: return null
+        val dir = if ((j["direction"] as? String) == "tx") "tx" else "rx"
+        return Report("raw", id, (j["origin"] as? String).orEmpty(), null, dir, raw, num(j["snr"] ?: j["SNR"]), num(j["rssi"] ?: j["RSSI"])?.toInt(),
+            id, true, num(j["timestamp"])?.toLong() ?: 0L)
     }
 
     private val ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'.000Z'").withZone(ZoneOffset.UTC)

@@ -411,6 +411,16 @@ Packets from the network are transmitted over the air, so they count against the
 
 Status: `get mqtt.status` shows WiFi, time sync, location code and each broker (`conn` = connecting, `up` = connected). Topics are `meshcore/<IATA>/<device>/packets|raw|status`.
 
+### 13.1 Catch-up for clients
+
+A client that was offline can ask the dashboard for the last hour of channel messages (UMC Net dashboard 2.28 or later; run `umcnet-user sync`
+or re-run `install-dash.sh` so the access lists gain the new topics).
+
+* The dashboard keeps every group packet its repeaters hear or send for an hour, whether or not it holds the channel key.
+* On connecting, the client publishes `{"since": <unix seconds>}` to `umcnet/v1/<area>/replay/req/<ID>` (`<ID>` is its 64 capital hex digit client id). `since` is never taken as older than one hour ago.
+* The dashboard answers on `umcnet/v1/<area>/replay/<ID>`: up to 500 packets, oldest first, each `{"origin_id","timestamp","type":"RAW","data":"<hex>","direction":"rx|tx","snr","rssi","replay":1}`, then `{"done":1,"n":<count>}`. Not retained.
+* One request per client id every 20 seconds; extra requests are ignored. A client may write only its own request topic and read only its own replay topic. Replays are never sent on `meshcore/.../raw`, so no repeater re-transmits them.
+
 ---
 
 ## 14. Bridge
