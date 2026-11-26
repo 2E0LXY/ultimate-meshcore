@@ -18,6 +18,9 @@ import kotlinx.coroutines.delay
 import uk.umc.app.AppState
 import uk.umc.app.net.*
 
+/** Regions are switched off: the chooser is hidden and nothing is sent with a region. Set to true to bring it back. */
+private const val REGIONS_UI = false
+
 /**
  * One UMC Net (internet) channel as a conversation: its messages, the region and repeater choosers, and the send box.
  * Opened from Messages as "net:<channelName>".
@@ -31,7 +34,7 @@ fun NetChannelChat(channelName: String, onBack: () -> Unit) {
     val regions by AppState.regions.collectAsState()
     val sender by UmcNet.senderName.collectAsState()
     // the network has one region: start on it; otherwise "no region" until chosen. Kept across rotation.
-    var region by rememberSaveable(channelName) { mutableStateOf(regions.singleOrNull() ?: "") }
+    var region by rememberSaveable(channelName) { mutableStateOf(if (REGIONS_UI) regions.singleOrNull() ?: "" else "") }
     var via by rememberSaveable(channelName) { mutableStateOf("") }                       // "" = all repeaters
     var draft by rememberSaveable(channelName) { mutableStateOf("") }
     var result by rememberSaveable(channelName) { mutableStateOf("") }
@@ -71,7 +74,7 @@ fun NetChannelChat(channelName: String, onBack: () -> Unit) {
             items(shown, key = { it.key }) { m ->
                 NetBubble(m, now, ::nameOf) {
                     // Reply: same region, through the repeater that heard it best
-                    region = m.region.takeIf { it in regions } ?: ""
+                    region = if (REGIONS_UI) m.region.takeIf { it in regions } ?: "" else ""
                     via = Delivery.replyVia(m)?.takeIf { id -> online.any { it.id == id } } ?: ""
                 }
             }
@@ -79,7 +82,7 @@ fun NetChannelChat(channelName: String, onBack: () -> Unit) {
         }
         Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pick(if (region.isEmpty()) "no region" else region, listOf("" to "no region") + regions.map { it to it }, { region = it }, Modifier.weight(1f))
+                if (REGIONS_UI) Pick(if (region.isEmpty()) "no region" else region, listOf("" to "no region") + regions.map { it to it }, { region = it }, Modifier.weight(1f))
                 Pick(if (via.isEmpty()) "via all repeaters" else "via " + nameOf(via), listOf("" to "via all repeaters") + online.map { it.id to "via " + it.label }, { via = it }, Modifier.weight(1f))
             }
             Row(verticalAlignment = Alignment.Top) {
@@ -87,7 +90,7 @@ fun NetChannelChat(channelName: String, onBack: () -> Unit) {
                     supportingText = { Text(if (result.isNotEmpty()) result else "$bytes/${MsgCodec.MAX_TEXT_BYTES} bytes") }, isError = tooLong)
                 Spacer(Modifier.width(8.dp))
                 ShButton(enabled = connected && draft.isNotBlank() && !tooLong, onClick = {
-                    val err = UmcNet.send(channelName, region.ifEmpty { null }, draft, via.ifEmpty { null })
+                    val err = UmcNet.send(channelName, if (REGIONS_UI) region.ifEmpty { null } else null, draft, via.ifEmpty { null })
                     result = err ?: ""; if (err == null) draft = ""
                 }) { Text("Send") }
             }
