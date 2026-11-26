@@ -47,7 +47,12 @@ public:
       _last_try = millis() ? millis() : 1;
       _running = _sensor.begin();                 // after WiFi.begin(); it calibrates for a few seconds, keep the room still
     }
-    if (_running) _sensor.loop();
+    if (_running) {
+      // ESPectre switches Wi-Fi power save off on each connection, but the node's own power-save setting can switch it
+      // back on (a settings change), which starves CSI. Re-assert every few seconds while sensing.
+      if (millis() - _last_ps > 5000UL) { _last_ps = millis(); if (WiFi.getSleep()) WiFi.setSleep(false); }
+      _sensor.loop();
+    }
 #endif
   }
 
@@ -64,6 +69,7 @@ private:
   bool _want = false;
   bool _running = false;
   unsigned long _last_try = 0;
+  unsigned long _last_ps = 0;
 #ifdef UMC_WIFI_CSI
   mutable ESPectre _sensor;
 #endif
