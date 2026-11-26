@@ -101,7 +101,6 @@ private:
 
   UmcHost* _host;
   NetworkService* _network;
-  bool _csi_was_running = false;
   UmcPrefs _prefs;
   UmcCsi _csi;
   UmcWebServer* _web;

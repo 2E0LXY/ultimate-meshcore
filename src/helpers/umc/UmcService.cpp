@@ -290,8 +290,7 @@ void UmcService::loop() {
   umc_health.loop(millis(), umc_traffic.rxTotal(), umc_traffic.txTotal());
   _csi.setEnabled(_prefs.csi_enabled);
   _csi.loop();
-  if (_csi_was_running && !_csi.running() && _network != nullptr) _network->setWifiPowerSave(_network->getWifiPowerSave());   // give Wi-Fi power save back
-  _csi_was_running = _csi.running();
+  if (_csi.takePowerSaveDirty() && _network != nullptr) _network->setWifiPowerSave(_network->getWifiPowerSave());   // give Wi-Fi power save back
   processMailbox();
   if (_ota_prepare) {
     _ota_prepare = false;
