@@ -770,6 +770,37 @@ class Telemetry(unittest.TestCase):
         acl = usr.acl_for("phone", {"role": "client", "device": self.DID})
         self.assertIn("topic read meshcore/+/+/telemetry", acl); self.assertNotIn("telemetry", "".join(l for l in acl.splitlines() if "write" in l))
 
+
+class PresenceTimeline(unittest.TestCase):
+    DID = "CD" * 32
+    def setUp(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM telem"); dash.DEV.clear()
+    def seg(self, samples, since=1000, now=5000): return dash.presence_segments(samples, since, now)
+    def test_no_readings_is_all_no_data(self):
+        self.assertEqual([[1000, 5000, -1]], self.seg([]))
+    def test_a_reading_holds_until_the_next_one(self):
+        self.assertEqual([[1000, 1100, -1], [1100, 1500, 1], [1500, 2000, 0], [2000, 3000, 1]],
+                         [[a, b, s] for a, b, s in self.seg([(1100, 1), (1500, 0), (2000, 1)], 1000, 3000)])
+    def test_a_silent_repeater_becomes_no_data_not_a_long_presence(self):
+        s = self.seg([(1100, 1)], 1000, 1100 + dash.PRESENCE_GAP + 600)
+        self.assertEqual([[1000, 1100, -1], [1100, 1100 + dash.PRESENCE_GAP, 1], [1100 + dash.PRESENCE_GAP, 1100 + dash.PRESENCE_GAP + 600, -1]], s)
+    def test_the_reading_before_the_window_carries_in(self):
+        self.assertEqual([[1000, 1200, 1], [1200, 1500, 0]], self.seg([(900, 1), (1200, 0)], 1000, 1500))
+    def test_segments_tile_the_window_without_gaps_or_overlap(self):
+        s = self.seg([(1100, 1), (1600, 0), (1700, 0), (4000, 1), (4100, 1)], 1000, 5000)
+        self.assertEqual(1000, s[0][0]); self.assertEqual(5000, s[-1][1])
+        for a, b in zip(s, s[1:]): self.assertEqual(a[1], b[0]); self.assertNotEqual(a[2], b[2])
+    def test_view_has_stats_and_movement(self):
+        now = 10000
+        for ts, v in ((now - 3000, 0), (now - 2400, 1), (now - 1800, 1), (now - 1200, 0), (now - 600, 1)):
+            dash.DB.execute("INSERT INTO telem VALUES(?,?,?,?,?,?,?)", (self.DID, "LBA", ts, 20, 102, "presence", v))
+        for ts, v in ((now - 2400, 60.0), (now - 600, 40.0)):
+            dash.DB.execute("INSERT INTO telem VALUES(?,?,?,?,?,?,?)", (self.DID, "LBA", ts, 21, 120, "percent", v))
+        r = dash.presence_view(1, now)[0]
+        self.assertEqual(1, r["now_state"]); self.assertEqual(2, r["events"]); self.assertEqual(now, r["last_on"])
+        self.assertEqual([[now - 2400, 60.0], [now - 600, 40.0]], [list(x) for x in r["movement"]])
+        self.assertTrue(0 < r["occupied_pct"] < 100)
+
 if __name__ == "__main__":
     unittest.main()
 

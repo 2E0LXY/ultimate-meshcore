@@ -239,7 +239,7 @@ const HELP = {
   accts: {what: "Each login on the broker, with its role and state.", steps: ["Find the account by name. Its role says what it can do; its state says whether it is approved, pending or blocked.", "Press **Remove** to delete an account. Removing a repeater stops it connecting; it can be added back later.", "Use **Add an account** above to create one."], why: "It is the list of everything allowed to connect to your broker.", see: "Accounts (approve or decline new ones), Settings (joining)."},
   enrol: {what: "Repeaters asking to join the network, waiting for your decision.", steps: ["When a new repeater is switched on to join, it appears here.", "Check the name and device ID match the one you expect, then press **Approve**.", "Press **Decline** to refuse it, or **Forget** to clear a refusal so it can ask again."], why: "Nothing joins the network without your approval, so a stranger cannot connect.", see: "Accounts (all logins), Settings (turn joining on or off)."},
   approve: {what: "Letting a waiting repeater onto the network.", steps: ["Check the name and device ID.", "Press **Approve**. The repeater receives its own login and remote control within a minute.", "It then shows up under **Repeaters** and can be managed on **Control**."], why: "Approval is what gives a repeater its own login, so you can manage it remotely.", see: "Repeaters (the approved one), Control (manage it)."},
-  sensors: {what: "Readings from the sensors on your repeaters: battery, temperature, humidity, pressure and anything else fitted.", steps: ["Each tile is one sensor on one repeater, with its latest value and the lowest and highest in the last 24 hours.", "The small line is the last 24 hours. A repeater only reports when a value has changed enough, and at least every 15 minutes.", "A tile that says **quiet** means nothing has arrived for over 30 minutes: check the repeater is online."], why: "It shows a failing battery or a hot enclosure before the repeater drops out.", see: "Repeaters (each node), Diagnostics (the problems)."},
+  sensors: {what: "Readings from the sensors on your repeaters: battery, temperature, humidity, pressure and anything else fitted.", steps: ["Each tile is one sensor on one repeater, with its latest value and the lowest and highest in the last 24 hours.", "The **Presence timeline** at the top shows when Wi-Fi motion sensing, a PIR or a mmWave sensor saw someone; pick 1 h, 6 h, 24 h or 7 d. The small line on a tile is the last 24 hours. A repeater only reports when a value has changed enough, and at least every 15 minutes.", "A tile that says **quiet** means nothing has arrived for over 30 minutes: check the repeater is online."], why: "It shows a failing battery or a hot enclosure before the repeater drops out.", see: "Repeaters (each node), Diagnostics (the problems)."},
   traffic: {what: "Every packet heard, grouped by the route it took and as a live list.", steps: ["**Packets by route** shows each packet once: its route through the repeaters, who first heard it and how many heard it.", "**Live packets** lists the newest first. Type in the filter box to search by name, type or repeater.", "**Packet types** shows the mix of packet kinds since the dashboard started.", "**Delivery delay** shows how long packets take from a repeater to this server."], why: "It lets you see the path a message took and spot packets that take a long time.", see: "Network (the map), Messages (the chat)."},
   heard: {what: "Packets that two or more repeaters heard, to show overlap.", steps: ["Each line is one packet that more than one repeater heard in the last 15 minutes.", "A lot of overlap is normal near each other; if repeaters never overlap, their coverage may be too far apart.", "Use **Network** to see the same links on a map."], why: "Overlap shows whether repeaters back each other up or leave gaps.", see: "Network (map), Traffic (the packets)."},
   overlap: {what: "Packets that two or more repeaters heard, to show overlap.", steps: ["Each line is one packet that more than one repeater heard in the last 15 minutes.", "A lot of overlap is normal near each other; if repeaters never overlap, their coverage may be too far apart.", "Use **Network** to see the same links on a map."], why: "Overlap shows whether repeaters back each other up or leave gaps.", see: "Network (map), Traffic (the packets)."},
@@ -403,17 +403,47 @@ function vClients(o) {
   return `<div class="panels">${panel("Connected and recent clients", "from the broker's log", table(["", "Account", "Client id", "From", "Connected for / ended", "Keepalive", "Protocol", "Logins last hour", "Logins total"], rows, "No connection seen since the dashboard started."), "clients")}</div>`;
 }
 
+// Presence timeline: when each presence sensor (Wi-Fi motion sensing, PIR, mmWave) saw someone, over a chosen range
+const PRES_RANGES = [[1, "1 h"], [6, "6 h"], [24, "24 h"], [168, "7 d"]];
+function presPanel() {
+  const h = S.presH || 24;
+  const btn = PRES_RANGES.map(([v, l]) => `<button class="${v === h ? "on" : ""}" onclick="S.presH=${v};S.presHtml='';draw()">${l}</button>`).join(" ");
+  return panel("Presence timeline", "green = someone detected, grey = clear, dark = no data", `<div style="margin-bottom:8px">${btn}</div><div id="presBox">${S.presHtml || '<span class="tr">loading…</span>'}</div>`);
+}
+function presStrip(r) {
+  const W = 1000, span = Math.max(1, r.now - r.since), x = t => ((t - r.since) / span * W).toFixed(1);
+  const col = {1: "#2fe27a", 0: "#1f3a30", "-1": "#3a2e14"};
+  const t = ts => new Date(ts * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+  const rects = r.segments.map(([a, b, st]) => `<rect x="${x(a)}" y="0" width="${Math.max(0.6, (b - a) / span * W).toFixed(1)}" height="18" fill="${col[st]}"><title>${st === 1 ? "present" : st === 0 ? "clear" : "no data"}: ${t(a)} to ${t(b)}</title></rect>`).join("");
+  const mv = r.movement.length > 1 ? `<polyline fill="none" stroke="#4aa8ff" stroke-width="1.6" points="${r.movement.map(([ts, v]) => `${x(ts)},${(36 - Math.min(100, Math.max(0, v)) / 100 * 14).toFixed(1)}`).join(" ")}"/>` : "";
+  const ticks = [0, .25, .5, .75, 1].map(f => `<text x="${(f * W).toFixed(0)}" y="49" font-size="10" fill="#8aa89b" text-anchor="${f === 0 ? "start" : f === 1 ? "end" : "middle"}">${t(r.since + f * span)}</text>`).join("");
+  const state = r.now_state === 1 ? '<span class="tag" style="background:#2fe27a;color:#06130d">present</span>' : r.now_state === 0 ? '<span class="tag">clear</span>' : '<span class="tag" style="background:#c9a227;color:#1a1305">no data</span>';
+  const last = r.last_on ? "last detected " + ago(r.last_on) : "nothing detected in this range";
+  return `<div style="margin:6px 0 14px"><div><b>${esc(r.name)}</b> ${state} <span class="tr">· ${r.occupied_pct == null ? "no readings" : "occupied " + r.occupied_pct + "% of the time heard"} · ${r.events} detection${r.events === 1 ? "" : "s"} · ${last} · data for ${r.known_pct}% of the range</span></div>
+    <svg viewBox="0 0 ${W} 54" width="100%" height="64" preserveAspectRatio="none" style="display:block;margin-top:4px">${rects}${mv}${ticks}</svg></div>`;
+}
+async function presLoad() {
+  const box = document.getElementById("presBox"); if (!box) return;
+  try {
+    const d = await jget("/api/presence?hours=" + (S.presH || 24));
+    S.presHtml = d.length ? d.map(presStrip).join("") + '<div class="tr">The blue line is the movement score (0 to 100 %) where the sensor reports it.</div>'
+      : '<span class="tr">No presence sensor has reported yet. Turn on Wi-Fi motion sensing on a repeater built with it (set csi on), or fit a PIR or mmWave sensor.</span>';
+    const b2 = document.getElementById("presBox"); if (b2) b2.innerHTML = S.presHtml;
+  } catch { box.innerHTML = '<span class="tr">could not load the timeline</span>'; }
+}
+
 // Sensors: the newest reading of every sensor on every repeater, with a 24 h line
 function vSensors(o) {
   const rows = o.sensors || [];
-  if (!rows.length) return `<div class="panels">${panel("Sensors", "from the repeaters", '<div class="tr" style="padding:8px">No readings yet. A repeater sends them to the broker when it has a sensor or a battery gauge and the UMC Net link is up.</div>')}</div>`;
+  setTimeout(presLoad, 0);
+  if (!rows.length) return `<div class="panels">${presPanel()}${panel("Sensors", "from the repeaters", '<div class="tr" style="padding:8px">No readings yet. A repeater sends them to the broker when it has a sensor or a battery gauge and the UMC Net link is up.</div>')}</div>`;
   const by = {}; rows.forEach(r => (by[r.id] = by[r.id] || {name: r.name, list: []}).list.push(r));
   const fmt = r => (Math.abs(r.v) >= 100 ? r.v.toFixed(0) : r.v.toFixed(r.type === 116 || r.type === 117 ? 2 : 1)) + (r.unit ? " " + r.unit : "");
   const tile = r => { const stale = r.age > 1800; const id = `sp_${r.id.slice(0, 8)}_${r.ch}_${r.type}`;
     return `<div class="tile" style="min-width:150px"><div class="tr">${esc(r.sensor)}${r.ch > 1 ? " #" + r.ch : ""}</div><div style="font-size:24px;font-weight:600">${esc(fmt(r))}</div><div class="tr">${stale ? "quiet · " + Math.round(r.age / 60) + " min" : "24 h: " + esc(fmt({...r, v: r.min})) + " – " + esc(fmt({...r, v: r.max}))}</div><svg id="${id}" data-i="${esc(r.id)}" data-c="${r.ch}" data-t="${r.type}" width="150" height="34"></svg></div>`; };
   const html = Object.values(by).map(g => panel(g.name, g.list.length + " sensor" + (g.list.length > 1 ? "s" : ""), `<div style="display:flex;flex-wrap:wrap;gap:10px">${g.list.map(tile).join("")}</div>`)).join("");
   setTimeout(sensLines, 0);
-  return `<div class="panels">${html}</div>`;
+  return `<div class="panels">${presPanel()}${html}</div>`;
 }
 async function sensLines() {
   for (const el of document.querySelectorAll("svg[data-i]")) {

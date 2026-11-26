@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.30"
+VERSION = "2.31"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -319,6 +319,53 @@ def telem_latest(allowed=None):
 def telem_series(did, ch, t, hours=24):
     with LOCK:
         return [[ts, v] for ts, v in DB.execute("SELECT ts,v FROM telem WHERE did=? AND ch=? AND type=? AND ts>=? ORDER BY ts", (did, int(ch), int(t), int(time.time()) - int(hours * 3600))).fetchall()]
+
+
+# ---- presence timeline: on / off / no-data stretches from a sensor's presence readings (LPP type 102) ----
+PRESENCE_GAP = 25 * 60        # a reading holds for at most this long; the repeater reports at least every 15 minutes
+
+def presence_segments(samples, since, now, gap=PRESENCE_GAP):
+    """samples: [(ts, value)] oldest first -> [[t0, t1, state]] covering since..now; state 1 = present, 0 = clear, -1 = no data."""
+    segs = []
+    def add(t0, t1, st):
+        if t1 <= t0: return
+        if segs and segs[-1][2] == st and segs[-1][1] == t0: segs[-1][1] = t1
+        else: segs.append([t0, t1, st])
+    cur = since
+    prev = None                                      # the reading in force at the start of the window
+    rows = []
+    for ts, v in samples:
+        if ts <= since: prev = (ts, 1 if v else 0)
+        elif ts <= now: rows.append((ts, 1 if v else 0))
+    pts = ([prev] if prev else []) + rows
+    if not pts: add(since, now, -1); return segs
+    if pts[0][0] > since + 0 and not prev: add(since, pts[0][0], -1)
+    for i, (ts, st) in enumerate(pts):
+        t0 = max(ts, since)
+        nxt = pts[i + 1][0] if i + 1 < len(pts) else now
+        hold_end = min(nxt, ts + gap, now)
+        add(t0, hold_end, st)
+        if hold_end < nxt: add(hold_end, nxt, -1)
+    return segs
+
+def presence_view(hours=24, now=None, allowed=None):
+    now = int(now or time.time()); hours = max(1, min(168, float(hours))); since = int(now - hours * 3600); out = []
+    with LOCK:
+        keys = DB.execute("SELECT DISTINCT did, ch FROM telem WHERE type=102 AND ts>=?", (since - PRESENCE_GAP,)).fetchall()
+        for did, ch in keys:
+            if allowed is not None and did not in allowed: continue
+            samples = DB.execute("SELECT ts, v FROM telem WHERE did=? AND ch=? AND type=102 AND ts>=? ORDER BY ts", (did, ch, since - PRESENCE_GAP)).fetchall()
+            segs = presence_segments(samples, since, now)
+            known = sum(b - a for a, b, st in segs if st >= 0); on = sum(b - a for a, b, st in segs if st == 1)
+            events = sum(1 for i, g in enumerate(segs) if g[2] == 1 and (i == 0 or segs[i - 1][2] != 1) and g[0] > since)
+            last_on = max((b for a, b, st in segs if st == 1), default=None)
+            mv = [(ts, v) for ts, v in DB.execute("SELECT ts, v FROM telem WHERE did=? AND ch=? AND type=120 AND ts>=? ORDER BY ts", (did, ch + 1, since)).fetchall()]
+            if len(mv) > 160: step = len(mv) / 160.0; mv = [mv[int(i * step)] for i in range(160)]
+            out.append({"id": did, "name": (DEV.get(did) or {}).get("name") or did[:8], "ch": ch, "since": since, "now": now, "segments": segs,
+                        "now_state": segs[-1][2] if segs else -1, "occupied_pct": round(100.0 * on / known, 1) if known else None,
+                        "events": events, "last_on": last_on, "known_pct": round(100.0 * known / (now - since), 1), "movement": mv})
+    out.sort(key=lambda r: (r["name"].lower(), r["ch"]))
+    return out
 
 def telem_prune(now):
     DB.execute("DELETE FROM telem WHERE ts<?", (now - 7 * 86400,))
@@ -2019,6 +2066,9 @@ class H(BaseHTTPRequestHandler):
                 else:                                           # nothing secret leaves for other users
                     c = json.loads(json.dumps(o["config"])); c.get("alerts", {})["url"] = "(set by the administrator)" if c.get("alerts", {}).get("url") else ""; c.pop("web_users", None); o["config"] = c
                 return self.send(200, json.dumps(o, default=str))
+            if u.path == "/api/presence":
+                try: return self.send(200, json.dumps(presence_view(float(q.get("hours", ["24"])[0]))))
+                except ValueError: return self.send(400, '{"error":"bad request"}')
             if u.path == "/api/telemetry":
                 try: return self.send(200, json.dumps(telem_series(str(q.get("id", [""])[0]).upper(), int(q.get("ch", ["0"])[0]), int(q.get("type", ["0"])[0]), max(1, min(168, float(q.get("hours", ["24"])[0]))))))
                 except ValueError: return self.send(400, '{"error":"bad request"}')

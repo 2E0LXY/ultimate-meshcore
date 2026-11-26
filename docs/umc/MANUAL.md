@@ -427,7 +427,7 @@ A repeater with a battery gauge or sensors reports them to the UMC Net broker (U
 
 * The repeater reads its sensors every 60 seconds (`SENSOR_READ_INTERVAL_SECS`) and publishes to `meshcore/<area>/<ID>/telemetry` when a value has moved by more than a default step (voltage 0.05 V, temperature 0.5 °C, humidity 2 %, pressure 1 hPa), and in any case at least every 15 minutes so a quiet sensor can be told from a dead repeater. If nobody is listening it does not read the sensors at all.
 * Message: `{"timestamp","origin","lpp":"<hex>"}`, where `lpp` is the Cayenne LPP buffer. It goes to the UMC Net broker only, never to the public brokers.
-* The dashboard keeps seven days of readings and shows them on the **Sensors** tab (latest value, 24 hour low and high, and a 24 hour line). The app shows the newest readings on its **Sensors** tile.
+* The dashboard keeps seven days of readings and shows them on the **Sensors** tab: a **Presence timeline** (a strip per presence sensor over 1 h, 6 h, 24 h or 7 days: green when someone was detected, grey when clear, dark when there was no data, with the movement score as a line and the share of time occupied, the number of detections and when someone was last seen), then the latest value of every sensor with its 24 hour low and high and a 24 hour line. The app shows the newest readings on its **Sensors** tile.
 * Over the radio, a client can ask the repeater to push telemetry only when values change: see `docs/payloads.md`, "Telemetry subscribe". Idea taken from `ripplebiz/MeshCore-sensor-playground` (`repeater-telem-push`).
 
 ### 13.3 Wi-Fi motion sensing (optional)
