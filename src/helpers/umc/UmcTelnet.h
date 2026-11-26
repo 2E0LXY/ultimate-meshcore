@@ -3,8 +3,12 @@
 #include <Arduino.h>
 
 class UmcService;
+#if defined(ESP32) && defined(UMC_WIFI_CSI)
+  #include <WiFi.h>   // Arduino-ESP32 3.x makes these typedefs of NetworkServer/NetworkClient, which cannot be forward-declared as classes
+#else
 class WiFiServer;
 class WiFiClient;
+#endif
 
 // Password-protected line CLI on TCP (default port 23). Runs on the loop task.
 class UmcTelnet {

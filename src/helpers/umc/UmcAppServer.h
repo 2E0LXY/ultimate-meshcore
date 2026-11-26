@@ -5,8 +5,12 @@
 #include "../BaseSerialInterface.h"
 
 class UmcService;
+#if defined(ESP32) && defined(UMC_WIFI_CSI)
+  #include <WiFi.h>   // Arduino-ESP32 3.x makes these typedefs of NetworkServer/NetworkClient, which cannot be forward-declared as classes
+#else
 class WiFiServer;
 class WiFiClient;
+#endif
 
 // MeshCore companion-protocol server on TCP (default port 5000), so the MeshCore apps,
 // meshcore-open, meshcore_py, meshcore-cli and Home Assistant can connect over the LAN.
