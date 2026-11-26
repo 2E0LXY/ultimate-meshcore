@@ -670,17 +670,18 @@ void MQTTUplink::destroyBroker(BrokerState& broker, bool reset_retry_state) {
   logMqttMemorySnapshot("destroy-post", broker.spec != nullptr ? broker.spec->label : nullptr);
 }
 
-void MQTTUplink::queuePublish(BrokerState& broker, const char* topic, const char* payload, bool retain) {
+bool MQTTUplink::queuePublish(BrokerState& broker, const char* topic, const char* payload, bool retain) {
   if (broker.client == nullptr || !broker.connected) {
-    return;
+    return false;
   }
   if (broker.spec->custom && _prefs.custom_enrol && strcmp(topic, umcenrol::kTopicHello) != 0) {
-    return;                                   // knocking: the enrol account may only send its request
+    return false;                                   // knocking: the enrol account may only send its request
   }
   MQTT_LOG("%s publish topic=%s retain=%d bytes=%u", broker.spec->label, topic, retain ? 1 : 0,
            static_cast<unsigned>(strlen(payload)));
   int enqueue_rc = esp_mqtt_client_enqueue(broker.client, topic, payload, 0, 1, retain, true);
   MQTT_LOG("%s enqueue topic=%s rc=%d connected=%d", broker.spec->label, topic, enqueue_rc, broker.connected ? 1 : 0);
+  return enqueue_rc >= 0;
 }
 
 int MQTTUplink::buildStatusJson(char* buffer, size_t buffer_size, bool online) const {
@@ -1256,13 +1257,13 @@ void MQTTUplink::publishPacket(const mesh::Packet& packet, bool is_tx, int rssi,
   freeScratchBuffer(raw_payload);
 }
 
-void MQTTUplink::publishTelemetry(const uint8_t* lpp, uint8_t len) {
+bool MQTTUplink::publishTelemetry(const uint8_t* lpp, uint8_t len) {
   if (!_running || lpp == nullptr || len == 0 || len > 200) {
-    return;
+    return false;
   }
   char* payload = allocScratchBuffer(640);
   if (payload == nullptr) {
-    return;
+    return false;
   }
   char ts[32];
   formatIsoTimestamp(time(nullptr), ts, sizeof(ts));
@@ -1273,7 +1274,7 @@ void MQTTUplink::publishTelemetry(const uint8_t* lpp, uint8_t len) {
   static const char kHex[] = "0123456789ABCDEF";
   if (n <= 0 || n + 2 * len + 3 >= 640) {
     freeScratchBuffer(payload);
-    return;
+    return false;
   }
   for (uint8_t i = 0; i < len; i++) {
     payload[n++] = kHex[lpp[i] >> 4];
@@ -1284,12 +1285,14 @@ void MQTTUplink::publishTelemetry(const uint8_t* lpp, uint8_t len) {
   payload[n] = 0;
   char topic[128];
   formatTopic(topic, sizeof(topic), "telemetry");
+  bool queued = false;
   for (BrokerState& broker : _brokers) {
     if (broker.spec != nullptr && broker.spec->custom) {
-      queuePublish(broker, topic, payload, false);
+      queued = queuePublish(broker, topic, payload, false) || queued;
     }
   }
   freeScratchBuffer(payload);
+  return queued;
 }
 
 void MQTTUplink::formatStatusReply(char* reply, size_t reply_size) const {
@@ -2020,7 +2023,7 @@ void MQTTUplink::begin(FILESYSTEM*) {}
 void MQTTUplink::end() {}
 void MQTTUplink::loop(const MQTTStatusSnapshot&) {}
 void MQTTUplink::publishPacket(const mesh::Packet&, bool, int, float, int, int) {}
-void MQTTUplink::publishTelemetry(const uint8_t*, uint8_t) {}
+bool MQTTUplink::publishTelemetry(const uint8_t*, uint8_t) { return false; }
 void MQTTUplink::formatStatusReply(char* reply, size_t reply_size) const { snprintf(reply, reply_size, "> unsupported"); }
 bool MQTTUplink::setEndpointEnabled(uint8_t, bool) { return false; }
 bool MQTTUplink::isEndpointEnabled(uint8_t) const { return false; }

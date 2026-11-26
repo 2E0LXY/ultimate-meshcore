@@ -106,13 +106,13 @@ struct TelemSubEntry {
 
 struct TelemSub {
   uint32_t push_tag;
-  uint32_t expiry;       // by OUR clock
+  uint32_t expiry;       // millis() deadline (monotonic: an RTC correction must neither extend nor cut a subscription)
   uint16_t region_id;    // 0 = use default scope / unscoped
   uint8_t  count;        // 0 = not subscribed
   TelemSubEntry e[TELEM_SUB_MAX_ENTRIES];
 
   void clear() { memset(this, 0, sizeof(*this)); }
-  bool active(uint32_t now) const { return count > 0 && now <= expiry; }
+  bool active(uint32_t now_ms) const { return count > 0 && (int32_t)(expiry - now_ms) >= 0; }   // wrap-safe
 };
 
 // Parse the deltas block. All-or-nothing: returns false (and leaves `s` cleared) on any defect.
@@ -138,21 +138,29 @@ inline bool telemSubParse(TelemSub& s, const uint8_t* deltas, uint8_t len) {
 }
 
 // True if any watched value is new or has moved by more than its min-delta since it was last pushed.
-// On true, the snapshot of ALL watched values is updated (so the next push is relative to this one).
-inline bool telemSubChanged(TelemSub& s, const uint8_t* telem, uint8_t tlen) {
-  float cur[TELEM_SUB_MAX_ENTRIES];
-  bool  ok[TELEM_SUB_MAX_ENTRIES];
-  bool changed = false;
+// Peek does not touch the snapshot; call telemSubCommit only once the push has really been queued,
+// so a failed send is retried on the next cycle.
+inline bool telemSubPeek(const TelemSub& s, const uint8_t* telem, uint8_t tlen) {
+  float cur;
   for (uint8_t k = 0; k < s.count; k++) {
-    ok[k] = lppFind(telem, tlen, s.e[k].channel, s.e[k].type, cur[k]);
-    if (!ok[k]) continue;                              // sensor absent this cycle: not a change
-    if (!s.e[k].have_prev || fabsf(cur[k] - s.e[k].prev) > s.e[k].min_delta) changed = true;
+    if (!lppFind(telem, tlen, s.e[k].channel, s.e[k].type, cur)) continue;     // sensor absent this cycle: not a change
+    if (!s.e[k].have_prev || fabsf(cur - s.e[k].prev) > s.e[k].min_delta) return true;
   }
-  if (changed) {
-    for (uint8_t k = 0; k < s.count; k++)
-      if (ok[k]) { s.e[k].prev = cur[k]; s.e[k].have_prev = true; }
-  }
-  return changed;
+  return false;
+}
+
+// Record every watched value that is present as the new baseline.
+inline void telemSubCommit(TelemSub& s, const uint8_t* telem, uint8_t tlen) {
+  float cur;
+  for (uint8_t k = 0; k < s.count; k++)
+    if (lppFind(telem, tlen, s.e[k].channel, s.e[k].type, cur)) { s.e[k].prev = cur; s.e[k].have_prev = true; }
+}
+
+// Peek and, on a change, commit in one step (for callers that cannot fail after the decision).
+inline bool telemSubChanged(TelemSub& s, const uint8_t* telem, uint8_t tlen) {
+  if (!telemSubPeek(s, telem, tlen)) return false;
+  telemSubCommit(s, telem, tlen);
+  return true;
 }
 
 // ---- built-in subscription for the MQTT uplink -------------------------------------------------

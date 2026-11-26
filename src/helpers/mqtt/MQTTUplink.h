@@ -42,7 +42,7 @@ public:
                      int duration = -1);
 
   // UMC: the repeater's own sensor readings (Cayenne LPP, hex) to the UMC Net broker only, never to public brokers.
-  void publishTelemetry(const uint8_t* lpp, uint8_t len);
+  bool publishTelemetry(const uint8_t* lpp, uint8_t len);   // true if queued to at least one broker
 
   bool isRunning() const { return _running; }
   bool isActive() const;
@@ -249,7 +249,7 @@ private:
   bool refreshToken(BrokerState& broker);
   void publishStatus(bool online);
   void publishBrokerStatus(BrokerState& broker, bool online);
-  void queuePublish(BrokerState& broker, const char* topic, const char* payload, bool retain);
+  bool queuePublish(BrokerState& broker, const char* topic, const char* payload, bool retain);
   int buildStatusJson(char* buffer, size_t buffer_size, bool online) const;
   int buildPacketJson(char* buffer, size_t buffer_size, const mesh::Packet& packet, bool is_tx, int rssi, float snr,
                       int score, int duration) const;

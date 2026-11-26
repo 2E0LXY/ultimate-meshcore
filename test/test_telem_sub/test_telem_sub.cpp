@@ -118,6 +118,23 @@ TEST(TelemSub, AutoStopsAtTheCapAndOnGarbage) {
   EXPECT_EQ(g.count, 0);
 }
 
+
+TEST(TelemSub, PeekDoesNotCommitSoAFailedSendIsRetried) {
+  TelemSub s; ASSERT_TRUE(telemSubParse(s, kDeltas, sizeof(kDeltas)));
+  EXPECT_TRUE(telemSubPeek(s, kTelem, sizeof(kTelem)));
+  EXPECT_TRUE(telemSubPeek(s, kTelem, sizeof(kTelem)));            // still pending: nothing was committed
+  telemSubCommit(s, kTelem, sizeof(kTelem));
+  EXPECT_FALSE(telemSubPeek(s, kTelem, sizeof(kTelem)));
+}
+
+TEST(TelemSub, ActiveIsWrapSafe) {
+  TelemSub s; ASSERT_TRUE(telemSubParse(s, kDeltas, sizeof(kDeltas)));
+  s.expiry = 500;                                                  // deadline just after millis() wrapped
+  EXPECT_TRUE(s.active(0xFFFFFF00u));
+  EXPECT_TRUE(s.active(500));
+  EXPECT_FALSE(s.active(501));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

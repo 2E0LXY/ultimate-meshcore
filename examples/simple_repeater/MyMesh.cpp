@@ -765,7 +765,7 @@ int MyMesh::handleTelemSubReq(ClientInfo* from, uint8_t req_type, const uint8_t*
     if (dlen > 0 && (size_t)dlen + 8 <= payload_len && secs > 0 && umc::telemSubParse(ns, &payload[8], dlen)) {
       if (secs > TELEM_SUBSCRIBE_MAX_SECS) secs = TELEM_SUBSCRIBE_MAX_SECS;
       ns.push_tag = tag;
-      ns.expiry = getRTCClock()->getCurrentTime() + secs;
+      ns.expiry = millis() + (uint32_t)secs * 1000UL;
       ns.region_id = (recv_pkt_region != NULL && !recv_pkt_region->isWildcard()) ? recv_pkt_region->id : 0;
       from->extra.sub = ns;
       memcpy(&reply_data[4], &secs, 2);
@@ -777,6 +777,7 @@ int MyMesh::handleTelemSubReq(ClientInfo* from, uint8_t req_type, const uint8_t*
 // Called from loop(): read sensors every SENSOR_READ_INTERVAL_SECS, push to subscribers whose watched values moved.
 void MyMesh::telemPushTick() {
   uint32_t curr = getRTCClock()->getCurrentTime();
+  uint32_t now_ms = millis();
   if (curr < last_telem_read) { last_telem_read = 0; last_mqtt_telem = 0; }   // the RTC was set backwards: do not stall until it catches up
   if (curr < last_telem_read + SENSOR_READ_INTERVAL_SECS) return;
   last_telem_read = curr;
@@ -784,7 +785,7 @@ void MyMesh::telemPushTick() {
   bool any = false;
   for (int i = 0; i < acl.getNumClients(); i++) {
     auto c = acl.getClientByIdx(i);
-    if (c->permissions != 0 && c->extra.sub.active(curr)) { any = true; break; }
+    if (c->permissions != 0 && c->extra.sub.active(now_ms)) { any = true; break; }
   }
   bool mqtt_on = mqtt.isActive();
   if (!any && !mqtt_on) return;             // nobody listening: do not even touch the sensors
@@ -798,18 +799,20 @@ void MyMesh::telemPushTick() {
 
   if (mqtt_on) {                            // the broker: on change, plus a heartbeat so the dash can tell "quiet" from "gone"
     umc::telemSubAuto(mqtt_telem, telemetry.getBuffer(), telemetry.getSize());
-    bool chg = umc::telemSubChanged(mqtt_telem, telemetry.getBuffer(), telemetry.getSize());
+    bool chg = umc::telemSubPeek(mqtt_telem, telemetry.getBuffer(), telemetry.getSize());
     if (chg || curr >= last_mqtt_telem + 900) {
-      mqtt.publishTelemetry(telemetry.getBuffer(), telemetry.getSize());
-      last_mqtt_telem = curr;
+      if (mqtt.publishTelemetry(telemetry.getBuffer(), telemetry.getSize())) {   // only a queued message moves the baseline
+        umc::telemSubCommit(mqtt_telem, telemetry.getBuffer(), telemetry.getSize());
+        last_mqtt_telem = curr;
+      }
     }
   }
 
   for (int i = 0; i < acl.getNumClients(); i++) {
     auto c = acl.getClientByIdx(i);
-    if (c->permissions == 0 || !c->extra.sub.active(curr)) continue;
+    if (c->permissions == 0 || !c->extra.sub.active(now_ms)) continue;
     // guests never get more than base telemetry; subscribers are >= read-only so full set is allowed
-    if (!umc::telemSubChanged(c->extra.sub, telemetry.getBuffer(), telemetry.getSize())) continue;
+    if (!umc::telemSubPeek(c->extra.sub, telemetry.getBuffer(), telemetry.getSize())) continue;
 
     uint8_t tlen = telemetry.getSize();
     if (tlen + 8 > sizeof(reply_data)) continue;
@@ -818,7 +821,8 @@ void MyMesh::telemPushTick() {
     memcpy(&reply_data[4], &ts, 4);
     memcpy(&reply_data[8], telemetry.getBuffer(), tlen);
     mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, c->id, c->shared_secret, reply_data, 8 + tlen);
-    if (!reply) continue;
+    if (!reply) continue;                                   // allocation failed: baseline untouched, retried next cycle
+    umc::telemSubCommit(c->extra.sub, telemetry.getBuffer(), telemetry.getSize());
     if (c->out_path_len != OUT_PATH_UNKNOWN) {
       sendDirect(reply, c->out_path, c->out_path_len, 0);
     } else {
