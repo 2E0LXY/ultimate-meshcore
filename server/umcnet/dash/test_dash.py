@@ -766,6 +766,12 @@ class Telemetry(unittest.TestCase):
         dash.on_publish("meshcore/LBA/%s/telemetry" % self.DID, json.dumps({"lpp": "ZZ"}).encode())
         dash.on_publish("meshcore/LBA/%s/telemetry" % self.DID, json.dumps({"lpp": "00" * 500}).encode())
         self.assertEqual([], dash.telem_latest())
+    def test_hostile_json_shapes_are_ignored_not_fatal(self):
+        topic = "meshcore/LBA/%s/telemetry" % self.DID
+        for body in (b"[1,2]", b"7", b"null", b'"x"', json.dumps({"origin": 12345, "lpp": "0167" + "0110"}).encode()):
+            dash.on_publish(topic, body)
+        dash.telem_latest(); dash.presence_view(1)                  # must not raise on a numeric origin
+
     def test_viewers_may_read_telemetry_and_clients_may_not_write_it(self):
         acl = usr.acl_for("phone", {"role": "client", "device": self.DID})
         self.assertIn("topic read meshcore/+/+/telemetry", acl); self.assertNotIn("telemetry", "".join(l for l in acl.splitlines() if "write" in l))
@@ -790,6 +796,16 @@ class PresenceTimeline(unittest.TestCase):
         s = self.seg([(1100, 1), (1600, 0), (1700, 0), (4000, 1), (4100, 1)], 1000, 5000)
         self.assertEqual(1000, s[0][0]); self.assertEqual(5000, s[-1][1])
         for a, b in zip(s, s[1:]): self.assertEqual(a[1], b[0]); self.assertNotEqual(a[2], b[2])
+    def test_no_data_never_starts_before_the_window(self):
+        s = dash.presence_segments([(100, 1)], 2000, 3000, 1500)
+        self.assertEqual(2000, s[0][0]); self.assertEqual(3000, s[-1][1])
+        for a, b in zip(s, s[1:]): self.assertEqual(a[1], b[0])
+    def test_now_state_follows_a_sample_exactly_at_now(self):
+        self.assertEqual(0, dash.presence_now([(100, 1), (5000, 0)], 5000))
+        self.assertEqual(1, dash.presence_now([(100, 1)], 150))
+        self.assertEqual(-1, dash.presence_now([(100, 1)], 100 + dash.PRESENCE_GAP + 1))
+        self.assertEqual(-1, dash.presence_now([], 100))
+
     def test_view_has_stats_and_movement(self):
         now = 10000
         for ts, v in ((now - 3000, 0), (now - 2400, 1), (now - 1800, 1), (now - 1200, 0), (now - 600, 1)):

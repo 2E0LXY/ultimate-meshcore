@@ -344,8 +344,15 @@ def presence_segments(samples, since, now, gap=PRESENCE_GAP):
         nxt = pts[i + 1][0] if i + 1 < len(pts) else now
         hold_end = min(nxt, ts + gap, now)
         add(t0, hold_end, st)
-        if hold_end < nxt: add(hold_end, nxt, -1)
+        if hold_end < nxt: add(max(hold_end, since), nxt, -1)      # never start a no-data stretch before the window
     return segs
+
+def presence_now(samples, now, gap=PRESENCE_GAP):
+    """The state right now: the newest reading at or before `now`, if it is recent enough to still hold."""
+    last = None
+    for ts, v in samples:
+        if ts <= now: last = (ts, 1 if v else 0)
+    return last[1] if last and now - last[0] <= gap else -1
 
 def presence_view(hours=24, now=None, allowed=None):
     now = int(now or time.time()); hours = max(1, min(168, float(hours))); since = int(now - hours * 3600); out = []
@@ -361,7 +368,7 @@ def presence_view(hours=24, now=None, allowed=None):
             mv = [(ts, v) for ts, v in DB.execute("SELECT ts, v FROM telem WHERE did=? AND ch=? AND type=120 AND ts>=? ORDER BY ts", (did, ch + 1, since)).fetchall()]
             if len(mv) > 160: step = len(mv) / 160.0; mv = [mv[int(i * step)] for i in range(160)]
             out.append({"id": did, "name": (DEV.get(did) or {}).get("name") or did[:8], "ch": ch, "since": since, "now": now, "segments": segs,
-                        "now_state": segs[-1][2] if segs else -1, "occupied_pct": round(100.0 * on / known, 1) if known else None,
+                        "now_state": presence_now(samples, now), "occupied_pct": round(100.0 * on / known, 1) if known else None,
                         "events": events, "last_on": last_on, "known_pct": round(100.0 * known / (now - since), 1), "movement": mv})
     out.sort(key=lambda r: (r["name"].lower(), r["ch"]))
     return out
@@ -382,10 +389,11 @@ def on_publish(topic, payload, retained=False):
     if did == DASH_ID: return                       # the dashboard's own messages on their way to the repeaters: not a repeater
     try: j = json.loads(payload.decode("utf-8", "replace"))
     except Exception: COUNT["bad_json"] += 1; return
+    if not isinstance(j, dict): COUNT["bad_json"] += 1; return
     with LOCK:
         d = device(did, area)
         if not retained: d["last"] = now; d["topics"][kind] += 1
-        if j.get("origin"): d["name"] = j["origin"]
+        if isinstance(j.get("origin"), str) and j["origin"]: d["name"] = j["origin"]
         ts = j.get("timestamp")
         if isinstance(ts, str) and not retained:
             try:
