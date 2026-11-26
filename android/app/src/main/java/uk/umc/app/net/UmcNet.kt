@@ -289,6 +289,8 @@ object UmcNet {
         val rep = Repeater(r.deviceId, r.name.ifBlank { old?.name ?: "" }, if (r.kind == "status") (r.status ?: "unknown") else (old?.status ?: "unknown"),
             if (retained) (old?.lastMs ?: 0L) else now)
         if (old != rep) repeaters.value = repeaters.value + (r.deviceId to rep)
+        val shown = sensors.value[r.deviceId]
+        if (shown != null && rep.name.isNotBlank() && shown.name != rep.name) sensors.value = sensors.value + (r.deviceId to shown.copy(name = rep.name))
         if (r.kind == "status") return
         val raw = r.raw ?: return
         val changed = if (r.direction == "tx") book.onSent(r.deviceId, raw, now)
@@ -297,6 +299,7 @@ object UmcNet {
     }
 
     private fun onTelemetry(deviceId: String, payload: ByteArray, retained: Boolean) {
+        if (retained) return                                              // an old retained reading must not look fresh on reconnect
         val hex = Protocol.parseTelemetryHex(payload) ?: return
         val readings = Lpp.decode(MsgCodec.fromHex(hex) ?: return)
         if (readings.isEmpty()) return
