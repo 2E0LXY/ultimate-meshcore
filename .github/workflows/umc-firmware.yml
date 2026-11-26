@@ -45,6 +45,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Build Environment
         uses: ./.github/actions/setup-build-environment
+      - name: PlatformIO 6.2 for the Wi-Fi motion sensing builds (the pioarduino platform needs it; other targets stay on the locked version)
+        if: ${{ endsWith(matrix.env, '_csi') }}
+        run: uv pip install "platformio==6.2.0"
       - name: Build ${{ matrix.env }}
         run: pio run -e ${{ matrix.env }} -t mergebin
       - name: Collect binaries
