@@ -331,12 +331,13 @@ function flowNet(o) {
   const box = (x, y, w, h, t, sub, cls = "") => `<g class="fn ${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11"/><text x="${x + w / 2}" y="${y + h / 2 - 1}" text-anchor="middle">${esc(t.length > 20 ? t.slice(0, 19) + "…" : t)}</text><text x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle" class="sb">${esc(sub.length > 26 ? sub.slice(0, 25) + "…" : sub)}</text></g>`;
   devs.forEach((d, i) => {
     const y = 40 + i * ((H - 102) / Math.max(1, devs.length - 1 || 1)) + (devs.length === 1 ? (H - 102) / 2 : 0), on = d.age < 300, br = d.bridge || {}, hear = d.pm || 0, send = br.passed_pm || 0;
-    e += edge(190, y - 9, 330, cy - 7, "rx", hear + 1, on && hear > 0) + edge(330, cy + 7, 190, y + 9, "tx", send + 1, on && send > 0);
+    const pulse = t => t && o.now - t < 20;                          // animate only for a packet that really arrived in the last 20 s
+    e += edge(190, y - 9, 330, cy - 7, "rx", hear + 1, on && pulse(d.last_pkt)) + edge(330, cy + 7, 190, y + 9, "tx", send + 1, on && pulse(d.last_tx));
     nodes += box(10, y - 26, 180, 52, d.name || d.id.slice(0, 8), `in ${perMin(hear)} · out ${perMin(send)} · ${d.age < 86400 ? dur(d.age) + " ago" : "quiet"}`, on ? "" : "off");
   });
   e += `<text x="10" y="${H - 8}" fill="#7fa392" font-size="11">green: heard by radio, sent to the broker · amber: from the broker, sent by radio (bridge)</text>`;
   const msgs = o.rates.messages, cl = num(o, "$SYS/broker/clients/connected"), up = o.mqtt.state === "connected";
-  e += edge(450, cy, 520, cy, "net", msgs + 1, msgs > 0 || cl > 0);
+  e += edge(450, cy, 520, cy, "net", msgs + 1, devs.some(d => d.last_pkt && o.now - d.last_pkt < 20));
   const subs = o.clients.filter(c => c.state === "connected" && c.user !== "dash");
   e += edge(650, cy - 30, 700, cy - 52, "tx", 1, up) + edge(650, cy + 30, 700, cy + 52, "net", subs.length, subs.length > 0);
   nodes += box(330, cy - 36, 120, 72, "Caddy", o.cert && o.cert.days != null ? "TLS " + Math.round(o.cert.days) + " d left" : "TLS ?", "") +

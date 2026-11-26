@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.32"
+VERSION = "2.33"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -410,6 +410,7 @@ def on_publish(topic, payload, retained=False):
         if kind == "telemetry":
             if not retained and isinstance(j.get("lpp"), str) and len(j["lpp"]) <= 400: telem_store(did, area, j["lpp"], now)
             return
+        if not retained: d["last_pkt"] = now                      # the moment of the newest radio packet, for the live flow pulses
         if kind == "raw": d["n_raw"] += 1
         else: d["n_pkt"] += 1
         raw_hex = j.get("data") if kind == "raw" else j.get("raw")
@@ -1297,6 +1298,7 @@ def bridge_poll_loop():
                 m = BRIDGE_RX.search(r.get("reply") or "") if r.get("ok") else None
                 if not m: continue
                 heard, passed, dropped = (int(x) for x in m.groups()); now = time.time(); b = d.get("bridge")
+                if b and passed > b.get("passed", passed): d["last_tx"] = now      # the bridge sent something to the radio since the last poll
                 if b and now - b["t"] < 400 and heard >= b["heard"] and passed >= b["passed"]:
                     dt = max(1.0, (now - b["t"]) / 60.0)
                     d["bridge"] = {"t": now, "heard": heard, "passed": passed, "dropped": dropped, "heard_pm": round((heard - b["heard"]) / dt, 2), "passed_pm": round((passed - b["passed"]) / dt, 2), "dropped_pm": round((dropped - b["dropped"]) / dt, 2)}
@@ -1879,7 +1881,7 @@ def public_overview():
     """Operational data safe to publish: no accounts, addresses, logs, keys or write state."""
     o = overview(); now = o["now"]; devices = []
     for d in o["devices"]:
-        devices.append({k: d.get(k) for k in ("id", "area", "name", "first", "last", "last_status", "status", "model", "fw", "radio", "client", "repeat", "stats", "n_raw", "n_pkt", "n_rx", "n_tx", "types", "rssi", "snr", "bytes", "skew", "topics", "pm", "label", "age")})
+        devices.append({k: d.get(k) for k in ("id", "area", "name", "first", "last", "last_status", "status", "model", "fw", "radio", "client", "repeat", "stats", "n_raw", "n_pkt", "n_rx", "n_tx", "types", "rssi", "snr", "bytes", "skew", "topics", "pm", "label", "age", "last_pkt", "last_tx")})
         br = d.get("bridge") or {}
         devices[-1]["pm"] = d.get("pm"); devices[-1]["age"] = d.get("age")
         devices[-1]["bridge"] = {k: br.get(k) for k in ("heard_pm", "passed_pm", "dropped_pm")} if br else None      # rates only: how much each bridge passes on

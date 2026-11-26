@@ -817,6 +817,17 @@ class PresenceTimeline(unittest.TestCase):
         self.assertEqual([[now - 2400, 60.0], [now - 600, 40.0]], [list(x) for x in r["movement"]])
         self.assertTrue(0 < r["occupied_pct"] < 100)
 
+class FlowPulse(unittest.TestCase):
+    DID = "EF" * 32
+    def test_last_packet_time_is_set_by_a_live_packet_not_a_retained_one(self):
+        dash.db_init(); dash.DEV.pop(self.DID, None)
+        topic = "meshcore/LBA/%s/packets" % self.DID
+        dash.on_publish(topic, json.dumps({"raw": "00", "origin": "R"}).encode(), True)
+        self.assertFalse((dash.DEV.get(self.DID) or {}).get("last_pkt"))
+        dash.on_publish(topic, json.dumps({"raw": "00", "origin": "R"}).encode())
+        self.assertTrue(dash.DEV[self.DID].get("last_pkt"))
+        dash.DEV.pop(self.DID, None)
+
 if __name__ == "__main__":
     unittest.main()
 
