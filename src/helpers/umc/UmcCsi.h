@@ -58,9 +58,10 @@ public:
 #ifdef UMC_WIFI_CSI
     bool up = WiFi.status() == WL_CONNECTED;
     bool running = _snap.running, failed = _snap.failed;
-    if (running && (!_want || !up)) { _sensor.end(); running = false; _ps_dirty = true; }
+    if (running && (!_want || !up)) { publish(false, false, false); _sensor.end(); running = false; _ps_dirty = true; }   // clear the snapshot first: end() may block
     if (!running && _want && up && (_last_try == 0 || millis() - _last_try > 15000UL)) {
       _last_try = millis() ? millis() : 1;
+      publish(false, false, false);                // begin() may block: never leave a stale reading visible meanwhile
       running = _sensor.begin();                  // after WiFi.begin(); it calibrates for a few seconds, keep the room still
       failed = !running;
       if (failed) _ps_dirty = true;               // a failed start may still have touched Wi-Fi power save
@@ -78,6 +79,11 @@ public:
     }
     UMC_CSI_LOCK(_mux); _snap = n; UMC_CSI_UNLOCK(_mux);
 #endif
+  }
+
+  void publish(bool running, bool failed, bool ready) {
+    Snap n = {running, failed, ready, false, 0.0f, _want};
+    UMC_CSI_LOCK(_mux); _snap = n; UMC_CSI_UNLOCK(_mux);
   }
 
   void status(char* out, size_t n) const {
