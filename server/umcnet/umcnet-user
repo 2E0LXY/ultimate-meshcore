@@ -128,7 +128,7 @@ def acl_for(name, info):
             out += [f"topic read umcnet/v1/+/replay/{dev}", f"topic write umcnet/v1/+/replay/req/{dev}"]      # catch-up: ask, and read the answer, under its own id only
         out += ["topic read meshcore/+/+/raw",
                 "topic read meshcore/+/+/packets",
-                "topic read meshcore/+/+/status", "topic read umcnet/v1/+/messages", "topic read umcnet/v1/+/adverts", "topic read umcnet/v1/+/nodes/#"]
+                "topic read meshcore/+/+/status", "topic read meshcore/+/+/telemetry", "topic read umcnet/v1/+/messages", "topic read umcnet/v1/+/adverts", "topic read umcnet/v1/+/nodes/#"]      # telemetry: sensor readings the repeaters report
     return "\n".join(out)
 
 

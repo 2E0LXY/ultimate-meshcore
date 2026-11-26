@@ -41,7 +41,7 @@ class NetBookTest {
 
     // ---- broker JSON
     @Test fun topics() {
-        assertEquals(listOf("meshcore/LBA/+/raw", "meshcore/LBA/+/status", "meshcore/LBA/+/packets", "umcnet/v1/LBA/replay/$ID"), Protocol.subscriptions("LBA", ID))
+        assertEquals(listOf("meshcore/LBA/+/raw", "meshcore/LBA/+/status", "meshcore/LBA/+/packets", "meshcore/LBA/+/telemetry", "umcnet/v1/LBA/replay/$ID"), Protocol.subscriptions("LBA", ID))
         assertEquals("meshcore/LBA/$ID/raw", Protocol.publishTopic("LBA", ID))
         assertEquals("raw", Protocol.parseTopic("meshcore/LBA/${A.lowercase()}/raw")!!.kind); assertEquals(A, Protocol.parseTopic("meshcore/LBA/${A.lowercase()}/raw")!!.deviceId)
         assertNull(Protocol.parseTopic("meshcore/LBA/short/raw"))

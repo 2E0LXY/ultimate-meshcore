@@ -7,11 +7,11 @@ import java.time.format.DateTimeFormatter
 object Protocol {
     class Topic(val area: String, val deviceId: String, val kind: String)
 
-    private val TOPIC = Regex("^meshcore/([^/]+)/([0-9A-Fa-f]{64})/(raw|packets|status)$")
+    private val TOPIC = Regex("^meshcore/([^/]+)/([0-9A-Fa-f]{64})/(raw|packets|status|telemetry)$")
     fun parseTopic(t: String): Topic? = TOPIC.matchEntire(t)?.let { Topic(it.groupValues[1], it.groupValues[2].uppercase(), it.groupValues[3]) }
 
     fun subscriptions(area: String, clientId: String) =
-        listOf("meshcore/$area/+/raw", "meshcore/$area/+/status", "meshcore/$area/+/packets", replayTopic(area, clientId))
+        listOf("meshcore/$area/+/raw", "meshcore/$area/+/status", "meshcore/$area/+/packets", "meshcore/$area/+/telemetry", replayTopic(area, clientId))
     fun publishTopic(area: String, clientId: String) = "meshcore/$area/$clientId/raw"
 
     /** Store-and-forward catch-up: we publish a request on [replayRequestTopic]; the dashboard answers on [replayTopic]. */
@@ -21,6 +21,10 @@ object Protocol {
     fun buildReplayRequest(since: Long) = MiniJson.obj("since" to since)
     /** The "since" to ask for: our newest held packet time, but never more than an hour back. */
     fun replaySince(lastSeenS: Long, nowS: Long) = maxOf(lastSeenS, nowS - REPLAY_WINDOW_S)
+
+    /** The Cayenne LPP bytes (hex) in a repeater's telemetry message, or null. */
+    fun parseTelemetryHex(payload: ByteArray): String? =
+        (MiniJson.parseObject(String(payload, Charsets.UTF_8))?.get("lpp") as? String)?.takeIf { it.length in 2..400 && it.length % 2 == 0 }
 
     /** What a repeater reported: a packet it heard ("rx") or sent ("tx"), or its status. */
     class Report(val kind: String, val deviceId: String, val name: String, val status: String?, val direction: String,

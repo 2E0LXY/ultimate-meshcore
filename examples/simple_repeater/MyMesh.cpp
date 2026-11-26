@@ -386,6 +386,8 @@ void escapeJsonString(const char* input, char* output, size_t output_size) {
 #define REQ_TYPE_GET_ACCESS_LIST    0x05
 #define REQ_TYPE_GET_NEIGHBOURS     0x06
 #define REQ_TYPE_GET_OWNER_INFO     0x07     // FIRMWARE_VER_LEVEL >= 2
+#define REQ_TYPE_SUBSCRIBE          0x08     // UMC: telemetry push on change (see UmcTelemSub.h)
+#define REQ_TYPE_UNSUBSCRIBE        0x09
 
 #define RESP_SERVER_LOGIN_OK        0 // response to ANON_REQ
 
@@ -713,8 +715,103 @@ int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t
     sprintf((char *) &reply_data[4], "%s\n%s\n%s", FIRMWARE_VERSION, _prefs.node_name, _prefs.owner_info);
     return 4 + strlen((char *) &reply_data[4]);
   }
+#ifdef UMC_BUILD
+  if (payload_len >= 1 && (payload[0] == REQ_TYPE_SUBSCRIBE || payload[0] == REQ_TYPE_UNSUBSCRIBE)) {
+    return handleTelemSubReq(sender, payload[0], &payload[1], payload_len - 1);
+  }
+#endif
   return 0; // unknown command
 }
+
+#ifdef UMC_BUILD
+#ifndef SENSOR_READ_INTERVAL_SECS
+  #define SENSOR_READ_INTERVAL_SECS 60
+#endif
+
+// Subscribe: [tag u32][timeout_secs u16][reserved u8][deltas_len u8][deltas...]  -> reply [granted_secs u16][0 u16]
+// Needs at least read-only (guests cannot subscribe). Reply scope for pushes = request scope if known, else default/unscoped.
+int MyMesh::handleTelemSubReq(ClientInfo* from, uint8_t req_type, const uint8_t* payload, size_t payload_len) {
+  if ((from->permissions & PERM_ACL_ROLE_MASK) < PERM_ACL_READ_ONLY) return 0;
+  if (req_type == REQ_TYPE_UNSUBSCRIBE) {
+    from->extra.sub.clear();
+    memset(&reply_data[4], 0, 4);
+    getRNG()->random(&reply_data[8], 2);   // entropy for packet-hash uniqueness
+    return 4 + 4 + 2;
+  }
+  memset(&reply_data[4], 0, 4);            // default: refused (0 secs)
+  if (payload_len >= 8) {
+    uint32_t tag; uint16_t secs;
+    memcpy(&tag, &payload[0], 4);
+    memcpy(&secs, &payload[4], 2);
+    uint8_t dlen = payload[7];
+    umc::TelemSub ns;
+    if (dlen > 0 && (size_t)dlen + 8 <= payload_len && secs > 0 && umc::telemSubParse(ns, &payload[8], dlen)) {
+      if (secs > TELEM_SUBSCRIBE_MAX_SECS) secs = TELEM_SUBSCRIBE_MAX_SECS;
+      ns.push_tag = tag;
+      ns.expiry = getRTCClock()->getCurrentTime() + secs;
+      ns.region_id = (recv_pkt_region != NULL && !recv_pkt_region->isWildcard()) ? recv_pkt_region->id : 0;
+      from->extra.sub = ns;
+      memcpy(&reply_data[4], &secs, 2);
+    }
+  }
+  return 4 + 4;
+}
+
+// Called from loop(): read sensors every SENSOR_READ_INTERVAL_SECS, push to subscribers whose watched values moved.
+void MyMesh::telemPushTick() {
+  uint32_t curr = getRTCClock()->getCurrentTime();
+  if (curr < last_telem_read + SENSOR_READ_INTERVAL_SECS) return;
+  last_telem_read = curr;
+
+  bool any = false;
+  for (int i = 0; i < acl.getNumClients(); i++) {
+    auto c = acl.getClientByIdx(i);
+    if (c->permissions != 0 && c->extra.sub.active(curr)) { any = true; break; }
+  }
+  bool mqtt_on = mqtt.isActive();
+  if (!any && !mqtt_on) return;             // nobody listening: do not even touch the sensors
+
+  telemetry.reset();
+  telemetry.addVoltage(TELEM_CHANNEL_SELF, (float)getBatteryMilliVolts(true) / 1000.0f);
+  sensors.querySensors(0xFF, telemetry);
+  float temperature = board.getMCUTemperature();
+  if (!isnan(temperature)) telemetry.addTemperature(TELEM_CHANNEL_SELF, temperature);
+
+  if (mqtt_on) {                            // the broker: on change, plus a heartbeat so the dash can tell "quiet" from "gone"
+    umc::telemSubAuto(mqtt_telem, telemetry.getBuffer(), telemetry.getSize());
+    bool chg = umc::telemSubChanged(mqtt_telem, telemetry.getBuffer(), telemetry.getSize());
+    if (chg || curr >= last_mqtt_telem + 900) {
+      mqtt.publishTelemetry(telemetry.getBuffer(), telemetry.getSize());
+      last_mqtt_telem = curr;
+    }
+  }
+
+  for (int i = 0; i < acl.getNumClients(); i++) {
+    auto c = acl.getClientByIdx(i);
+    if (c->permissions == 0 || !c->extra.sub.active(curr)) continue;
+    // guests never get more than base telemetry; subscribers are >= read-only so full set is allowed
+    if (!umc::telemSubChanged(c->extra.sub, telemetry.getBuffer(), telemetry.getSize())) continue;
+
+    uint8_t tlen = telemetry.getSize();
+    if (tlen + 8 > sizeof(reply_data)) continue;
+    memcpy(reply_data, &c->extra.sub.push_tag, 4);
+    uint32_t ts = getRTCClock()->getCurrentTimeUnique();
+    memcpy(&reply_data[4], &ts, 4);
+    memcpy(&reply_data[8], telemetry.getBuffer(), tlen);
+    mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, c->id, c->shared_secret, reply_data, 8 + tlen);
+    if (!reply) continue;
+    if (c->out_path_len != OUT_PATH_UNKNOWN) {
+      sendDirect(reply, c->out_path, c->out_path_len, 0);
+    } else {
+      TransportKey scope;
+      RegionEntry* r = c->extra.sub.region_id ? region_map.findById(c->extra.sub.region_id) : NULL;
+      if (r && region_map.getTransportKeysFor(*r, &scope, 1) > 0) sendFloodScoped(scope, reply, 0, _prefs.path_hash_mode + 1);
+      else if (!default_scope.isNull())                          sendFloodScoped(default_scope, reply, 0, _prefs.path_hash_mode + 1);
+      else                                                       sendFlood(reply, 0, _prefs.path_hash_mode + 1);
+    }
+  }
+}
+#endif
 
 mesh::Packet *MyMesh::createSelfAdvert() {
   uint8_t app_data[MAX_ADVERT_DATA_SIZE];
@@ -1251,6 +1348,11 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   next_history_sample_ms = 0;
   next_local_advert = next_flood_advert = 0;
   dirty_contacts_expiry = 0;
+#ifdef UMC_BUILD
+  last_telem_read = 0;
+  last_mqtt_telem = 0;
+  mqtt_telem.clear();
+#endif
   set_radio_at = revert_radio_at = 0;
   _logging = false;
   _archive_neighbours_dirty = false;
@@ -3350,6 +3452,10 @@ void MyMesh::loop() {
   }
 
   // is pending dirty contacts write needed?
+#ifdef UMC_BUILD
+  telemPushTick();
+#endif
+
   if (dirty_contacts_expiry && millisHasNowPassed(dirty_contacts_expiry)) {
     acl.save(_fs);
     dirty_contacts_expiry = 0;

@@ -43,6 +43,7 @@ object UmcNet {
     val senderName = MutableStateFlow("UMC-App")
     val messages = MutableStateFlow<List<NetMessage>>(emptyList())
     val repeaters = MutableStateFlow<Map<String, Repeater>>(emptyMap())
+    val sensors = MutableStateFlow<Map<String, SensorSet>>(emptyMap())      // newest sensor readings per repeater
     /** Set when secure storage cannot be opened: nothing is saved and nothing is sent. */
     val storageError = MutableStateFlow<String?>(null)
 
@@ -209,7 +210,7 @@ object UmcNet {
 
     fun forgetAccount() {
         stopSession(); account.value = null; phase.value = JoinPhase.NONE; status.value = "not connected"
-        prefs?.edit()?.remove("account")?.putBoolean("knocking", false)?.apply(); book.clear(); messages.value = emptyList(); repeaters.value = emptyMap()
+        prefs?.edit()?.remove("account")?.putBoolean("knocking", false)?.apply(); book.clear(); messages.value = emptyList(); repeaters.value = emptyMap(); sensors.value = emptyMap()
         synchronized(saveLock) { saveJob?.cancel(); saveJob = null; historyFile?.delete() }
     }
 
@@ -280,6 +281,7 @@ object UmcNet {
         if (a != null && topic == Protocol.replayTopic(a.area, a.clientId)) { onReplay(payload); return }
         val t = Protocol.parseTopic(topic) ?: return
         if (t.deviceId == me) return                                     // our own packets echoed back
+        if (t.kind == "telemetry") { onTelemetry(t.deviceId, payload, retained); return }
         val r = Protocol.parseReport(topic, payload) ?: return
         if (r.originId == me) return
         val now = System.currentTimeMillis()
@@ -292,6 +294,14 @@ object UmcNet {
         val changed = if (r.direction == "tx") book.onSent(r.deviceId, raw, now)
                       else book.onHeard(r.deviceId, raw, r.snr, r.rssi, now, decoded(), AppState.regions.value)
         if (changed) { publishBook(); noteSeen(now / 1000) }
+    }
+
+    private fun onTelemetry(deviceId: String, payload: ByteArray, retained: Boolean) {
+        val hex = Protocol.parseTelemetryHex(payload) ?: return
+        val readings = Lpp.decode(MsgCodec.fromHex(hex) ?: return)
+        if (readings.isEmpty()) return
+        val name = repeaters.value[deviceId]?.name.orEmpty()
+        sensors.value = sensors.value + (deviceId to SensorSet(deviceId, name, System.currentTimeMillis(), readings))
     }
 
     // ---------------------------------------------------------------- channels

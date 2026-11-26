@@ -32,6 +32,7 @@ import com.composables.icons.lucide.ChartPie
 import com.composables.icons.lucide.Globe
 import com.composables.icons.lucide.Hash
 import com.composables.icons.lucide.House
+import com.composables.icons.lucide.Thermometer
 import com.composables.icons.lucide.LocateFixed
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Map
@@ -54,6 +55,7 @@ enum class Dest(val label: String, val icon: ImageVector) {
     GPS("GPS", Lucide.LocateFixed),
     RADIO("Radio", Lucide.Settings),
     DEVICE("Device", Lucide.Wifi),
+    SENSORS("Sensors", Lucide.Thermometer),
     NET("UMC Net", Lucide.Globe),
     RADIOS("Radios", Lucide.Radio),
     LOOK("Look", Lucide.SlidersHorizontal),

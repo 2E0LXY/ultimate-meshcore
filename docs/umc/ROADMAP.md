@@ -278,7 +278,8 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 | 3.2 | **Bluetooth** on repeaters: NUS service advertised as `MeshCore-UMC-<name>`, same protocol subset + CLI, PIN pairing, idle auto-off | new (spec) | ✅ Heltec V4 builds (hardware test pending) |
 | 3.3 | Web Bluetooth / Web Serial "UMC Config" page (no WiFi needed) | new | 📋 |
 | 3.4 | BitChat `#mesh` bridge over BLE | MeshCore-BitChat | 📋 |
-| 3.5 | Home Assistant MQTT discovery (sensors: battery, noise, packets, neighbours) | jmead, Offband | 📋 |
+| 3.5 | Home Assistant MQTT discovery (sensors: battery, noise, packets, neighbours) | jmead, Offband | 📋 (telemetry topic now exists: `meshcore/<area>/<id>/telemetry`) |
+| 3.6 | Telemetry push on change: radio subscribe/unsubscribe, MQTT `telemetry` topic, dash Sensors tab, app Sensors tile | ripplebiz/MeshCore-sensor-playground | ✅ |
 
 ## 4. Reliability and maintenance
 

@@ -158,6 +158,7 @@ fun UmcApp() {
                         Dest.GPS -> GpsScreen()
                         Dest.RADIO -> RadioScreen()
                         Dest.DEVICE -> UmcDeviceScreen()
+                        Dest.SENSORS -> SensorsScreen()
                         Dest.NET -> UmcNetScreen(onBack = { go(Dest.HOME) }, onMessages = { go(Dest.CHATS) })
                         Dest.RADIOS -> ConnectScreen(onUmcNet = { go(Dest.NET) })
                         Dest.LOOK -> LookScreen()

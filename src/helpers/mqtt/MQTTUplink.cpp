@@ -1256,6 +1256,42 @@ void MQTTUplink::publishPacket(const mesh::Packet& packet, bool is_tx, int rssi,
   freeScratchBuffer(raw_payload);
 }
 
+void MQTTUplink::publishTelemetry(const uint8_t* lpp, uint8_t len) {
+  if (!_running || lpp == nullptr || len == 0 || len > 200) {
+    return;
+  }
+  char* payload = allocScratchBuffer(640);
+  if (payload == nullptr) {
+    return;
+  }
+  char ts[32];
+  formatIsoTimestamp(time(nullptr), ts, sizeof(ts));
+  char origin[80];
+  const char* node_name = (_node_name != nullptr && _node_name[0] != 0) ? _node_name : _device_id;
+  escapeJsonString(node_name, origin, sizeof(origin));
+  int n = snprintf(payload, 640, "{\"timestamp\":\"%s\",\"origin\":\"%s\",\"lpp\":\"", ts, origin);
+  static const char kHex[] = "0123456789ABCDEF";
+  if (n <= 0 || n + 2 * len + 3 >= 640) {
+    freeScratchBuffer(payload);
+    return;
+  }
+  for (uint8_t i = 0; i < len; i++) {
+    payload[n++] = kHex[lpp[i] >> 4];
+    payload[n++] = kHex[lpp[i] & 15];
+  }
+  payload[n++] = '"';
+  payload[n++] = '}';
+  payload[n] = 0;
+  char topic[128];
+  formatTopic(topic, sizeof(topic), "telemetry");
+  for (BrokerState& broker : _brokers) {
+    if (broker.spec != nullptr && broker.spec->custom) {
+      queuePublish(broker, topic, payload, false);
+    }
+  }
+  freeScratchBuffer(payload);
+}
+
 void MQTTUplink::formatStatusReply(char* reply, size_t reply_size) const {
   auto broker_state = [this](uint8_t bit) -> const char* {
     if ((_prefs.enabled_mask & bit) == 0) {
@@ -1984,6 +2020,7 @@ void MQTTUplink::begin(FILESYSTEM*) {}
 void MQTTUplink::end() {}
 void MQTTUplink::loop(const MQTTStatusSnapshot&) {}
 void MQTTUplink::publishPacket(const mesh::Packet&, bool, int, float, int, int) {}
+void MQTTUplink::publishTelemetry(const uint8_t*, uint8_t) {}
 void MQTTUplink::formatStatusReply(char* reply, size_t reply_size) const { snprintf(reply, reply_size, "> unsupported"); }
 bool MQTTUplink::setEndpointEnabled(uint8_t, bool) { return false; }
 bool MQTTUplink::isEndpointEnabled(uint8_t) const { return false; }

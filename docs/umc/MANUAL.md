@@ -421,6 +421,15 @@ or re-run `install-dash.sh` so the access lists gain the new topics).
 * The dashboard answers on `umcnet/v1/<area>/replay/<ID>`: up to 500 packets, oldest first, each `{"origin_id","timestamp","type":"RAW","data":"<hex>","direction":"rx|tx","snr","rssi","replay":1}`, then `{"done":1,"n":<count>}`. Not retained.
 * One request per client id every 20 seconds; extra requests are ignored. A client may write only its own request topic and read only its own replay topic. Replays are never sent on `meshcore/.../raw`, so no repeater re-transmits them.
 
+### 13.2 Sensor telemetry
+
+A repeater with a battery gauge or sensors reports them to the UMC Net broker (UMC Net dashboard 2.30 or later; run `umcnet-user sync` or re-run `install-dash.sh` so the access lists gain the new topic).
+
+* The repeater reads its sensors every 60 seconds (`SENSOR_READ_INTERVAL_SECS`) and publishes to `meshcore/<area>/<ID>/telemetry` when a value has moved by more than a default step (voltage 0.05 V, temperature 0.5 °C, humidity 2 %, pressure 1 hPa), and in any case at least every 15 minutes so a quiet sensor can be told from a dead repeater. If nobody is listening it does not read the sensors at all.
+* Message: `{"timestamp","origin","lpp":"<hex>"}`, where `lpp` is the Cayenne LPP buffer. It goes to the UMC Net broker only, never to the public brokers.
+* The dashboard keeps seven days of readings and shows them on the **Sensors** tab (latest value, 24 hour low and high, and a 24 hour line). The app shows the newest readings on its **Sensors** tile.
+* Over the radio, a client can ask the repeater to push telemetry only when values change: see `docs/payloads.md`, "Telemetry subscribe". Idea taken from `ripplebiz/MeshCore-sensor-playground` (`repeater-telem-push`).
+
 ---
 
 ## 14. Bridge

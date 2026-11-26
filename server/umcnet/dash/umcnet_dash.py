@@ -27,7 +27,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.29"
+VERSION = "2.30"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -271,12 +271,64 @@ def device(did, area=""):
     if area: d["area"] = area
     return d
 
+
+# ---- repeater sensor telemetry (Cayenne LPP, published by the repeater as meshcore/<area>/<id>/telemetry) ----
+# type -> (name, bytes, divisor, signed, unit); multi-value types are skipped over but not stored
+LPP = {0: ("digital in", 1, 1, False, ""), 1: ("digital out", 1, 1, False, ""), 2: ("analog in", 2, 100, True, ""), 3: ("analog out", 2, 100, True, ""),
+       100: ("generic", 4, 1, False, ""), 101: ("light", 2, 1, False, "lx"), 102: ("presence", 1, 1, False, ""), 103: ("temperature", 2, 10, True, "°C"),
+       104: ("humidity", 1, 2, False, "%"), 115: ("pressure", 2, 10, False, "hPa"), 116: ("voltage", 2, 100, False, "V"), 117: ("current", 2, 1000, True, "A"),
+       118: ("frequency", 4, 1, False, "Hz"), 120: ("percent", 1, 1, False, "%"), 121: ("altitude", 2, 1, True, "m"), 125: ("concentration", 2, 1, False, "ppm"),
+       128: ("power", 2, 1, False, "W"), 130: ("distance", 4, 1000, False, "m"), 131: ("energy", 4, 1000, False, "kWh"), 132: ("direction", 2, 1, False, "°"),
+       133: ("time", 4, 1, False, ""), 142: ("switch", 1, 1, False, "")}
+LPP_SKIP = {113: 6, 134: 6, 135: 3, 136: 9}      # accelerometer, gyrometer, colour, GPS: skipped safely
+def lpp_decode(b):
+    """-> [(channel, type, name, value, unit)]; stops quietly at the first thing it cannot read (never raises)."""
+    out, i = [], 0
+    while i + 2 <= len(b):
+        ch, t = b[i], b[i + 1]
+        if ch == 0 and t == 0: break
+        if t in LPP_SKIP: n = LPP_SKIP[t]; i += 2 + n; continue
+        if t not in LPP: break
+        name, n, div, sg, unit = LPP[t]
+        if i + 2 + n > len(b): break
+        v = int.from_bytes(b[i + 2:i + 2 + n], "big", signed=sg)
+        out.append((ch, t, name, round(v / div, 3), unit)); i += 2 + n
+    return out
+
+def telem_store(did, area, lpp_hex, now):
+    try: vals = lpp_decode(bytes.fromhex(lpp_hex))
+    except (ValueError, TypeError): COUNT["bad_telem"] += 1; return 0
+    if not vals: return 0
+    with LOCK:
+        DB.executemany("INSERT INTO telem VALUES(?,?,?,?,?,?,?)", [(did, area, int(now), ch, t, name, v) for ch, t, name, v, unit in vals])
+    COUNT["telem"] += 1
+    return len(vals)
+
+def telem_latest(allowed=None):
+    """Newest value of every sensor, with 24 h min/max, for the Sensors tab. `allowed` = device ids a restricted user may see."""
+    now = int(time.time()); rows = []
+    with LOCK:
+        for did, area, ts, ch, t, name, v in DB.execute("SELECT did,area,MAX(ts),ch,type,name,v FROM telem GROUP BY did,ch,type").fetchall():
+            if allowed is not None and did not in allowed: continue
+            lo, hi, n = DB.execute("SELECT MIN(v),MAX(v),COUNT(*) FROM telem WHERE did=? AND ch=? AND type=? AND ts>=?", (did, ch, t, now - 86400)).fetchone()
+            rows.append({"id": did, "area": area, "name": (DEV.get(did) or {}).get("name") or did[:8], "ts": ts, "age": now - ts, "ch": ch, "type": t, "sensor": name,
+                         "v": v, "unit": LPP.get(t, ("", 0, 1, False, ""))[4], "min": lo, "max": hi, "n": n})
+    rows.sort(key=lambda r: (r["name"].lower(), r["ch"], r["type"]))
+    return rows
+
+def telem_series(did, ch, t, hours=24):
+    with LOCK:
+        return [[ts, v] for ts, v in DB.execute("SELECT ts,v FROM telem WHERE did=? AND ch=? AND type=? AND ts>=? ORDER BY ts", (did, int(ch), int(t), int(time.time()) - int(hours * 3600))).fetchall()]
+
+def telem_prune(now):
+    DB.execute("DELETE FROM telem WHERE ts<?", (now - 7 * 86400,))
+
 def on_publish(topic, payload, retained=False):
     now = time.time()
     if topic.startswith("$SYS/"):
         with LOCK: SYS[topic] = [payload.decode("utf-8", "replace"), now]
         return
-    m = re.match(r"^meshcore/([^/]+)/([0-9A-Fa-f]{64})/(raw|packets|status)$", topic)
+    m = re.match(r"^meshcore/([^/]+)/([0-9A-Fa-f]{64})/(raw|packets|status|telemetry)$", topic)
     COUNT["messages"] += 1; note_rate("messages")
     if not m:
         COUNT["other_topics"] += 1; return
@@ -300,6 +352,9 @@ def on_publish(topic, payload, retained=False):
             for k_src, k_dst in (("model", "model"), ("firmware_version", "fw"), ("radio", "radio"), ("client_version", "client"), ("repeat", "repeat")):
                 if j.get(k_src) is not None: d[k_dst] = j[k_src]
             if isinstance(j.get("stats"), dict): d["stats"] = j["stats"]
+            return
+        if kind == "telemetry":
+            if not retained and isinstance(j.get("lpp"), str) and len(j["lpp"]) <= 400: telem_store(did, area, j["lpp"], now)
             return
         if kind == "raw": d["n_raw"] += 1
         else: d["n_pkt"] += 1
@@ -563,6 +618,7 @@ def db_init():
     DB.execute("PRAGMA journal_mode=WAL"); DB.execute("PRAGMA synchronous=NORMAL")
     DB.execute("CREATE TABLE IF NOT EXISTS samples(ts INTEGER, k TEXT, v REAL)"); DB.execute("CREATE INDEX IF NOT EXISTS s_k ON samples(k, ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, seen INTEGER, chan TEXT, chash TEXT, region TEXT, sender TEXT, text TEXT, pkey TEXT UNIQUE, dir TEXT, hops INTEGER, snr REAL, rssi INTEGER, heard TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS m_seen ON messages(seen)")
+    DB.execute("CREATE TABLE IF NOT EXISTS telem(did TEXT, area TEXT, ts INTEGER, ch INTEGER, type INTEGER, name TEXT, v REAL)"); DB.execute("CREATE INDEX IF NOT EXISTS t_key ON telem(did, ch, type, ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS grp_buf(pkey TEXT, did TEXT, seen INTEGER, dir TEXT, snr REAL, rssi INTEGER, raw TEXT, PRIMARY KEY(pkey, did, dir))"); DB.execute("CREATE INDEX IF NOT EXISTS g_seen ON grp_buf(seen)")
     DB.execute("CREATE TABLE IF NOT EXISTS links(a TEXT, b TEXT, first INTEGER, last INTEGER, snr REAL, rssi INTEGER, PRIMARY KEY(a, b))")
     DB.execute("CREATE TABLE IF NOT EXISTS traffic(h INTEGER, node TEXT, rx TEXT, ptype TEXT, hops INTEGER, n INTEGER, PRIMARY KEY(h, node, rx, ptype, hops))")
@@ -598,6 +654,7 @@ def sampler_loop():
             if int(time.time()) % 600 < 60: nodes_housekeeping()
             now = int(time.time()); vals = snapshot_values()
             grp_prune(now)
+            if now % 3600 < 60: telem_prune(now)
             DB.executemany("INSERT INTO samples VALUES(?,?,?)", [(now, k, float(v)) for k, v in vals.items()])
             if now % 3600 < 60:
                 cut = now - CONF["keep_days"] * 86400; DB.execute("DELETE FROM samples WHERE ts<?", (cut,)); DB.execute("DELETE FROM events WHERE ts<?", (cut,)); DB.execute("DELETE FROM audit WHERE ts<?", (now - max(90, CONF["keep_days"]) * 86400,))
@@ -1753,7 +1810,7 @@ def overview():
         sysd = {k: v[0] for k, v in SYS.items()}
         try: msg_last = (DB.execute("SELECT MAX(id) FROM messages").fetchone() or [0])[0] or 0
         except Exception: msg_last = 0
-        res = {"routes": packet_routes(), "scope": scope_audit(24), "scope_names": scope_names(), "msg_last": msg_last, "version": VERSION, "now": now, "started": START, "mqtt": dict(MQTT), "sys": sysd, "system": sysinfo, "cert": cert, "devices": devs, "clients": clients, "accounts": accs,
+        res = {"sensors": telem_latest(), "routes": packet_routes(), "scope": scope_audit(24), "scope_names": scope_names(), "msg_last": msg_last, "version": VERSION, "now": now, "started": START, "mqtt": dict(MQTT), "sys": sysd, "system": sysinfo, "cert": cert, "devices": devs, "clients": clients, "accounts": accs,
                "packets": [dict(p) for p in list(PKTS)[-60:]][::-1], "events": [dict(e) for e in list(EVENTS)[-80:]][::-1], "log": [dict(l) for l in list(LOG)[-60:]][::-1], "count": dict(COUNT),
                "rates": {"messages": rate_per_min("messages"), "packets": rate_per_min("packets"), "unique": rate_per_min("unique")},
                "overlap": {"ids": ids, "names": [DEV[i]["name"] or i[:8] for i in ids], "m": overlap}, "heard_by": dict(sorted(multi.items())), "types": dict(types),
@@ -1962,6 +2019,9 @@ class H(BaseHTTPRequestHandler):
                 else:                                           # nothing secret leaves for other users
                     c = json.loads(json.dumps(o["config"])); c.get("alerts", {})["url"] = "(set by the administrator)" if c.get("alerts", {}).get("url") else ""; c.pop("web_users", None); o["config"] = c
                 return self.send(200, json.dumps(o, default=str))
+            if u.path == "/api/telemetry":
+                try: return self.send(200, json.dumps(telem_series(str(q.get("id", [""])[0]).upper(), int(q.get("ch", ["0"])[0]), int(q.get("type", ["0"])[0]), max(1, min(168, float(q.get("hours", ["24"])[0]))))))
+                except ValueError: return self.send(400, '{"error":"bad request"}')
             if u.path == "/api/history":
                 keys = [k for k in (q.get("k", [""])[0]).split(",") if k][:60]; secs = max(60, min(14 * 86400, int(q.get("range", ["3600"])[0])))
                 return self.send(200, json.dumps(history(keys, secs)))

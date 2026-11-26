@@ -41,6 +41,9 @@ public:
   void publishPacket(const mesh::Packet& packet, bool is_tx, int rssi, float snr, int score = -1,
                      int duration = -1);
 
+  // UMC: the repeater's own sensor readings (Cayenne LPP, hex) to the UMC Net broker only, never to public brokers.
+  void publishTelemetry(const uint8_t* lpp, uint8_t len);
+
   bool isRunning() const { return _running; }
   bool isActive() const;
 

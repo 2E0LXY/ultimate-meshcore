@@ -731,6 +731,45 @@ class AdminHelper(unittest.TestCase):
         self.assertFalse(adm.handle({"op": "nonsense"})["ok"])
 
 
+
+class Telemetry(unittest.TestCase):
+    DID = "AB" * 32
+    # ch1 voltage 4.10 V, ch2 temperature -5.5 C, ch3 humidity 50 %
+    LPP = bytes([1, 116, 0x01, 0x9A, 2, 103]) + (-55).to_bytes(2, "big", signed=True) + bytes([3, 104, 100])
+    def setUp(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM telem"); dash.DEV.clear()
+    def test_decodes_values_with_units_and_signs(self):
+        v = {x[2]: (x[3], x[4]) for x in dash.lpp_decode(self.LPP)}
+        self.assertEqual({"voltage": (4.1, "V"), "temperature": (-5.5, "°C"), "humidity": (50.0, "%")}, v)
+    def test_truncated_or_unknown_never_raises(self):
+        self.assertEqual([], dash.lpp_decode(b"\x01"))
+        self.assertEqual(1, len(dash.lpp_decode(self.LPP[:4] + b"\x02\xfa\x00")))      # unknown type: keep what was read
+        self.assertEqual(1, len(dash.lpp_decode(self.LPP[:4] + bytes([2, 103, 0]))))    # cut mid-value
+    def test_skips_multi_value_types(self):
+        gps = bytes([9, 136]) + bytes(9)
+        self.assertEqual(["voltage"], [x[2] for x in dash.lpp_decode(gps + self.LPP[:4])])
+    def test_topic_is_accepted_and_stored(self):
+        body = json.dumps({"timestamp": "2026-11-26T13:00:00Z", "origin": "Tingley", "lpp": self.LPP.hex().upper()}).encode()
+        dash.on_publish("meshcore/LBA/%s/telemetry" % self.DID, body)
+        rows = dash.telem_latest()
+        self.assertEqual(3, len(rows)); self.assertEqual({"voltage", "temperature", "humidity"}, {r["sensor"] for r in rows})
+        self.assertEqual(self.DID, rows[0]["id"])
+    def test_latest_has_min_max_and_series(self):
+        now = int(time.time())
+        for i, tv in enumerate((10.0, 14.5, 12.0)):
+            dash.DB.execute("INSERT INTO telem VALUES(?,?,?,?,?,?,?)", (self.DID, "LBA", now - 600 + i * 60, 2, 103, "temperature", tv))
+        r = [x for x in dash.telem_latest() if x["type"] == 103][0]
+        self.assertEqual((12.0, 10.0, 14.5, 3), (r["v"], r["min"], r["max"], r["n"]))
+        self.assertEqual([10.0, 14.5, 12.0], [v for _, v in dash.telem_series(self.DID, 2, 103, 1)])
+    def test_junk_payloads_are_counted_not_fatal(self):
+        dash.on_publish("meshcore/LBA/%s/telemetry" % self.DID, b"not json")
+        dash.on_publish("meshcore/LBA/%s/telemetry" % self.DID, json.dumps({"lpp": "ZZ"}).encode())
+        dash.on_publish("meshcore/LBA/%s/telemetry" % self.DID, json.dumps({"lpp": "00" * 500}).encode())
+        self.assertEqual([], dash.telem_latest())
+    def test_viewers_may_read_telemetry_and_clients_may_not_write_it(self):
+        acl = usr.acl_for("phone", {"role": "client", "device": self.DID})
+        self.assertIn("topic read meshcore/+/+/telemetry", acl); self.assertNotIn("telemetry", "".join(l for l in acl.splitlines() if "write" in l))
+
 if __name__ == "__main__":
     unittest.main()
 

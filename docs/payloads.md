@@ -102,6 +102,25 @@ For the common chat/server helpers in `BaseChatMesh`, the current request type v
 | `0x01` | get stats | get stats of repeater or room server               |
 | `0x02` | keepalive | keep-alive request used for maintained connections |
 
+| `0x08` | subscribe | UMC: push telemetry when watched values change (see below) |
+| `0x09` | unsubscribe | UMC: cancel the subscription |
+
+#### Telemetry subscribe (UMC)
+
+Needs read-only access or better; guests are refused. The repeater reads its sensors every `SENSOR_READ_INTERVAL_SECS` (60) and sends a response packet to the subscriber when a watched value has moved by more than its minimum delta since the last push.
+
+Request body after the `0x08` byte:
+
+| Field         | Size | Description                                                                   |
+|---------------|------|-------------------------------------------------------------------------------|
+| push_tag      | 4    | echoed in the first four bytes of every push so the client can match it       |
+| timeout_secs  | 2    | little endian, capped at `TELEM_SUBSCRIBE_MAX_SECS` (3600); 0 is refused      |
+| reserved      | 1    | 0                                                                             |
+| deltas_len    | 1    | length of the list below, at least 1                                          |
+| deltas        | n    | repeated: channel (1), Cayenne LPP type (1), minimum change in that type's own encoding |
+
+Only single-value types are allowed, at most 8 entries, no channel 0, no duplicates; anything else refuses the whole request. Reply: 2 bytes granted seconds (little endian, 0 = refused), 2 bytes reserved. A push is `[push_tag 4][timestamp 4][Cayenne LPP]`. The first push comes with the next sensor read (within 60 seconds); later ones only on change. Pushes go direct when a path is known, otherwise flood in the request's region scope, else the default scope, else unscoped. Subscriptions live in RAM and end on reboot or expiry.
+
 #### Get stats
 
 Gets information about the node, possibly including the following:

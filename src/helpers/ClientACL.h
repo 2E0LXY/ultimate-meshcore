@@ -1,5 +1,8 @@
 #pragma once
 
+#ifdef UMC_BUILD
+#include <helpers/umc/UmcTelemSub.h>
+#endif
 #include <Arduino.h>   // needed for PlatformIO
 #include <Mesh.h>
 #include <helpers/IdentityStore.h>
@@ -28,6 +31,9 @@ struct ClientInfo {
       unsigned long ack_timeout;
       uint8_t  push_failures;
     } room;
+#ifdef UMC_BUILD
+    umc::TelemSub sub;   // repeater telemetry subscription (transient, not saved)
+#endif
   } extra;
   
   bool isAdmin() const { return (permissions & PERM_ACL_ROLE_MASK) == PERM_ACL_ADMIN; }

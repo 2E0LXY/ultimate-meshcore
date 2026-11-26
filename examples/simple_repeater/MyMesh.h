@@ -175,6 +175,13 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks, public WebPanelComm
   unsigned long pending_discover_until;
   bool region_load_active;
   unsigned long dirty_contacts_expiry;
+#ifdef UMC_BUILD
+  uint32_t last_telem_read;
+  umc::TelemSub mqtt_telem;       // built-in subscription for the UMC Net broker
+  uint32_t last_mqtt_telem;
+  void telemPushTick();
+  int handleTelemSubReq(ClientInfo* from, uint8_t req_type, const uint8_t* payload, size_t payload_len);
+#endif
 #if MAX_NEIGHBOURS
   NeighbourInfo neighbours[MAX_NEIGHBOURS];
 #endif
