@@ -777,6 +777,7 @@ int MyMesh::handleTelemSubReq(ClientInfo* from, uint8_t req_type, const uint8_t*
 // Called from loop(): read sensors every SENSOR_READ_INTERVAL_SECS, push to subscribers whose watched values moved.
 void MyMesh::telemPushTick() {
   uint32_t curr = getRTCClock()->getCurrentTime();
+  if (curr < last_telem_read) { last_telem_read = 0; last_mqtt_telem = 0; }   // the RTC was set backwards: do not stall until it catches up
   if (curr < last_telem_read + SENSOR_READ_INTERVAL_SECS) return;
   last_telem_read = curr;
 
