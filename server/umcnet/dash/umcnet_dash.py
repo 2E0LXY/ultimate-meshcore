@@ -331,7 +331,6 @@ def presence_segments(samples, since, now, gap=PRESENCE_GAP):
         if t1 <= t0: return
         if segs and segs[-1][2] == st and segs[-1][1] == t0: segs[-1][1] = t1
         else: segs.append([t0, t1, st])
-    cur = since
     prev = None                                      # the reading in force at the start of the window
     rows = []
     for ts, v in samples:
