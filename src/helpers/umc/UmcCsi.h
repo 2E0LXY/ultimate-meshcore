@@ -26,32 +26,33 @@ public:
   bool enabled() const { return _want; }
   bool running() const { return _running; }
 
-  // The newest reading, only while sensing is running and calibrated.
+  // The newest reading, only while sensing is running and calibrated. Reads a snapshot taken in loop(): the ESPectre SDK
+  // wants every call on one owner task, and this is also called from the web panel's HTTP task (get csi) and the push tick.
   bool reading(bool& motion, float& movement) const {
-#ifdef UMC_WIFI_CSI
-    if (!_running || !_sensor.ready()) return false;
-    motion = _sensor.motion();
-    movement = _sensor.movement();
+    if (!_running || !_snap_ok) return false;
+    motion = _snap_motion;
+    movement = _snap_move;
     return true;
-#else
-    (void)motion; (void)movement;
-    return false;
-#endif
   }
 
   void loop() {
 #ifdef UMC_WIFI_CSI
     bool up = WiFi.status() == WL_CONNECTED;
-    if (_running && (!_want || !up)) { _sensor.end(); _running = false; }
+    if (_running && (!_want || !up)) { _sensor.end(); _running = false; _snap_ok = false; }
     if (!_running && _want && up && (_last_try == 0 || millis() - _last_try > 15000UL)) {
       _last_try = millis() ? millis() : 1;
       _running = _sensor.begin();                 // after WiFi.begin(); it calibrates for a few seconds, keep the room still
+      _failed = !_running;
     }
+    if (!_want) _failed = false;
     if (_running) {
       // ESPectre switches Wi-Fi power save off on each connection, but the node's own power-save setting can switch it
       // back on (a settings change), which starves CSI. Re-assert every few seconds while sensing.
       if (millis() - _last_ps > 5000UL) { _last_ps = millis(); if (WiFi.getSleep()) WiFi.setSleep(false); }
       _sensor.loop();
+      _snap_ok = _sensor.ready();
+      _snap_motion = _snap_ok && _sensor.motion();
+      _snap_move = _snap_ok ? _sensor.movement() : 0.0f;
     }
 #endif
   }
@@ -59,7 +60,7 @@ public:
   void status(char* out, size_t n) const {
     if (!built()) { snprintf(out, n, "not in this build"); return; }
     if (!_want) { snprintf(out, n, "off"); return; }
-    if (!_running) { snprintf(out, n, "on, waiting for Wi-Fi"); return; }
+    if (!_running) { snprintf(out, n, _failed ? "on, sensor failed to start (retrying every 15 s)" : "on, waiting for Wi-Fi"); return; }
     bool m = false; float mv = 0;
     if (!reading(m, mv)) { snprintf(out, n, "on, calibrating (keep the room still)"); return; }
     snprintf(out, n, "on, %s, movement %.2f", m ? "motion" : "idle", (double)mv);
@@ -67,10 +68,14 @@ public:
 
 private:
   bool _want = false;
-  bool _running = false;
+  volatile bool _running = false;
+  bool _failed = false;
+  volatile bool _snap_ok = false;
+  volatile bool _snap_motion = false;
+  volatile float _snap_move = 0.0f;
   unsigned long _last_try = 0;
   unsigned long _last_ps = 0;
 #ifdef UMC_WIFI_CSI
-  mutable ESPectre _sensor;
+  ESPectre _sensor;
 #endif
 };
