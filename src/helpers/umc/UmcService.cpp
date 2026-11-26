@@ -218,7 +218,12 @@ void UmcService::begin(UmcHost* host, NetworkService* network) {
   _app = new UmcAppServer(*this);
 #if defined(ESP_PLATFORM)
   // begin() and loop() both run on the Arduino loop task, so this watches the whole mesh loop.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  { esp_task_wdt_config_t wc = {}; wc.timeout_ms = kLoopWatchdogSecs * 1000; wc.trigger_panic = true;
+    if (esp_task_wdt_reconfigure(&wc) != ESP_OK) esp_task_wdt_init(&wc); }   // core 3.x starts the task watchdog itself
+#else
   esp_task_wdt_init(kLoopWatchdogSecs, true);
+#endif
   esp_task_wdt_add(nullptr);
   UMC_LOGF("[UMC] last reset: %s\n", resetReasonLabel(esp_reset_reason()));
 #endif
