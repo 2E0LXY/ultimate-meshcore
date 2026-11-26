@@ -807,7 +807,7 @@ void MyMesh::telemPushTick() {
       RegionEntry* r = c->extra.sub.region_id ? region_map.findById(c->extra.sub.region_id) : NULL;
       if (r && region_map.getTransportKeysFor(*r, &scope, 1) > 0) sendFloodScoped(scope, reply, 0, _prefs.path_hash_mode + 1);
       else if (!default_scope.isNull())                          sendFloodScoped(default_scope, reply, 0, _prefs.path_hash_mode + 1);
-      else                                                       sendFlood(reply, 0, _prefs.path_hash_mode + 1);
+      else                                                       sendFlood(reply, (uint32_t)0, _prefs.path_hash_mode + 1);
     }
   }
 }
