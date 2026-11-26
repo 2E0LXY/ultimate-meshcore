@@ -1,0 +1,18 @@
+# Optional PIR (HC-SR501, AM312, any digital output). Wire: VCC to 3V3 (AM312) or 5V (HC-SR501), GND, OUT to ${pir_pin}.
+substitutions:
+  pir_pin: GPIO4
+
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - globals.set: {id: have_pir, value: "true"}
+
+binary_sensor:
+  - platform: gpio
+    id: pir
+    name: "PIR Motion"
+    device_class: motion
+    pin: ${pir_pin}
+    on_state:
+      - globals.set: {id: vote_pir, value: !lambda 'return x;'}

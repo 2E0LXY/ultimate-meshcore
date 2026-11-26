@@ -1,0 +1,11 @@
+# Heltec WiFi LoRa 32 V4 as a presence sensor. NOTE: this is ESPHome firmware, not MeshCore: the LoRa radio is not used.
+substitutions:
+  name: umc-presence-v4
+  friendly_name: UMC Presence V4
+  flash_size: 16MB
+
+packages:
+  base: !include base.yaml
+  # drop-in add-ons: remove the # to fit one or both
+  # pir: !include addon-pir.yaml
+  # mmwave: !include addon-mmwave-ld2410.yaml

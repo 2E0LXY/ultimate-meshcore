@@ -1,0 +1,30 @@
+# Optional mmWave: HLK-LD2410 / LD2410C. Wire: VCC to 5V, GND, LD2410 TX to ${mmw_rx_pin}, LD2410 RX to ${mmw_tx_pin}.
+# Unlike PIR it also sees a person who is sitting still, which Wi-Fi sensing can miss.
+substitutions:
+  mmw_rx_pin: GPIO5
+  mmw_tx_pin: GPIO6
+
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - globals.set: {id: have_mmw, value: "true"}
+
+uart:
+  id: uart_mmw
+  tx_pin: ${mmw_tx_pin}
+  rx_pin: ${mmw_rx_pin}
+  baud_rate: 256000
+  parity: NONE
+  stop_bits: 1
+
+ld2410:
+  uart_id: uart_mmw
+
+binary_sensor:
+  - platform: ld2410
+    has_target:
+      id: mmw_target
+      name: "mmWave Presence"
+      on_state:
+        - globals.set: {id: vote_mmw, value: !lambda 'return x;'}
