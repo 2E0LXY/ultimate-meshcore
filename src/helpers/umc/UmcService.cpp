@@ -283,6 +283,8 @@ void UmcService::loop() {
 #endif
   if (_host != nullptr) umc_health.setEpoch(_host->umcEpoch());
   umc_health.loop(millis(), umc_traffic.rxTotal(), umc_traffic.txTotal());
+  _csi.setEnabled(_prefs.csi_enabled);
+  _csi.loop();
   processMailbox();
   if (_ota_prepare) {
     _ota_prepare = false;
@@ -441,6 +443,9 @@ void UmcService::formatInfoJson(char* out, size_t out_size) const {
 #endif
 #ifdef DISPLAY_CLASS
   appendFeature(out, out_size, pos, "display");
+#endif
+#ifdef UMC_WIFI_CSI
+  appendFeature(out, out_size, pos, "csi");
 #endif
 #if defined(WITH_WEB_PANEL) && WITH_WEB_PANEL
   appendFeature(out, out_size, pos, "webstats");
@@ -810,6 +815,25 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
       _prefs.telnet_enabled = b;
       UmcPrefsStore::save(_prefs);
       snprintf(reply, reply_size, b && isDefaultAdminPassword() ? "OK - starts once admin password is changed" : "OK");
+    }
+    return true;
+  }
+  if (strcmp(command, "get csi") == 0) {
+    char line[96];
+    _csi.status(line, sizeof(line));
+    snprintf(reply, reply_size, "> %s", line);
+    return true;
+  }
+  if (startsWith(command, "set csi ")) {
+    bool b;
+    if (!UmcCsi::built()) {
+      snprintf(reply, reply_size, "Err - Wi-Fi motion sensing is not in this build");
+    } else if (!parseOnOff(command + 8, b)) {
+      snprintf(reply, reply_size, "Err - use on|off");
+    } else {
+      _prefs.csi_enabled = b;
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK");
     }
     return true;
   }

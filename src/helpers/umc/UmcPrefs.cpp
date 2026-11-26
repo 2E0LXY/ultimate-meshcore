@@ -80,6 +80,7 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.telnet_port = 23;
   p.session_timeout_min = 30;
   p.ble_enabled = UMC_DEFAULT_BLE;
+  p.csi_enabled = false;
   p.ble_idle_off_min = UMC_DEFAULT_BLE_IDLE_OFF_MIN;
   p.display_mode = 0;
   p.display_timeout_s = 0;
@@ -136,6 +137,7 @@ void UmcPrefsStore::load(UmcPrefs& p) {
     p.telnet_port = nvs.getUShort("telnet_port", p.telnet_port);
     p.session_timeout_min = nvs.getUShort("sess_min", p.session_timeout_min);
     p.ble_enabled = nvs.getBool("ble", p.ble_enabled);
+    p.csi_enabled = nvs.getBool("csi", p.csi_enabled);
     p.ble_idle_off_min = nvs.getUShort("ble_idle", p.ble_idle_off_min);
     p.display_mode = nvs.getUChar("disp_mode", p.display_mode);
     p.display_timeout_s = nvs.getUShort("disp_to", p.display_timeout_s);
@@ -189,6 +191,7 @@ bool UmcPrefsStore::save(const UmcPrefs& p) {
   nvs.putUShort("telnet_port", p.telnet_port);
   nvs.putUShort("sess_min", p.session_timeout_min);
   nvs.putBool("ble", p.ble_enabled);
+  nvs.putBool("csi", p.csi_enabled);
   nvs.putUShort("ble_idle", p.ble_idle_off_min);
   nvs.putUChar("disp_mode", p.display_mode);
   nvs.putUShort("disp_to", p.display_timeout_s);

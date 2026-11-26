@@ -430,6 +430,16 @@ A repeater with a battery gauge or sensors reports them to the UMC Net broker (U
 * The dashboard keeps seven days of readings and shows them on the **Sensors** tab (latest value, 24 hour low and high, and a 24 hour line). The app shows the newest readings on its **Sensors** tile.
 * Over the radio, a client can ask the repeater to push telemetry only when values change: see `docs/payloads.md`, "Telemetry subscribe". Idea taken from `ripplebiz/MeshCore-sensor-playground` (`repeater-telem-push`).
 
+### 13.3 Wi-Fi motion sensing (optional)
+
+Builds named `*_csi` (Heltec V3 and V4 OLED repeaters to start with) can detect movement in the room from the Wi-Fi signal alone, using the [ESPectre](https://espectre.dev/) library. It is a switch next to everything else the node does: LoRa, MQTT and the web panel keep running.
+
+* `set csi on` / `set csi off` (saved), `get csi` shows the state. It is **off by default**. Sensing starts when the node is joined to Wi-Fi, takes a few seconds to calibrate (keep the room still), and stops by itself if Wi-Fi drops.
+* Needs a **2.4 GHz access point** the node stays joined to. Place the node in the room you want to watch; on a mesh Wi-Fi, use the nearest access point. It detects movement, not people, and is weak on someone sitting still.
+* The result joins the telemetry: **presence** on channel 20 and a **movement** percentage on channel 21. They go to the broker, the dash Sensors tab and the app Sensors tile like any other sensor (13.2).
+* **Licence:** ESPectre is GPLv3 (or commercial), so `*_csi` firmware is GPLv3. Normal builds contain none of it.
+* **Experimental:** ESPectre needs Arduino-ESP32 3.3 or later; the other ESP32 builds use 2.0.17. The `*_csi` builds use the pioarduino platform (Arduino 3.3.12). Nodes without Wi-Fi (nRF52, RP2040, STM32 boards) cannot do this.
+
 ---
 
 ## 14. Bridge

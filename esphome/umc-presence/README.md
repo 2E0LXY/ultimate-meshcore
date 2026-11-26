@@ -2,7 +2,7 @@
 
 ESPHome firmware for a Heltec WiFi LoRa 32 V3 / V3.2 or V4 (both ESP32-S3). Wi-Fi sensing ([ESPectre](https://espectre.dev/), built into ESPHome 2026.11+) is the default detector and needs no extra hardware. A PIR and an LD2410 mmWave module are drop-in add-ons.
 
-**This replaces the MeshCore firmware on that board.** ESPHome has no MeshCore stack, so the board is a presence sensor, not a repeater. Use a separate board for each job. (Putting CSI inside the UMC firmware is a different, larger piece of work; see the end.)
+**This replaces the MeshCore firmware on that board.** ESPHome has no MeshCore stack, so the board is a presence sensor, not a repeater. Use a separate board for each job. To keep MeshCore on the board and add Wi-Fi sensing as a switch, use the `umc_*_repeater_csi` firmware instead (MANUAL 13.3). This ESPHome package is for a dedicated sensor board.
 
 ## Use
 

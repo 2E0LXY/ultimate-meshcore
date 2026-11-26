@@ -279,6 +279,7 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 | 3.3 | Web Bluetooth / Web Serial "UMC Config" page (no WiFi needed) | new | 📋 |
 | 3.4 | BitChat `#mesh` bridge over BLE | MeshCore-BitChat | 📋 |
 | 3.5 | Home Assistant MQTT discovery (sensors: battery, noise, packets, neighbours) | jmead, Offband | 📋 (telemetry topic now exists: `meshcore/<area>/<id>/telemetry`) |
+| 3.7 | Wi-Fi motion sensing (ESPectre) as an optional switch in the repeater: `*_csi` builds, `set csi`, presence in telemetry | espectre.dev | 🧪 (builds in CI; not run on a board) |
 | 3.6 | Telemetry push on change: radio subscribe/unsubscribe, MQTT `telemetry` topic, dash Sensors tab, app Sensors tile | ripplebiz/MeshCore-sensor-playground | ✅ |
 
 ## 4. Reliability and maintenance

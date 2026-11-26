@@ -13,6 +13,7 @@ struct UmcPrefs {
   uint16_t session_timeout_min;
   char pin[9];                 // 8 digits; used as setup/rescue AP password and BLE PIN
   bool ble_enabled;
+  bool csi_enabled;            // Wi-Fi motion sensing (only in builds with UMC_WIFI_CSI); off by default
   uint16_t ble_idle_off_min;   // 0 = never auto-off
   uint8_t display_mode;        // 0 = cycle pages, 1 = status page only, 2 = off (button wakes)
   uint16_t display_timeout_s;  // 0 = never blank

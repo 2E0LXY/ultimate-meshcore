@@ -550,6 +550,20 @@ uint8_t MyMesh::handleAnonClockReq(const mesh::Identity& sender, uint32_t sender
   return 0;
 }
 
+
+#ifdef UMC_BUILD
+// Wi-Fi motion sensing (UMC_WIFI_CSI builds, `set csi on`): presence and movement score join the telemetry on fixed channels.
+static const uint8_t TELEM_CHANNEL_CSI = 20;
+static void addCsiTelemetry(UmcService& umc, CayenneLPP& lpp) {
+  bool motion = false; float movement = 0;
+  if (!umc.csiReading(motion, movement)) return;
+  lpp.addPresence(TELEM_CHANNEL_CSI, motion ? 1 : 0);
+  if (movement < 0) movement = 0;
+  if (movement > 1) movement = 1;
+  lpp.addPercentage(TELEM_CHANNEL_CSI + 1, movement * 100.0f);
+}
+#endif
+
 int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t *payload, size_t payload_len) {
   // uint32_t now = getRTCClock()->getCurrentTimeUnique();
   // memcpy(reply_data, &now, 4);   // response packets always prefixed with timestamp
@@ -590,6 +604,9 @@ int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t
       perm_mask = 0x00;  // just base telemetry allowed
     }
     sensors.querySensors(perm_mask, telemetry);
+#ifdef UMC_BUILD
+    if (perm_mask != 0x00) addCsiTelemetry(umc, telemetry);   // guests get base telemetry only
+#endif
 
 	// This default temperature will be overridden by external sensors (if any)
     float temperature = board.getMCUTemperature();
@@ -776,6 +793,7 @@ void MyMesh::telemPushTick() {
   sensors.querySensors(0xFF, telemetry);
   float temperature = board.getMCUTemperature();
   if (!isnan(temperature)) telemetry.addTemperature(TELEM_CHANNEL_SELF, temperature);
+  addCsiTelemetry(umc, telemetry);
 
   if (mqtt_on) {                            // the broker: on change, plus a heartbeat so the dash can tell "quiet" from "gone"
     umc::telemSubAuto(mqtt_telem, telemetry.getBuffer(), telemetry.getSize());

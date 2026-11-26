@@ -5,6 +5,7 @@
 #include "UmcHost.h"
 #include "UmcPrefs.h"
 #include "UmcRoutes.h"
+#include "UmcCsi.h"
 
 #if defined(ESP_PLATFORM)
   #include <freertos/FreeRTOS.h>
@@ -59,6 +60,8 @@ public:
   bool isSetupMode() const { return !_prefs.setup_done; }
   const char* getPin() const { return _prefs.pin; }
   const UmcPrefs& prefs() const { return _prefs; }
+  // Wi-Fi motion sensing: the newest reading, false when off, not built in, or still calibrating
+  bool csiReading(bool& motion, float& movement) const { return _csi.reading(motion, movement); }
   // The region scope a channel is set to send with, or false when it has none of its own.
   bool channelScope(const char* channel_name, char* scope, size_t scope_size) const;
   // Sets (or with scope "-", clears) one channel's scope. False if the table is full.
@@ -99,6 +102,7 @@ private:
   UmcHost* _host;
   NetworkService* _network;
   UmcPrefs _prefs;
+  UmcCsi _csi;
   UmcWebServer* _web;
   UmcTelnet* _telnet;
   UmcUpdater* _updater;

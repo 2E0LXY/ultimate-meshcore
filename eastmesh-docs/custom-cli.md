@@ -332,6 +332,12 @@ Notes for roaming use:
 
 No new CLI commands. UMC builds of `simple_repeater` read the sensors every `SENSOR_READ_INTERVAL_SECS` (60) only while someone is listening: a UMC Net broker connection, or a radio subscriber (request types `0x08` and `0x09`, see `docs/payloads.md`). With the UMC Net link up the repeater publishes `meshcore/<area>/<id>/telemetry` on change and at least every 15 minutes; it never publishes it to public brokers. Adds about 100 bytes of RAM per ACL client (`TELEM_SUB_MAX_ENTRIES` 8).
 
+## Wi-Fi Motion Sensing (UMC `*_csi` builds)
+
+- `get csi`: `off`, `on, waiting for Wi-Fi`, `on, calibrating`, or `on, motion|idle, movement <0..1>`; `not in this build` on normal builds.
+- `set csi on|off`: saved; off by default. Presence and movement are added to telemetry (channels 20 and 21) while sensing is running.
+- Built only with `-D UMC_WIFI_CSI=1` (environments `umc_*_repeater_csi`, pioarduino platform, ESPectre library, GPLv3).
+
 ## Heap Health Check Script
 
 `eastmesh-tools/web-heap-check.sh <host> [--stress] [--rounds N]` reads `memory`, `get web.status`, `get mqtt.status` and `get wifi.status` over the HTTPS API and, with `--stress`, simulates browser page-load bursts before re-reading `memory`. Authenticate with `REPEATER_PASSWORD` or `REPEATER_TOKEN` in the environment (or enter the password at the prompt). Watch `heap_max` (largest internal block; TLS needs ~40KB), `heap_min`, and the `heals`/`deferred`/`leaked` counters.
