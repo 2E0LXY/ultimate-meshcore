@@ -28,7 +28,7 @@ object UmcNet {
     private var prefs: SharedPreferences? = null
     private var appContext: Context? = null
     private var identity: Identity? = null
-    private var session: MqttSession? = null
+    @Volatile private var session: MqttSession? = null
     private var hellos: Job? = null
     private val book = NetBook()
     private val limiter = SendLimiter()
@@ -46,9 +46,20 @@ object UmcNet {
     /** Set when secure storage cannot be opened: nothing is saved and nothing is sent. */
     val storageError = MutableStateFlow<String?>(null)
 
+    /** When any network comes up, retry the broker at once rather than after the backoff (up to 60 s). */
+    private fun watchNetwork(c: Context) {
+        try {
+            val cm = c.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) { session?.retryNow() }
+            })
+        } catch (e: Exception) { /* no connectivity service: the normal backoff still retries */ }
+    }
+
     fun init(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
+        watchNetwork(context.applicationContext)
         val p = try {
             val key = MasterKey.Builder(context.applicationContext).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
             EncryptedSharedPreferences.create(context.applicationContext, "umcnet_secure", key,

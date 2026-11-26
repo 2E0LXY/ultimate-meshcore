@@ -27,6 +27,7 @@ class MqttSession(
     private val lock = Any()
     @Volatile private var closed = false
     @Volatile private var everConnected = false
+    @Volatile private var failedOnce = false                 // a failure with a real reason has been shown: the watchdog must not overwrite it
     private var retryDelayS = 1L
     private var socket: WebSocket? = null          // current attempt (guarded by lock)
     private var connected = false                   // CONNACK 0 received on [socket]
@@ -47,7 +48,7 @@ class MqttSession(
         onState("connecting…", false, false)
         // say so after 20 s instead of showing "connecting…" for ever, while nothing has connected yet
         dog = scheduler.scheduleWithFixedDelay({
-            if (!closed && !everConnected) onState("no answer from $host:443 after ${++waited * 20}s (still trying)", false, false)
+            if (!closed && !everConnected && !failedOnce) onState("no answer from $host:443 after ${++waited * 20}s (still trying)", false, false)
         }, 20, 20, TimeUnit.SECONDS)
         synchronized(lock) { connect() }
     }
@@ -135,7 +136,19 @@ class MqttSession(
             retryTask = try { scheduler.schedule({ synchronized(lock) { connect() } }, wait, TimeUnit.SECONDS) } catch (e: Exception) { null }
         }
         runCatching { old?.cancel() }
-        onState("cannot reach $host: ${t.javaClass.simpleName} ${t.message ?: ""} (retrying in ${wait}s)".replace("  ", " "), false, false)
+        failedOnce = true
+        val why = if (t is java.net.UnknownHostException) "no internet on this network (airplane mode, or a Wi-Fi without internet)"
+                  else "${t.javaClass.simpleName} ${t.message ?: ""}".trim()
+        onState("cannot reach $host: $why (retrying in ${wait}s)", false, false)
+    }
+
+    /** A network has just come up: try now instead of waiting out the retry delay. */
+    fun retryNow() {
+        synchronized(lock) {
+            if (closed || connected || socket != null) return
+            retryTask?.cancel(false); retryDelayS = 1
+            connect()
+        }
     }
 
     /** QoS 0. Reports a failure (not connected, for one) through [onFail]. */
