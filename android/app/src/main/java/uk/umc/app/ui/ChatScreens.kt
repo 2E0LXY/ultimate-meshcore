@@ -17,48 +17,77 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import uk.umc.app.AppState
+import uk.umc.app.net.JoinPhase
+import uk.umc.app.net.UmcNet
 import uk.umc.app.proto.ChatMessage
 import uk.umc.app.proto.MAX_TEXT_BYTES
 import uk.umc.app.proto.MeshSession
 
-/** Messages: the groups (channels) and room servers. People you chat with one-to-one are under Users. */
+/** One line of the Messages list. [conversation] is "ch:<idx>", "c:<prefix>" or "net:<channel>". */
+private data class ConvRow(val conversation: String, val title: String, val subtitle: String, val lastText: String?, val lastAt: Long, val net: Boolean)
+
+/** The radio's groups and room servers; empty (and nothing observed) when no radio is connected. */
 @Composable
-fun ChatsScreen(onOpen: (String) -> Unit) {
-    val session by AppState.session.collectAsState()
-    val s = session ?: return NotConnected()
+private fun radioRows(s: MeshSession?): List<ConvRow> {
+    if (s == null) return emptyList()
     val channels by s.channels.collectAsState()
     val contacts by s.contacts.collectAsState()
     val messages by s.messages.collectAsState()
-
-    data class Row(val conversation: String, val title: String, val subtitle: String, val last: ChatMessage?)
-
-    val rows = buildList {
+    fun text(m: ChatMessage?) = m?.let { (if (it.outgoing) "You: " else if (it.from.isNotEmpty()) "${it.from}: " else "") + it.text }
+    return buildList {
         channels.forEach { ch ->
             val last = messages.lastOrNull { it.conversation == "ch:${ch.idx}" }
-            add(Row("ch:${ch.idx}", ch.name, "channel", last))
+            add(ConvRow("ch:${ch.idx}", ch.name, "channel", text(last), last?.received ?: 0, false))
         }
         // Room servers are shared rooms, so they stay here with the groups. People (chat contacts) are not
         // listed here: they are under Users, where tapping one opens the direct conversation.
         contacts.filter { it.type == uk.umc.app.proto.ADV_TYPE_ROOM }.forEach { c ->
             val last = messages.lastOrNull { it.conversation == "c:${c.prefix}" }
-            add(Row("c:${c.prefix}", c.name, c.typeName + " · " + pathLabel(c), last))
+            add(ConvRow("c:${c.prefix}", c.name, c.typeName + " · " + pathLabel(c), text(last), last?.received ?: 0, false))
         }
-    }.sortedByDescending { it.last?.received ?: 0 }
+    }
+}
+
+/** UMC Net channels, once this phone has joined: each with its newest message. */
+@Composable
+private fun netRows(): List<ConvRow> {
+    val phase by UmcNet.phase.collectAsState()
+    if (phase != JoinPhase.JOINED) return emptyList()
+    val channels by UmcNet.channels.collectAsState()
+    val messages by UmcNet.messages.collectAsState()
+    return channels.map { ch ->
+        val last = messages.lastOrNull { it.channel == ch.name }
+        ConvRow("net:${ch.name}", ch.name, "UMC Net · internet",
+            last?.let { (if (it.outgoing) "You: " else if (it.sender.isNotEmpty()) "${it.sender}: " else "") + it.text }, last?.seenMs ?: 0, true)
+    }
+}
+
+/** Messages: the radio's groups and room servers, and the UMC Net (internet) channels, newest first. People you chat with one-to-one are under Users. */
+@Composable
+fun ChatsScreen(onOpen: (String) -> Unit) {
+    val session by AppState.session.collectAsState()
+    val radio = radioRows(session)
+    val net = netRows()
+    if (session == null && net.isEmpty()) return NotConnected("Connect to a radio, or join UMC Net, to see messages")
+    val rows = (radio + net).sortedByDescending { it.lastAt }
 
     LazyColumn(Modifier.fillMaxSize()) {
-        items(rows) { r ->
+        items(rows, key = { it.conversation }) { r ->
             ListItem(
                 modifier = Modifier.clickable { onOpen(r.conversation) },
                 headlineContent = { Text(r.title, fontWeight = FontWeight.SemiBold) },
                 supportingContent = {
-                    Text(r.last?.let { (if (it.outgoing) "You: " else if (it.from.isNotEmpty()) "${it.from}: " else "") + it.text } ?: r.subtitle,
-                        maxLines = 1)
+                    Column {
+                        if (r.net) Text("UMC Net · internet", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Text(r.lastText ?: r.subtitle, maxLines = 1)
+                    }
                 },
-                trailingContent = { r.last?.let { Text(agoMillis(it.received), style = MaterialTheme.typography.labelSmall) } },
+                trailingContent = { if (r.lastAt > 0) Text(agoMillis(r.lastAt), style = MaterialTheme.typography.labelSmall) },
             )
             HorizontalDivider()
         }
-        if (rows.isEmpty()) item { SectionCard("No groups yet", "Channels and room servers appear here. To message a person, open Users and tap them.") {} }
+        if (session == null) item { Text("No radio connected", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall) }
+        else if (rows.isEmpty()) item { SectionCard("No groups yet", "Channels and room servers appear here. To message a person, open Users and tap them.") {} }
     }
 }
 
@@ -228,8 +257,8 @@ private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.corouti
 }
 
 @Composable
-fun NotConnected() {
+fun NotConnected(message: String = "Connect to a radio first") {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Connect to a radio first", style = MaterialTheme.typography.bodyLarge)
+        Text(message, style = MaterialTheme.typography.bodyLarge, color = LocalContentColor.current)
     }
 }

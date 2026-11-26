@@ -8,8 +8,9 @@ The phone app for Ultimate MeshCore radios — and for any standard MeshCore com
 
 | | |
 |---|---|
+| **Home** | The first screen is a grid of square tiles for everything the app does. The menu at the top right (☰) lists the same places; the Back button returns to Home. |
 | **Connect** | Bluetooth (pair with the PIN on the radio's screen) or WiFi (TCP port 5000 on an Ultimate MeshCore client or repeater). Radios you use are remembered and reconnected. |
-| **Messages** | Queued, pending, delivered, replied and failed states; ACK round-trip time kept separate from reply return-path hops; failure diagnosis; retry on the same route or automatic recovery through a recently ACKed route, live discovery and flood fallback. |
+| **Messages** | Radio groups and room servers together with your **UMC Net** (internet) channels, newest first. UMC Net messages from the last 24 hours are kept on the phone, so history is there offline. Queued, pending, delivered, replied and failed states; ACK round-trip time kept separate from reply return-path hops; failure diagnosis; retry on the same route or automatic recovery through a recently ACKed route, live discovery and flood fallback. |
 | **Contacts** | Everyone the radio knows: log in, **status**, **telemetry**, **trace path**, **discover path**, reset path, share, export/import `meshcore://` contacts, favourites, remove — and a **remote admin console** for repeaters and room servers. |
 | **Channels** | Public, hashtag (`#name`), private (random key) and shared-key channels. |
 | **Map** | Everyone who shares a location, on OpenStreetMap. Tiles you have already viewed keep working offline. |

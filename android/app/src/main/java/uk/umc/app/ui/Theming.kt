@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -92,7 +94,10 @@ fun Backdrop(content: @Composable () -> Unit) {
                 }
             }
         }
-        content()
+        // Text with no colour of its own takes LocalContentColor, which is black until something sets it: the Scaffold
+        // over this backdrop is transparent, so nothing did, and plain text was dark on dark. Set it here for everything inside.
+        val ink = if (kind == Background.SYSTEM) MaterialTheme.colorScheme.onBackground else Color.White
+        CompositionLocalProvider(LocalContentColor provides ink) { content() }
     }
 }
 

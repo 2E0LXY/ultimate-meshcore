@@ -6,40 +6,21 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import com.composables.icons.lucide.Activity
-import com.composables.icons.lucide.Hash
-import com.composables.icons.lucide.House
-import com.composables.icons.lucide.LocateFixed
 import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Map
-import com.composables.icons.lucide.MessageSquare
-import com.composables.icons.lucide.Settings
-import com.composables.icons.lucide.Users
-import com.composables.icons.lucide.Wifi
+import com.composables.icons.lucide.Menu
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.core.view.WindowCompat
 import uk.umc.app.link.LinkState
 import uk.umc.app.ui.*
-
-private enum class Tab(val label: String, val icon: ImageVector) {
-    DASHBOARD("Home", Lucide.House),
-    CHATS("Messages", Lucide.MessageSquare),
-    CONTACTS("Contacts", Lucide.Users),
-    CHANNELS("Channels", Lucide.Hash),
-    MAP("Map", Lucide.Map),
-    SPECTRUM("Spectrum", Lucide.Activity),
-    GPS("GPS", Lucide.LocateFixed),
-    RADIO("Radio", Lucide.Settings),
-    DEVICE("Device", Lucide.Wifi),
-}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,6 +30,11 @@ class MainActivity : ComponentActivity() {
         uk.umc.app.net.UmcNet.init(this)
         createNotificationChannel()
         setContent { UmcApp() }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        uk.umc.app.net.UmcNet.flush()
     }
 
     private fun createNotificationChannel() {
@@ -68,16 +54,23 @@ class MainActivity : ComponentActivity() {
 fun UmcApp() {
     val dark = androidx.compose.foundation.isSystemInDarkTheme()
     ShadTheme(dark) {
-        var tab by remember { mutableStateOf(Tab.DASHBOARD) }
-        var openChat by remember { mutableStateOf<String?>(null) }
-        var showConnect by remember { mutableStateOf(false) }
-        var showLook by remember { mutableStateOf(false) }
-        var showNet by remember { mutableStateOf(false) }
+        // kept across rotation: where we are, and the open conversation ("ch:<idx>", "c:<prefix>" or "net:<channel>")
+        var destName by rememberSaveable { mutableStateOf(Dest.HOME.name) }
+        var openChat by rememberSaveable { mutableStateOf<String?>(null) }
+        var menuOpen by remember { mutableStateOf(false) }
+        val dest = Dest.entries.firstOrNull { it.name == destName } ?: Dest.HOME
+        fun go(d: Dest) { destName = d.name; openChat = null }
         val snackbar = remember { SnackbarHostState() }
         val toast by AppState.toast.collectAsState()
         val state by AppState.linkState.collectAsState()
         val session by AppState.session.collectAsState()
         val self by (session?.self ?: remember { kotlinx.coroutines.flow.MutableStateFlow(null) }).collectAsState()
+        // text colour for everything under the transparent Scaffold: white over a photo, colour or gradient, else the theme's own
+        val ink = if (onGlass()) Color.White else MaterialTheme.colorScheme.onBackground
+
+        // back: a conversation closes to its list, a page returns to Home, Home leaves the app
+        BackHandler(enabled = dest != Dest.HOME && openChat == null) { destName = Dest.HOME.name }
+        BackHandler(enabled = openChat != null) { openChat = null }
 
         LaunchedEffect(toast) {
             toast?.let {
@@ -88,7 +81,8 @@ fun UmcApp() {
 
         Backdrop {
         Scaffold(
-            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            containerColor = Color.Transparent,
+            contentColor = ink,
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
                 TopAppBar(
@@ -106,55 +100,55 @@ fun UmcApp() {
                             )
                         }
                     },
-                    actions = { ShButton(variant = ShVariant.Outline, onClick = { showConnect = true }) { Text("Radios") } },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    actions = {
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) { Icon(Lucide.Menu, contentDescription = "Menu") }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                Dest.entries.forEach { d ->
+                                    DropdownMenuItem(
+                                        text = { Text(d.label, color = if (d == dest && openChat == null) MaterialTheme.colorScheme.primary else Color.Unspecified) },
+                                        leadingIcon = { Icon(d.icon, contentDescription = null) },
+                                        onClick = { menuOpen = false; go(d) },
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent,
+                        titleContentColor = ink, actionIconContentColor = ink, navigationIconContentColor = ink,
+                    ),
                 )
-            },
-            bottomBar = {
-                Column {
-                ShSeparator()
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), tonalElevation = 0.dp) {
-                    Tab.entries.forEach { t ->
-                        NavigationBarItem(
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary,
-                                indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant, unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                            selected = tab == t && openChat == null && !showConnect && !showLook && !showNet,
-                            onClick = { tab = t; openChat = null; showConnect = false; showLook = false; showNet = false },
-                            icon = { Icon(t.icon, contentDescription = t.label) },
-                            label = { Text(t.label, style = MaterialTheme.typography.labelSmall) },
-                        )
-                    }
-                }
-                }
             },
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
+                val chat = openChat
                 when {
-                    showNet -> UmcNetScreen { showNet = false }
-                    showConnect -> ConnectScreen(onUmcNet = { showNet = true })
-                    openChat != null -> ChatScreen(openChat!!) { openChat = null }
-                    showLook -> LookScreen()
-                    else -> when (tab) {
-                        Tab.DASHBOARD -> DashboardScreen { where ->
+                    chat != null ->
+                        if (chat.startsWith("net:")) NetChannelChat(chat.removePrefix("net:")) { openChat = null }
+                        else ChatScreen(chat) { openChat = null }
+                    else -> when (dest) {
+                        Dest.HOME -> HomeScreen { go(it) }
+                        Dest.DASHBOARD -> DashboardScreen { where ->
                             when (where) {
-                                "chats" -> tab = Tab.CHATS
-                                "contacts" -> tab = Tab.CONTACTS
-                                "map" -> tab = Tab.MAP
-                                "radio" -> tab = Tab.RADIO
-                                "look" -> showLook = true
+                                "chats" -> go(Dest.CHATS)
+                                "contacts" -> go(Dest.CONTACTS)
+                                "map" -> go(Dest.MAP)
+                                "radio" -> go(Dest.RADIO)
+                                "look" -> go(Dest.LOOK)
                             }
                         }
-                        Tab.CHATS -> ChatsScreen { openChat = it }
-                        Tab.CONTACTS -> ContactsScreen(onMessage = { openChat = it }, onMap = { tab = Tab.MAP })
-                        Tab.CHANNELS -> ChannelsScreen()
-                        Tab.MAP -> MapScreen()
-                        Tab.SPECTRUM -> SpectrumScreen()
-                        Tab.GPS -> GpsScreen()
-                        Tab.RADIO -> RadioScreen()
-                        Tab.DEVICE -> UmcDeviceScreen()
+                        Dest.CHATS -> ChatsScreen { openChat = it }
+                        Dest.CONTACTS -> ContactsScreen(onMessage = { openChat = it }, onMap = { go(Dest.MAP) })
+                        Dest.CHANNELS -> ChannelsScreen()
+                        Dest.MAP -> MapScreen()
+                        Dest.SPECTRUM -> SpectrumScreen()
+                        Dest.GPS -> GpsScreen()
+                        Dest.RADIO -> RadioScreen()
+                        Dest.DEVICE -> UmcDeviceScreen()
+                        Dest.NET -> UmcNetScreen(onBack = { go(Dest.HOME) }, onMessages = { go(Dest.CHATS) })
+                        Dest.RADIOS -> ConnectScreen(onUmcNet = { go(Dest.NET) })
+                        Dest.LOOK -> LookScreen()
                     }
                 }
             }

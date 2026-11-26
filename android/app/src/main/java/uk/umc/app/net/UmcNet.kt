@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import uk.umc.app.AppState
 
 /** A channel the phone can read and write in UMC Net mode. [psk] is base64, or empty for a #hashtag channel. */
@@ -60,12 +61,52 @@ object UmcNet {
         host.value = p.getString("host", Enrol.DEFAULT_HOST) ?: Enrol.DEFAULT_HOST
         senderName.value = p.getString("sender", "UMC-App") ?: "UMC-App"
         p.getString("channels", null)?.let { loadChannels(it) }
+        loadHistory()
         p.getString("account", null)?.let { SetupCode.parse(it).getOrNull() }?.takeIf { it.clientId == id.id }?.let { account.value = it }
         when {
             account.value != null -> { phase.value = JoinPhase.JOINED; if (p.getBoolean("on", true)) startAccount() }
             p.getBoolean("knocking", false) -> startKnocking()
         }
     }
+
+    // ---------------------------------------------------------------- history kept on the phone
+
+    private val historyFile get() = appContext?.let { File(it.filesDir, "umcnet_messages.json") }
+    private val saveLock = Any()
+    @Volatile private var historyLoaded = false
+    private var saveJob: Job? = null
+
+    private fun loadHistory() {
+        runCatching {
+            val f = historyFile
+            if (f != null && f.exists()) { book.restore(NetStore.decode(f.readText(Charsets.UTF_8), System.currentTimeMillis())); messages.value = book.messages() }
+        }
+        historyLoaded = true
+    }
+
+    /** Shows the book and schedules a save: at most one write every five seconds, not one per packet. */
+    private fun publishBook() {
+        messages.value = book.messages()
+        synchronized(saveLock) {
+            if (saveJob?.isActive == true) return
+            saveJob = scope.launch { delay(5_000L); saveNow() }
+        }
+    }
+
+    private fun saveNow() {
+        if (!historyLoaded) return
+        val f = historyFile ?: return
+        synchronized(saveLock) {
+            runCatching {
+                val tmp = File(f.parentFile, f.name + ".tmp")
+                tmp.writeText(NetStore.encode(book.messages(), System.currentTimeMillis()), Charsets.UTF_8)
+                if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
+            }
+        }
+    }
+
+    /** Writes the history now (the app is going to the background, or the connection is being closed). */
+    fun flush() { synchronized(saveLock) { saveJob?.cancel(); saveJob = null }; saveNow() }
 
     private fun loadChannels(json: String) {
         val a = runCatching { JSONArray(json) }.getOrNull() ?: return
@@ -158,12 +199,13 @@ object UmcNet {
     fun forgetAccount() {
         stopSession(); account.value = null; phase.value = JoinPhase.NONE; status.value = "not connected"
         prefs?.edit()?.remove("account")?.putBoolean("knocking", false)?.apply(); book.clear(); messages.value = emptyList(); repeaters.value = emptyMap()
+        synchronized(saveLock) { saveJob?.cancel(); saveJob = null; historyFile?.delete() }
     }
 
     // ---------------------------------------------------------------- the account connection
 
     fun connect() { if (account.value != null) { prefs?.edit()?.putBoolean("on", true)?.apply(); startAccount() } }
-    fun disconnect() { stopSession(); prefs?.edit()?.putBoolean("on", false)?.apply(); status.value = "not connected" }
+    fun disconnect() { stopSession(); flush(); prefs?.edit()?.putBoolean("on", false)?.apply(); status.value = "not connected" }
 
     private fun stopSession() { hellos?.cancel(); session?.close(); session = null; connected.value = false }
 
@@ -190,7 +232,7 @@ object UmcNet {
     private fun requestReplay(a: UmcAccount) {
         val nowS = System.currentTimeMillis() / 1000
         if (lastSeenS == 0L) lastSeenS = prefs?.getLong("lastSeen", 0L) ?: 0L
-        // the message list is in memory only: if it is empty (app restarted) we hold nothing, so ask for the whole hour
+        // if the book is empty we hold nothing, so ask for the whole hour; if it holds messages (kept on the phone) ask only since the newest
         val seen = if (book.messages().isEmpty()) 0L else lastSeenS
         replayNew = 0
         session?.publish(Protocol.replayRequestTopic(a.area, a.clientId), Protocol.buildReplayRequest(Protocol.replaySince(seen, nowS)).toByteArray(Charsets.UTF_8))
@@ -218,7 +260,7 @@ object UmcNet {
         val changed = if (r.direction == "tx") book.onSent(r.deviceId, raw, at)
                       else book.onHeard(r.deviceId, raw, r.snr, r.rssi, at, decoded(), AppState.regions.value)
         noteSeen(r.timestampS)
-        if (changed) { replayNew++; messages.value = book.messages() }
+        if (changed) { replayNew++; publishBook() }
     }
 
     private fun onBroker(topic: String, payload: ByteArray, retained: Boolean) {
@@ -238,7 +280,7 @@ object UmcNet {
         val raw = r.raw ?: return
         val changed = if (r.direction == "tx") book.onSent(r.deviceId, raw, now)
                       else book.onHeard(r.deviceId, raw, r.snr, r.rssi, now, decoded(), AppState.regions.value)
-        if (changed) { messages.value = book.messages(); noteSeen(now / 1000) }
+        if (changed) { publishBook(); noteSeen(now / 1000) }
     }
 
     // ---------------------------------------------------------------- channels
@@ -274,7 +316,7 @@ object UmcNet {
         val ts = now / 1000
         val raw = try { MsgCodec.buildGroupText(ch, sender, body, ts, reg.ifEmpty { null }) } catch (e: IllegalArgumentException) { return e.message }
         val json = Protocol.txJson("UMC App", a.clientId, ts, via ?: "", raw)
-        book.addOutgoing(raw, ch.name, reg, sender, body, ts, now); messages.value = book.messages()
+        book.addOutgoing(raw, ch.name, reg, sender, body, ts, now); publishBook()
         s.publish(Protocol.publishTopic(a.area, a.clientId), json.toByteArray(Charsets.UTF_8)) { status.value = "send failed: $it" }
         return null
     }

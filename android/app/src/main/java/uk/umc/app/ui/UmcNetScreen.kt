@@ -1,29 +1,23 @@
 package uk.umc.app.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import uk.umc.app.AppState
 import uk.umc.app.net.*
 
-/** UMC Net (internet) mode: channel messages through the broker, with no radio attached. */
+/** UMC Net (internet): joining, the account, the connection and the channel list. The messages themselves are in Messages ([NetChannelChat]). */
 @Composable
-fun UmcNetScreen(onBack: () -> Unit) {
+fun UmcNetScreen(onBack: () -> Unit, onMessages: () -> Unit = {}) {
     val phase by UmcNet.phase.collectAsState()
     val storageError by UmcNet.storageError.collectAsState()
     Column(Modifier.fillMaxSize()) {
@@ -32,7 +26,7 @@ fun UmcNetScreen(onBack: () -> Unit) {
             Text("UMC Net (internet)", style = MaterialTheme.typography.titleMedium)
         }
         if (storageError != null) { ShAlert("Cannot keep an account", storageError, Modifier.padding(12.dp), destructive = true); return@Column }
-        if (phase == JoinPhase.JOINED) NetChat() else JoinNet()
+        if (phase == JoinPhase.JOINED) NetAccount(onMessages) else JoinNet()
     }
 }
 
@@ -85,115 +79,52 @@ private fun JoinNet() {
     }
 }
 
-// ------------------------------------------------------------------------------------------------ messages
+// ------------------------------------------------------------------------------------------------ account and connection
 
+/** Joined: the connection, the account and the channel list. Messages are read and sent from Messages, not here. */
 @Composable
-private fun NetChat() {
+private fun NetAccount(onMessages: () -> Unit) {
     val account by UmcNet.account.collectAsState()
     val status by UmcNet.status.collectAsState()
     val connected by UmcNet.connected.collectAsState()
     val channels by UmcNet.channels.collectAsState()
-    val messages by UmcNet.messages.collectAsState()
     val repeaters by UmcNet.repeaters.collectAsState()
-    val regions by AppState.regions.collectAsState()
     val sender by UmcNet.senderName.collectAsState()
-    var channel by remember { mutableStateOf(channels.firstOrNull()?.name ?: "") }
-    var region by remember { mutableStateOf("") }
-    var via by remember { mutableStateOf("") }                       // "" = all repeaters
-    var draft by remember { mutableStateOf("") }
-    var result by remember { mutableStateOf("") }
-    var help by remember { mutableStateOf(false) }
-    var adding by remember { mutableStateOf(false) }
-    var account_ by remember { mutableStateOf(false) }
+    var help by rememberSaveable { mutableStateOf(false) }
+    var adding by rememberSaveable { mutableStateOf(false) }
+    var showAccount by rememberSaveable { mutableStateOf(false) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(5000); now = System.currentTimeMillis() } }
-    LaunchedEffect(channels) { if (channels.none { it.name == channel }) channel = channels.firstOrNull()?.name ?: "" }
+    val online = repeaters.values.count { it.online(now) }
 
-    val shown = messages.filter { it.channel == channel }
-    val listState = rememberLazyListState()
-    LaunchedEffect(shown.size) { if (shown.isNotEmpty()) listState.animateScrollToItem(shown.size - 1) }
-    val online = repeaters.values.filter { it.online(now) }.sortedBy { it.label.lowercase() }
-    fun nameOf(id: String) = repeaters[id]?.label ?: id.take(8)
-    val bytes = draft.toByteArray(Charsets.UTF_8).size
-    val tooLong = bytes > MsgCodec.MAX_TEXT_BYTES
-
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ShBadge(if (connected) "connected" else "offline", kind = if (connected) ShBadgeKind.Success else ShBadgeKind.Warning)
-            Text(if (connected) "${online.size} repeater${if (online.size == 1) "" else "s"} online" else status, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 2)
-            if (connected) ShButton(variant = ShVariant.Ghost, onClick = { UmcNet.disconnect() }) { Text("Disconnect") }
-            else ShButton(variant = ShVariant.Ghost, onClick = { UmcNet.connect() }) { Text("Connect") }
-            ShButton(variant = ShVariant.Ghost, onClick = { account_ = true }) { Text("Account") }
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Pick(channel.ifEmpty { "channel" }, channels.map { it.name to it.name }, { channel = it }, Modifier.weight(1f))
-            ShButton(variant = ShVariant.Outline, onClick = { adding = true }) { Text("Add") }
-            ShButton(variant = ShVariant.Ghost, onClick = { help = true }) { Text("?") }
-        }
-        ShSeparator(Modifier.padding(top = 6.dp))
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
-            items(shown, key = { it.key }) { m ->
-                NetBubble(m, now, ::nameOf) {
-                    // Reply: same channel and region, through the repeater that heard it best
-                    channel = m.channel; region = m.region.takeIf { it in regions } ?: ""
-                    via = Delivery.replyVia(m)?.takeIf { id -> online.any { it.id == id } } ?: ""
-                }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ShCard(title = "Connection") {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ShBadge(if (connected) "connected" else "offline", kind = if (connected) ShBadgeKind.Success else ShBadgeKind.Warning)
+                Text(if (connected) "$online repeater${if (online == 1) "" else "s"} online" else status, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 2)
             }
-            if (shown.isEmpty()) item { Text("No messages in $channel yet. They appear as repeaters hear them.", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall) }
-        }
-        Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pick(if (region.isEmpty()) "no region" else region, listOf("" to "no region") + regions.map { it to it }, { region = it }, Modifier.weight(1f))
-                Pick(if (via.isEmpty()) "via all repeaters" else "via " + nameOf(via), listOf("" to "via all repeaters") + online.map { it.id to "via " + it.label }, { via = it }, Modifier.weight(1f))
+                if (connected) ShButton(variant = ShVariant.Outline, onClick = { UmcNet.disconnect() }) { Text("Disconnect") }
+                else ShButton(variant = ShVariant.Outline, onClick = { UmcNet.connect() }) { Text("Connect") }
+                ShButton(variant = ShVariant.Outline, onClick = { showAccount = true }) { Text("Account") }
             }
-            Row(verticalAlignment = Alignment.Top) {
-                OutlinedTextField(draft, { draft = it.replace("\n", " ") }, Modifier.weight(1f), placeholder = { Text("Message as $sender") },
-                    supportingText = { Text(if (result.isNotEmpty()) result else "$bytes/${MsgCodec.MAX_TEXT_BYTES} bytes") }, isError = tooLong)
-                Spacer(Modifier.width(8.dp))
-                ShButton(enabled = connected && draft.isNotBlank() && !tooLong, onClick = {
-                    val err = UmcNet.send(channel, region.ifEmpty { null }, draft, via.ifEmpty { null })
-                    result = err ?: ""; if (err == null) draft = ""
-                }) { Text("Send") }
+        }
+        ShCard(title = "Messages", description = "UMC Net channels are in Messages, with your radio's conversations. Messages from the last 24 hours are kept on this phone.") {
+            ShButton(onClick = onMessages) { Text("Open messages") }
+        }
+        ShCard(title = "Channels") {
+            channels.forEach { c -> Text(c.name, style = MaterialTheme.typography.bodyMedium) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ShButton(variant = ShVariant.Outline, onClick = { adding = true }) { Text("Add channel") }
+                ShButton(variant = ShVariant.Ghost, onClick = { help = true }) { Text("Help") }
             }
         }
     }
 
     if (help) AlertDialog(onDismissRequest = { help = false }, confirmButton = { ShButton(variant = ShVariant.Ghost, onClick = { help = false }) { Text("OK") } },
         title = { Text("About delivery") }, text = { Text(Delivery.TOOLTIP) })
-    if (adding) AddChannelDialog({ adding = false }) { n, k -> UmcNet.addChannel(n, k).also { if (it == null) { channel = n.trim(); adding = false } } }
-    if (account_) AccountDialog(account, sender, { account_ = false })
-}
-
-@Composable
-private fun NetBubble(m: NetMessage, now: Long, name: (String) -> String, onReply: () -> Unit) {
-    val (foot, none) = Delivery.text(m, now, name)
-    val scheme = MaterialTheme.colorScheme
-    val glass = onGlass()
-    val bubble = when { glass && m.outgoing -> androidx.compose.ui.graphics.Color(0xFF2E7D5B).copy(alpha = 0.55f); glass -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.12f)
-                        m.outgoing -> scheme.primaryContainer; else -> scheme.surfaceVariant }
-    val ink = when { glass -> androidx.compose.ui.graphics.Color.White; m.outgoing -> scheme.onPrimaryContainer; else -> scheme.onSurfaceVariant }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp), horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start) {
-        Column(Modifier.clip(RoundedCornerShape(12.dp)).background(bubble).padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Text(m.sender.ifEmpty { "?" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = ink)
-            Text(m.text, color = ink)
-            val meta = listOfNotNull(clock(m.seenMs / 1000), m.region.takeIf { it.isNotEmpty() }?.let { if (it == "?") "other region" else it }).joinToString(" · ")
-            Text(meta, style = MaterialTheme.typography.labelSmall, color = ink.copy(alpha = 0.72f))
-        }
-        if (foot.isNotEmpty()) Text(foot, style = MaterialTheme.typography.labelSmall, color = if (none) scheme.error else scheme.outline, modifier = Modifier.padding(horizontal = 4.dp))
-        if (!m.outgoing) ShButton(variant = ShVariant.Ghost, onClick = onReply) { Text("Reply") }
-    }
-}
-
-/** A button that opens a menu of (value, label) choices. */
-@Composable
-private fun Pick(label: String, choices: List<Pair<String, String>>, onPick: (String) -> Unit, modifier: Modifier = Modifier) {
-    var open by remember { mutableStateOf(false) }
-    Box(modifier) {
-        ShButton(variant = ShVariant.Outline, onClick = { open = true }, modifier = Modifier.fillMaxWidth()) { Text(label, maxLines = 1) }
-        DropdownMenu(open, { open = false }) {
-            choices.forEach { (v, l) -> DropdownMenuItem(text = { Text(l) }, onClick = { onPick(v); open = false }) }
-        }
-    }
+    if (adding) AddChannelDialog({ adding = false }) { n, k -> UmcNet.addChannel(n, k).also { if (it == null) adding = false } }
+    if (showAccount) AccountDialog(account, sender, { showAccount = false })
 }
 
 @Composable

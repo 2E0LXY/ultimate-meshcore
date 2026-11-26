@@ -18,7 +18,11 @@ data class Repeater(val id: String, val name: String, val status: String, val la
 class NetBook(private val maxMessages: Int = 500) {
     private val byKey = LinkedHashMap<String, NetMessage>()
 
-    @Synchronized fun messages(): List<NetMessage> = byKey.values.sortedWith(compareBy({ it.seenMs }, { it.ts }))
+    /** Oldest first by the message's own time, then by when we saw it, so replayed (older) messages fall in their right place. */
+    @Synchronized fun messages(): List<NetMessage> = byKey.values.sortedWith(compareBy({ it.ts }, { it.seenMs }))
+
+    /** Puts back messages kept from an earlier run (see [NetStore]). Anything already held wins. */
+    @Synchronized fun restore(list: List<NetMessage>) { list.forEach { byKey.putIfAbsent(it.key, it) }; trim() }
 
     /** A repeater [deviceId] heard [raw] on the air. Returns true if the book changed. Packets we cannot read are ignored. */
     @Synchronized fun onHeard(deviceId: String, raw: ByteArray, snr: Double?, rssi: Int?, nowMs: Long, channels: List<NetChannel>, regions: List<String>): Boolean {
@@ -63,7 +67,13 @@ class NetBook(private val maxMessages: Int = 500) {
 
     @Synchronized fun clear() = byKey.clear()
 
-    private fun trim() { while (byKey.size > maxMessages) byKey.remove(byKey.keys.first()) }
+    /** Over the limit, the oldest message (by its own time) goes first. */
+    private fun trim() {
+        while (byKey.size > maxMessages) {
+            val oldest = byKey.values.minWithOrNull(compareBy({ it.ts }, { it.seenMs })) ?: return
+            byKey.remove(oldest.key)
+        }
+    }
 }
 
 /** The words under a bubble, following the dashboard's wording (dash.html). */
