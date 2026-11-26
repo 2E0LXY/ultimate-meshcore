@@ -45,8 +45,8 @@
 .dash2 table{width:100%;border-collapse:collapse;font-size:13px}.dash2 th{color:var(--mu);font-weight:500;text-align:left;font-size:12px;padding:4px 6px}.dash2 td{white-space:nowrap}.dash2 td b{white-space:normal}.dash2 td{padding:6px;border-top:1px solid #12291f}
 .dash2 .bar{height:7px;border-radius:4px;background:#12291f;min-width:70px}.dash2 .bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#1fb85c,var(--g2))}
 .dash2 .tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;background:#10301f;color:var(--g)}.dash2 .tag.tx{background:#33280f;color:var(--am)}
-.dash2 .conn{display:flex;flex-direction:column;gap:2px}.dash2 .conn div{display:flex;gap:10px;align-items:center;padding:7px 4px;border-top:1px solid #12291f}.dash2 .conn div:first-child{border-top:0}
-.dash2 .conn b{font-weight:600}.dash2 .conn span{color:var(--mu);font-size:12px;margin-left:auto;text-align:right}
+.dash2 .conn{display:flex;flex-direction:column;gap:2px}.dash2 .conn div{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;padding:7px 4px;border-top:1px solid #12291f}.dash2 .conn div:first-child{border-top:0}
+.dash2 .conn b{font-weight:600}.dash2 .conn span{color:var(--mu);font-size:12px;margin-left:auto;text-align:right;overflow-wrap:anywhere;max-width:100%}@media(max-width:700px){.dash2 .conn span{flex-basis:100%;margin-left:0;text-align:left}}
 .dash2 .flow svg{width:100%;height:auto}
 .dash2 .fn rect{fill:#0c2018;stroke:#1f6a45;stroke-width:1.2}.dash2 .fn.off rect{stroke:#2a3a34;fill:#0a1511}.dash2 .fn text{fill:var(--tx);font-size:12px;font-weight:600}.dash2 .fn .sb{fill:var(--mu);font-size:10px;font-weight:400}
 .dash2 .fn.hub rect{stroke:var(--g);stroke-width:2;filter:drop-shadow(0 0 10px #2fe27a66)}
@@ -321,15 +321,18 @@ function who(o, p) {
 }
 const level = (v, good, warn, hib = false) => v == null ? "#7fa392" : (hib ? (v >= good ? "#2fe27a" : v >= warn ? "#f2c14e" : "#ff5d6c") : (v <= good ? "#2fe27a" : v <= warn ? "#f2c14e" : "#ff5d6c"));
 
+// Repeaters in a fixed order (name, then id): the server sends them newest-first, which made the order and the colours jump on every refresh.
+const stableDevs = o => o.devices.slice().sort((a, b) => String(a.name || "").toLowerCase().localeCompare(String(b.name || "").toLowerCase()) || String(a.id).localeCompare(String(b.id))).slice(0, 6);
+const perMin = v => !v ? "0" : v >= 1 ? v.toFixed(1) + "/min" : Math.max(1, Math.round(v * 60)) + "/h";
 function flowNet(o) {
-  const devs = o.devices.slice(0, 6), W = 820, H = 92 + Math.max(devs.length, 3) * 56, cy = (H - 22) / 2;
+  const devs = stableDevs(o), W = 820, H = 92 + Math.max(devs.length, 3) * 56, cy = (H - 22) / 2;
   const edge = (x1, y1, x2, y2, cls, rate, on) => D.flowEdge(x1, y1, x2, y2, cls, rate, on);
   let e = "", nodes = "";
   const box = (x, y, w, h, t, sub, cls = "") => `<g class="fn ${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11"/><text x="${x + w / 2}" y="${y + h / 2 - 1}" text-anchor="middle">${esc(t.length > 20 ? t.slice(0, 19) + "…" : t)}</text><text x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle" class="sb">${esc(sub.length > 26 ? sub.slice(0, 25) + "…" : sub)}</text></g>`;
   devs.forEach((d, i) => {
     const y = 40 + i * ((H - 102) / Math.max(1, devs.length - 1 || 1)) + (devs.length === 1 ? (H - 102) / 2 : 0), on = d.age < 300, br = d.bridge || {}, hear = d.pm || 0, send = br.passed_pm || 0;
     e += edge(190, y - 9, 330, cy - 7, "rx", hear + 1, on && hear > 0) + edge(330, cy + 7, 190, y + 9, "tx", send + 1, on && send > 0);
-    nodes += box(10, y - 26, 180, 52, d.name || d.id.slice(0, 8), `in ${hear.toFixed(1)} · out ${send.toFixed(1)} /min`, on ? "" : "off");
+    nodes += box(10, y - 26, 180, 52, d.name || d.id.slice(0, 8), `in ${perMin(hear)} · out ${perMin(send)} · ${d.age < 86400 ? dur(d.age) + " ago" : "quiet"}`, on ? "" : "off");
   });
   e += `<text x="10" y="${H - 8}" fill="#7fa392" font-size="11">green: heard by radio, sent to the broker · amber: from the broker, sent by radio (bridge)</text>`;
   const msgs = o.rates.messages, cl = num(o, "$SYS/broker/clients/connected"), up = o.mqtt.state === "connected";
@@ -360,7 +363,7 @@ function vOverview(o) {
     D.gauge(sys.load[0], 0, (sys.cores || 1) * 2, "Load (1 min)", sys.load[0].toFixed(2), (sys.cores || 1) + " core(s)", level(sys.load[0], sys.cores || 1, (sys.cores || 1) * 1.5)),
     D.gauge(cert.days, 0, 90, "Certificate", cert.days != null ? Math.round(cert.days) : "—", "days left", level(cert.days, 30, 14, true)),
     D.gauge(num(o, "$SYS/broker/load/connections/1min"), 0, 60, "Logins / min", num(o, "$SYS/broker/load/connections/1min").toFixed(1), "broker 1 min avg", level(num(o, "$SYS/broker/load/connections/1min"), 5, 15))].join("");
-  const top = o.devices.slice(0, 6), colors = ["#2fe27a", "#4aa8ff", "#f2c14e", "#a58bff", "#ff8f5a", "#5be3d8"];
+  const top = stableDevs(o), colors = ["#2fe27a", "#4aa8ff", "#f2c14e", "#a58bff", "#ff8f5a", "#5be3d8"];
   const dg = o.diagnostics.filter(d => d.level !== "ok").slice(0, 8), okn = o.diagnostics.filter(d => d.level === "ok").length;
   const diag = `<div class="conn">${dg.map(d => `<div>${dot(d.level)}<b>${esc(d.title)}</b><span>${esc(d.detail)}</span></div>`).join("") || `<div>${dot("ok")}<b>Everything checked is fine</b><span>${okn} checks</span></div>`}</div>`;
   const evs = o.events.filter(e => e.kind !== "start").slice(0, 8);
