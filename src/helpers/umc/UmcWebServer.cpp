@@ -12,6 +12,9 @@
   #include <Update.h>
   #include <WiFi.h>
   #include <esp_app_format.h>
+  #ifndef ESP_APP_DESC_MAGIC_WORD
+    #define ESP_APP_DESC_MAGIC_WORD 0xABCD5432   // newer ESP-IDF (Arduino-ESP32 3.x) moves the definition elsewhere
+  #endif
   #include <esp_random.h>
   #include <helpers/NetworkService.h>
   #include <lwip/sockets.h>
