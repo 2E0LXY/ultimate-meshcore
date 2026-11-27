@@ -3,6 +3,7 @@
 #include "ControlCmd.h"
 #include "JoinCode.h"
 #include "Enrol.h"
+#include <helpers/umc/UmcBootId.h>
 
 #ifndef UMCNET_ENROL_USER
 #define UMCNET_ENROL_USER "enrol"                      // the public account a repeater knocks with; it can only send and receive enrolment messages
@@ -568,6 +569,8 @@ void MQTTUplink::refreshBrokerState(BrokerState& broker) {
   escapeJsonString(node_name, origin, sizeof(origin));
   char client_version[96];
   snprintf(client_version, sizeof(client_version), "%s", CLIENT_VERSION);
+  char boot_hex[17];
+  umcboot::toHex(umcboot::bootId(), boot_hex);
   char radio_info[48];
   snprintf(radio_info, sizeof(radio_info), "%.6f,%.1f,%u,%u", static_cast<double>(_last_status.radio_freq),
            static_cast<double>(_last_status.radio_bw), _last_status.radio_sf, _last_status.radio_cr);
@@ -576,9 +579,9 @@ void MQTTUplink::refreshBrokerState(BrokerState& broker) {
   formatIsoTimestamp(time(nullptr), ts, sizeof(ts));
   snprintf(broker.offline_payload, sizeof(broker.offline_payload),
            "{\"status\":\"offline\",\"timestamp\":\"%s\",\"origin\":\"%s\",\"origin_id\":\"%s\",\"model\":\"%s\","
-           "\"firmware_version\":\"%s\",\"radio\":\"%s\",\"client_version\":\"%s\",\"repeat\":\"%s\"}",
+           "\"firmware_version\":\"%s\",\"radio\":\"%s\",\"client_version\":\"%s\",\"repeat\":\"%s\",\"boot_id\":\"%s\"}",
            ts, origin, _device_id, safe_name, FIRMWARE_VERSION, radio_info, client_version,
-           _last_status.repeat_enabled ? "on" : "off");
+           _last_status.repeat_enabled ? "on" : "off", boot_hex);
 }
 
 bool MQTTUplink::refreshToken(BrokerState& broker) {
@@ -694,23 +697,26 @@ int MQTTUplink::buildStatusJson(char* buffer, size_t buffer_size, bool online) c
   escapeJsonString(node_name, origin, sizeof(origin));
   char client_version[96];
   snprintf(client_version, sizeof(client_version), "%s", CLIENT_VERSION);
+  char boot_hex[17];
+  umcboot::toHex(umcboot::bootId(), boot_hex);
   char radio_info[48];
   snprintf(radio_info, sizeof(radio_info), "%.6f,%.1f,%u,%u", static_cast<double>(_last_status.radio_freq),
            static_cast<double>(_last_status.radio_bw), _last_status.radio_sf, _last_status.radio_cr);
   return snprintf(buffer, buffer_size,
                   "{\"status\":\"%s\",\"timestamp\":\"%s\",\"origin\":\"%s\",\"origin_id\":\"%s\","
                   "\"model\":\"%s\",\"firmware_version\":\"%s\",\"radio\":\"%s\",\"client_version\":\"%s\","
-                  "\"repeat\":\"%s\",\"stats\":{\"battery_mv\":%d,\"uptime_secs\":%lu,\"errors\":%u,\"queue_len\":%u,"
+                  "\"repeat\":\"%s\",\"boot_id\":\"%s\",\"stats\":{\"battery_mv\":%d,\"uptime_secs\":%lu,\"errors\":%u,\"queue_len\":%u,"
                   "\"noise_floor\":%d,\"tx_air_secs\":%lu,\"rx_air_secs\":%lu,\"recv_errors\":%lu,"
-                  "\"packets_sent\":%lu,\"packets_received\":%lu}}",
+                  "\"packets_sent\":%lu,\"packets_received\":%lu,\"advert_drop\":%lu}}",
                   online ? "online" : "offline", ts, origin, _device_id, model, FIRMWARE_VERSION, radio_info, client_version,
-                  _last_status.repeat_enabled ? "on" : "off", _last_status.battery_mv,
+                  _last_status.repeat_enabled ? "on" : "off", boot_hex, _last_status.battery_mv,
                   static_cast<unsigned long>(_last_status.uptime_secs), _last_status.error_flags, _last_status.queue_len,
                   _last_status.noise_floor, static_cast<unsigned long>(_last_status.tx_air_secs),
                   static_cast<unsigned long>(_last_status.rx_air_secs),
                   static_cast<unsigned long>(_last_status.recv_errors),
                   static_cast<unsigned long>(_last_status.packets_sent),
-                  static_cast<unsigned long>(_last_status.packets_received));
+                  static_cast<unsigned long>(_last_status.packets_received),
+                  static_cast<unsigned long>(_advert.dropped()));
 }
 
 int MQTTUplink::buildPacketJson(char* buffer, size_t buffer_size, const mesh::Packet& packet, bool is_tx, int rssi,
@@ -1212,6 +1218,21 @@ void MQTTUplink::publishPacket(const mesh::Packet& packet, bool is_tx, int rssi,
   if (is_tx && !_prefs.tx_enabled) {
     return;
   }
+  // heard adverts: drop corrupted ones (our own are not checked). Checked only here, at publish time, and
+  // at most a few a second. A good signature means "well formed", not "trusted".
+  if (!is_tx && packet.getPayloadType() == PAYLOAD_TYPE_ADVERT && !_prefs.advert_verify_off) {
+    static_assert(umcadv::kPubKey == PUB_KEY_SIZE && umcadv::kSig == SIGNATURE_SIZE &&
+                  umcadv::kMaxAppData == MAX_ADVERT_DATA_SIZE, "UmcAdvertVerify.h constants must match the protocol");
+    auto verify = [](const uint8_t* pub, const uint8_t* sig, const uint8_t* msg, int n) {
+      mesh::Identity id(pub);
+      return id.verify(sig, msg, n);
+    };
+    if (!umcadv::shouldPublish(_advert, _advert_budget, millis(), packet.payload, packet.payload_len, verify)) {
+      MQTT_LOG("advert dropped (drops=%lu skipped=%lu)", static_cast<unsigned long>(_advert.dropped()),
+               static_cast<unsigned long>(_advert.skipped));
+      return;
+    }
+  }
   MQTT_LOG("packet dir=%s type=%u payload_len=%u rssi=%d snr=%.1f score=%d duration=%d",
            is_tx ? "tx" : "rx", packet.getPayloadType(), packet.payload_len, rssi, snr, score, duration);
 
@@ -1270,7 +1291,9 @@ bool MQTTUplink::publishTelemetry(const uint8_t* lpp, uint8_t len) {
   char origin[80];
   const char* node_name = (_node_name != nullptr && _node_name[0] != 0) ? _node_name : _device_id;
   escapeJsonString(node_name, origin, sizeof(origin));
-  int n = snprintf(payload, 640, "{\"timestamp\":\"%s\",\"origin\":\"%s\",\"lpp\":\"", ts, origin);
+  char boot_hex[17];
+  umcboot::toHex(umcboot::bootId(), boot_hex);
+  int n = snprintf(payload, 640, "{\"timestamp\":\"%s\",\"origin\":\"%s\",\"boot_id\":\"%s\",\"lpp\":\"", ts, origin, boot_hex);
   static const char kHex[] = "0123456789ABCDEF";
   if (n <= 0 || n + 2 * len + 3 >= 640) {
     freeScratchBuffer(payload);
@@ -1408,6 +1431,24 @@ bool MQTTUplink::setRawEnabled(bool enabled) {
 bool MQTTUplink::setStatusEnabled(bool enabled) {
   _prefs.status_enabled = enabled ? 1 : 0;
   return savePrefs();
+}
+
+bool MQTTUplink::setAdvertVerify(const char* value) {
+  if (value == nullptr) return false;
+  if (strncasecmp(value, "on", 2) == 0 && (value[2] == 0 || value[2] == ' ')) {
+    _prefs.advert_verify_off = 0;
+  } else if (strncasecmp(value, "off", 3) == 0 && (value[3] == 0 || value[3] == ' ')) {
+    _prefs.advert_verify_off = 1;
+  } else {
+    return false;
+  }
+  return savePrefs();
+}
+
+void MQTTUplink::formatAdvertReply(char* reply, size_t reply_size) const {
+  snprintf(reply, reply_size, "> verify %s, checked %lu, mqtt.advert_drop %lu (bad signature %lu, malformed %lu), not checked %lu",
+           getAdvertVerify() ? "on" : "off", (unsigned long)_advert.checked, (unsigned long)_advert.dropped(),
+           (unsigned long)_advert.dropped_sig, (unsigned long)_advert.dropped_short, (unsigned long)_advert.skipped);
 }
 
 bool MQTTUplink::setTxEnabled(bool enabled) {
@@ -2031,6 +2072,8 @@ bool MQTTUplink::setPacketsEnabled(bool) { return false; }
 bool MQTTUplink::setRawEnabled(bool) { return false; }
 bool MQTTUplink::setStatusEnabled(bool) { return false; }
 bool MQTTUplink::setTxEnabled(bool) { return false; }
+bool MQTTUplink::setAdvertVerify(const char*) { return false; }
+void MQTTUplink::formatAdvertReply(char* reply, size_t n) const { snprintf(reply, n, "> unsupported"); }
 bool MQTTUplink::setIata(const char*) { return false; }
 bool MQTTUplink::isActive() const { return false; }
 bool MQTTUplink::setOwnerPublicKey(const char*) { return false; }

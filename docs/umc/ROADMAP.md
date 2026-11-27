@@ -6,6 +6,13 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ✅ done · 🔜 next · 📋 planned · 💡 idea
 
+## Unreleased (repeater)
+
+- ✅ **`boot_id`** in the MQTT status and UMC Net telemetry: a random 64-bit value per boot, as 16 hex characters. Not stored, identifies nothing
+- ✅ **`tryset`**: timed, unsaved trial of one safe setting (`keep`, `revert`, `status`); `set` is refused during a trial and other saves write the original. Radio parameters and TX power are deliberately excluded until a hardware rollback is proven
+- ✅ **MQTT advert check**: adverts heard by radio are checked (structure and signature) before publishing; bad ones are dropped and counted (`mqtt.advert_drop`, `stats.advert_drop`). `set mqtt.advert.verify on|off`, default on. A valid signature is not trust
+- 📋 **Radio shutdown before restart (audit only, nothing changed).** `ESP32Board::reboot()` is a bare `esp_restart()`; the OTA/update-mode reboot (`UmcService::scheduleReboot`) and factory reset also end in `esp_restart()` after `umcBeforeReboot()` (companion: saves contacts only). WiFi, Bluetooth and the LoRa chip are not stopped by the firmware first; this relies on ESP-IDF's shutdown handlers, which should be checked on hardware. `enterDeepSleep()` powers off LoRa, GPS and the display but does not stop WiFi/Bluetooth; deep sleep drops the RF domain anyway. `esp_light_sleep_start()` (idle sleep) leaves them as configured. A fix (stop WiFi, then Bluetooth, then LoRa to standby, with bounded waits, before `esp_restart()`) needs hardware verification of the order and timeouts, and differs between core 2.0.17 and core 3 (`_csi`), so it is not made here
+
 ## Done in 0.1.38 (T-Deck)
 
 - ✅ **WiFi scan works.** The background join loop kept starting connection attempts, and the ESP32 cannot scan while it is joining, so every scan failed (the screen reported "Scanning" and then "Scan failed"). The join loop now pauses for the duration of a scan (for at most 20 seconds, so it can never be left paused). A scan the radio refuses to start is retried once in the blocking way. The screen now says what happened: networks found, none in range, scan refused, or timed out, instead of a generic message

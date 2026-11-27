@@ -4,6 +4,7 @@
 #include <Mesh.h>
 #include <RTClib.h>
 #include <target.h>
+#include <helpers/umc/UmcTrial.h>
 
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
   #include <InternalFileSystem.h>
@@ -187,6 +188,12 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks, public WebPanelComm
 #endif
   CayenneLPP telemetry;
   unsigned long set_radio_at, revert_radio_at;
+  // `tryset`: a timed, unsaved trial of one setting (src/helpers/umc/UmcTrial.h)
+  umctrial::Trial _trial;
+  umctrial::Snapshot _trial_snap;
+  bool _trial_applying = false;     // true while a trial value is applied or undone: the CLI's own save is skipped
+  void trialCommand(uint32_t sender_timestamp, const char* args, char* reply);
+  bool trialUndo();                 // put the old values back (live, unsaved), read them back, end the trial
   float pending_freq;
   float pending_bw;
   uint8_t pending_sf;
@@ -317,6 +324,15 @@ public:
   }
 
   void savePrefs() override {
+    if (_trial_applying) return;                  // a trial value is live only: never written
+    if (_trial.active()) {                        // some other save while on trial: write the original values, keep the trial live
+      umctrial::Snapshot live;
+      umctrial::capture(_prefs, live);
+      umctrial::restore(_prefs, _trial_snap);
+      _cli.savePrefs(_fs);
+      umctrial::restore(_prefs, live);
+      return;
+    }
     _cli.savePrefs(_fs);
   }
 

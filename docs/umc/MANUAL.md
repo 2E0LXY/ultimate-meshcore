@@ -247,6 +247,7 @@ All nodes in a mesh must use the same **frequency, bandwidth and spreading facto
 | Channel activity detection | `set cad on\|off` | off | Listens for LoRa activity before transmitting. |
 | Interference threshold | `set int.thresh <n>` | 0 | Defers transmission when the channel is noisy. |
 | Temporary radio test | `tempradio <MHz>,<kHz>,<SF>,<CR>,<minutes>` | — | Tries settings for a while, then reverts. Not saved. |
+| Trial of a safe setting | `tryset <secs> <key> <value>`, then `tryset keep` / `revert` / `status` | 30–3600 s | Applies one setting live **without saving**; it goes back by itself when the time runs out or on reboot, `keep` saves it. One at a time; `set` is refused meanwhile. Only low-risk settings (duty cycle, airtime factor, advert intervals, flood hop limits, delays, AGC reset, multi acks). Radio frequency/bandwidth/SF/CR, TX power, passwords, WiFi and MQTT cannot be trialled; use `tempradio` for radio tests. |
 
 **Presets** (same as the MeshCore apps): EU/UK Narrow (869.618 MHz, 62.5 kHz, SF8), EU/UK Medium Range, EU/UK Long Range, Switzerland, Czech Republic, Portugal 869/433, EU 433 MHz, USA/Canada, USA Arizona, USA Philly, Australia (and Narrow, Mid, SA/WA/QLD), New Zealand (and Narrow), Vietnam.
 
@@ -401,6 +402,7 @@ Custom broker: `set mqtt.custom on`, `mqtt.custom.host`, `mqtt.custom.port`, `mq
 |---|---|
 | `set mqtt.iata <code>` | The area. Repeaters only exchange packets with others using the same code. |
 | `set mqtt.raw on` | Publish every packet this repeater hears (as `meshcore/<area>/<device id>/raw`), so others can pick them up. |
+| `set mqtt.advert.verify on\|off` | Check each advert heard by radio (structure and signature, the mesh's own rule) before publishing it, and drop corrupted ones. Default **on**. `get mqtt.advert` shows the checks and `mqtt.advert_drop` (also `stats.advert_drop` in the status message). A valid signature is not trust: it only shows the advert is intact. |
 | `set mqtt.tx off` | Publish only what it hears by radio, not what it transmits (avoids the same packet arriving twice). |
 | `set mqtt.custom.bridge on` | **Also listen** for the other repeaters' packets and pass them to the mesh as if they had arrived by radio. The mesh drops anything it has already seen, so nothing loops, and forwards the rest by its normal rules (hop limit, regions, duty cycle). Off by default. |
 | `set mqtt.custom.rate <1-120>` | Most packets a minute passed on from the network (default 20). Extras are dropped and counted. |
@@ -408,6 +410,8 @@ Custom broker: `set mqtt.custom on`, `mqtt.custom.host`, `mqtt.custom.port`, `mq
 | *Targeted sending* | A packet on the broker can name the repeaters allowed to pass it on (`"target":"<id>[,<id>]"` in its JSON). The dashboard uses this to send a reply through only the repeater that heard the original. A repeater whose id is not in the list ignores the packet; with no target, every bridging repeater takes it, as before. Repeaters running older firmware ignore the target and pass everything on. |
 
 Packets from the network are transmitted over the air, so they count against the repeater's duty cycle on 869 MHz; the rate limit and the mesh's own airtime budget keep that in check. Give each repeater its own broker account bound to its device id (`umcnet-user add <name> repeater --device <id>`), so it can only publish under its own topic.
+
+Each status and telemetry message carries `boot_id`, a random 64-bit value (16 hex characters) chosen at every boot, so the dashboard can tell a restart from a gap. It is not stored and identifies nothing.
 
 Status: `get mqtt.status` shows WiFi, time sync, location code and each broker (`conn` = connecting, `up` = connected). Topics are `meshcore/<IATA>/<device>/packets|raw|status`.
 
@@ -1081,6 +1085,8 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get/set telnet on\|off` | Telnet command line |
 | `get/set app.tcp on\|off`, `get app.status` | MeshCore app connection on TCP port 5000 |
 | `tempradio <MHz>,<kHz>,<SF>,<CR>,<min>` | Temporary radio settings |
+| `tryset <secs> <key> <value>`, `tryset keep\|revert\|status` | Timed, unsaved trial of one safe setting |
+| `get mqtt.advert`, `set mqtt.advert.verify on\|off` | Advert check before MQTT publish; `mqtt.advert_drop` count |
 | `time <epoch>` | Set clock |
 | `trace <a1,b2,…>`, `trace route <node>`, `get trace` | Trace a path and read the per-hop SNR |
 | `get/set timezone <POSIX TZ>` | Display time zone |

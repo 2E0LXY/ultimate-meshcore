@@ -1674,6 +1674,96 @@ void MyMesh::updateFloodAdvertTimer() {
   }
 }
 
+// Put back what a trial changed. Live only: the file was never written, so a reboot also undoes it.
+// Returns false if the values read back are not the originals.
+bool MyMesh::trialUndo() {
+  if (!_trial.active()) return true;
+  char key[28];
+  strncpy(key, _trial.key(), sizeof(key) - 1);
+  key[sizeof(key) - 1] = 0;
+  umctrial::restore(_prefs, _trial_snap);
+  if (strcmp(key, "advert.interval") == 0) {
+    updateAdvertTimer();
+  } else if (strcmp(key, "flood.advert.interval") == 0) {
+    updateFloodAdvertTimer();
+  }
+  umctrial::Snapshot back;
+  umctrial::capture(_prefs, back);
+  const bool ok = umctrial::same(back, _trial_snap);
+  _trial.finish();
+  MESH_DEBUG_PRINTLN("tryset %s reverted, verified=%d", key, ok ? 1 : 0);
+  return ok;
+}
+
+// tryset <secs> <key> <value> | keep | revert | status
+// Reached only through handleCommand, so it has the same authentication as every other CLI command
+// (admin login over the mesh, serial, or a signed UMC Net control message).
+void MyMesh::trialCommand(uint32_t sender_timestamp, const char* args, char* reply) {
+  while (*args == ' ') args++;
+  const uint32_t now = millis();
+  if (strcmp(args, "status") == 0 || *args == 0) {
+    if (!_trial.active()) {
+      strcpy(reply, "No trial running");
+    } else {
+      snprintf(reply, 157, "Trial of %s: %lus left; tryset keep to save, tryset revert to undo", _trial.key(),
+               (unsigned long)_trial.remainingSecs(now));
+    }
+    return;
+  }
+  if (strcmp(args, "keep") == 0) {
+    if (!_trial.active()) { strcpy(reply, umctrial::errText(umctrial::R_NONE)); return; }
+    char key[28];
+    strncpy(key, _trial.key(), sizeof(key) - 1);
+    key[sizeof(key) - 1] = 0;
+    _trial.finish();            // ended first, so the save below writes the live (trial) values
+    savePrefs();
+    MESH_DEBUG_PRINTLN("tryset %s kept", key);
+    snprintf(reply, 157, "OK - %s kept and saved", key);
+    return;
+  }
+  if (strcmp(args, "revert") == 0) {
+    if (!_trial.active()) { strcpy(reply, umctrial::errText(umctrial::R_NONE)); return; }
+    char key[28];
+    strncpy(key, _trial.key(), sizeof(key) - 1);
+    key[sizeof(key) - 1] = 0;
+    if (trialUndo()) {
+      snprintf(reply, 157, "OK - %s reverted", key);
+    } else {
+      snprintf(reply, 157, "Err - %s revert did not read back correctly; reboot to restore the saved value", key);
+    }
+    return;
+  }
+  umctrial::Args a;
+  umctrial::Result r = umctrial::parse(args, a);
+  if (r == umctrial::R_OK && _trial.active()) r = umctrial::R_BUSY;
+  if (r != umctrial::R_OK) {
+    strcpy(reply, umctrial::errText(r));
+    if (r == umctrial::R_KEY) {
+      size_t n = strlen(reply);
+      snprintf(reply + n, 157 - n, ": %.100s", umctrial::keyList());
+    }
+    return;
+  }
+  umctrial::capture(_prefs, _trial_snap);
+  // the same code as `set`, so the value is checked the same way; its save is skipped
+  char cmd[100];
+  snprintf(cmd, sizeof(cmd), "set %s %s", a.key, a.value);
+  char out[160];
+  out[0] = 0;
+  _trial_applying = true;
+  handleCommand(sender_timestamp, cmd, out);
+  _trial_applying = false;
+  if (strncmp(out, "OK", 2) != 0) {          // refused: nothing changed
+    umctrial::restore(_prefs, _trial_snap);
+    snprintf(reply, 157, "Err - not applied: %.120s", out);
+    return;
+  }
+  _trial.begin(now, a.secs, a.key);
+  MESH_DEBUG_PRINTLN("tryset %s started for %lus", a.key, (unsigned long)a.secs);
+  snprintf(reply, 157, "OK - trying %s %s for %lus, NOT saved; tryset keep to save, tryset revert to undo",
+           a.key, a.value, (unsigned long)a.secs);
+}
+
 void MyMesh::dumpLogFile() {
 #if defined(RP2040_PLATFORM)
   File f = _fs->open(PACKET_LOG_FILE, "r");
@@ -2605,6 +2695,14 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     command += 3;
   }
 
+  if (_trial.active() && !_trial_applying && memcmp(command, "set ", 4) == 0) {
+    strcpy(reply, "Err - a tryset trial is running: tryset keep or tryset revert first");
+    return;
+  }
+  if (memcmp(command, "tryset ", 7) == 0 || strcmp(command, "tryset") == 0) {
+    trialCommand(sender_timestamp, command[6] ? command + 7 : command + 6, reply);
+    return;
+  }
 #ifdef UMC_BUILD
   if (umc.handleCommand(command, reply, 157)) {
     return;
@@ -3026,6 +3124,11 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     strcpy(reply, mqtt.setControlKey(&command[21]) ? "OK" : "Err - the control key is 64 hex characters");
   } else if (memcmp(command, "set mqtt.control ", 17) == 0) {
     strcpy(reply, mqtt.setControl(&command[17]) ? "OK" : "Err - on|off, and on needs a control key first");
+  } else if (strcmp(command, "get mqtt.advert") == 0 || strcmp(command, "get mqtt.advert.verify") == 0 ||
+             strcmp(command, "get mqtt.advert_drop") == 0) {
+    mqtt.formatAdvertReply(reply, 160);
+  } else if (memcmp(command, "set mqtt.advert.verify ", 23) == 0) {
+    strcpy(reply, mqtt.setAdvertVerify(&command[23]) ? "OK" : "Err - on|off");
   } else if (strcmp(command, "get mqtt.custom.bridge") == 0) {
     mqtt.formatBridgeReply(reply, 160);
   } else if (strcmp(command, "get mqtt.custom.rate") == 0) {
@@ -3460,6 +3563,10 @@ void MyMesh::loop() {
     if (pkt) sendZeroHop(pkt);
 
     updateAdvertTimer(); // schedule next local advert
+  }
+
+  if (_trial.expired(now)) {   // a `tryset` that was not kept: back to the old value
+    trialUndo();   // logs whether the read-back matched
   }
 
   if (set_radio_at && millisHasNowPassed(set_radio_at)) { // apply pending (temporary) radio params

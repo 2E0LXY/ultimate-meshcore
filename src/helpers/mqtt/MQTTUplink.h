@@ -8,6 +8,7 @@
 
 #include "JWTHelper.h"
 #include "MQTTPrefs.h"
+#include <helpers/umc/UmcAdvertVerify.h>
 
 #if defined(ESP_PLATFORM)
 #include <mqtt_client.h>
@@ -108,6 +109,12 @@ public:
   bool isEnrolling() const;
   void pauseForUpdate(bool pause);           // close the broker connections while a firmware download runs (it needs the memory); resumes by itself
   void formatUmcNetReply(char* reply, size_t reply_size) const;
+  // Adverts heard on the radio are checked (structure and signature) before they go to a broker; bad ones
+  // are dropped and counted. `set mqtt.advert.verify on|off`, default on.
+  bool setAdvertVerify(const char* value);   // on | off
+  bool getAdvertVerify() const { return _prefs.advert_verify_off == 0; }
+  uint32_t getAdvertDrop() const { return _advert.dropped(); }   // mqtt.advert_drop
+  void formatAdvertReply(char* reply, size_t reply_size) const;
   bool hasCustomPassword() const { return _prefs.custom_password[0] != 0; }
   bool sendStatusNow();
   bool isAnyBrokerConnected() const;
@@ -164,6 +171,8 @@ private:
   uint32_t _abandoned_client_count;
   unsigned long _token_refresh_active_until_ms;
   MQTTStatusSnapshot _last_status;
+  umcadv::Counters _advert;
+  umcadv::Budget _advert_budget;
   char _device_id[65];
   const char* _node_name;
 
