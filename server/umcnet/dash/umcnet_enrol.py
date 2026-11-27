@@ -116,12 +116,22 @@ def ed_sign(prv64, pub32, msg):
     return R + ((r + k * a) % L).to_bytes(32, "little")
 
 
+def small_order(pt):
+    """True when the point has order dividing 8 (one of the eight torsion points, including the identity)."""
+    q = _mul(8, pt)
+    return q[0] % P == 0 and (q[1] - q[2]) % P == 0
+
+
 def ed_verify(pub32, msg, sig64):
+    """Strict Ed25519 verification: refuses a small-order public key (with one, an all-zero signature verifies for about a quarter of all messages),
+    non-canonical key or R encodings (y >= p, or x = 0 with the sign bit set) and S >= L (malleability)."""
     try:
+        sig64 = bytes(sig64); pub32 = bytes(pub32)
         if len(sig64) != 64 or len(pub32) != 32: return False
         A = _dec(pub32); R = _dec(sig64[:32])
         S = int.from_bytes(sig64[32:], "little")
         if A is None or R is None or S >= L: return False
+        if small_order(A): return False
         k = _h(sig64[:32] + pub32 + msg) % L
         lhs = _mul(S, G); rhs = _add(R, _mul(k, A))
         return (lhs[0] * rhs[2] - rhs[0] * lhs[2]) % P == 0 and (lhs[1] * rhs[2] - rhs[1] * lhs[2]) % P == 0

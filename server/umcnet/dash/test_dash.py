@@ -381,6 +381,59 @@ class Enrol(unittest.TestCase):
         self.assertEqual("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b", sig.hex())
         self.assertTrue(self.E.ed_verify(pub, b"", sig)); self.assertFalse(self.E.ed_verify(pub, b"x", sig))
 
+    def test_ed25519_rfc_8032_vectors_2_and_3_and_an_advert(self):
+        for seed, pub, msg, sig in (("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb", "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c", "72", "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"),
+                                    ("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7", "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025", "af82", "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a")):
+            prv, p = self.E.ed_keypair(bytes.fromhex(seed)); self.assertEqual(pub, p.hex())
+            self.assertTrue(self.E.ed_verify(p, bytes.fromhex(msg), bytes.fromhex(sig)))
+        key, pkt = make_advert(seed=b"\x34" * 32, ts=1760000000); parts = dash.advert_parts(pkt[2:]); pub, ts, sig, app = parts
+        self.assertTrue(self.E.ed_verify(pub, pub + pkt[2 + 32:2 + 36] + app, sig))
+
+    SMALL_ORDER = ("0000000000000000000000000000000000000000000000000000000000000000", "0100000000000000000000000000000000000000000000000000000000000000",
+                   "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", "0000000000000000000000000000000000000000000000000000000000000080",
+                   "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a", "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+                   "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85")
+
+    def test_small_order_keys_never_verify_with_a_zero_signature(self):
+        E = self.E; P = E.P
+        noncanon = [((y + P) | (s << 255)).to_bytes(32, "little") for y in (0, 1) for s in (0, 1)]          # y = p and p + 1 (the same points, written another way)
+        noncanon += [((P - 1 + P) & ((1 << 255) - 1) | 0).to_bytes(32, "little")]
+        for pubhex in self.SMALL_ORDER:
+            pub = bytes.fromhex(pubhex); self.assertTrue(E.small_order(E._dec(pub)), pubhex)
+            for i in range(400):
+                msg = b"umc|%d" % i
+                self.assertFalse(E.ed_verify(pub, msg, bytes(64)), (pubhex, i))
+                self.assertFalse(E.ed_verify(pub, msg, E._enc(E._mul(1, E.G)) + bytes(32)), (pubhex, i))        # R = base point, S = 0
+                self.assertFalse(E.ed_verify(pub, msg, bytes.fromhex(pubhex) + bytes(32)), (pubhex, i))         # R = the key itself
+        for pub in noncanon:
+            for i in range(50): self.assertFalse(E.ed_verify(pub, b"m%d" % i, bytes(64)))
+        self.assertTrue(E.small_order(E._dec(bytes.fromhex(self.SMALL_ORDER[0]))))
+        self.assertFalse(E.small_order(E.G))
+
+    def test_a_forged_hello_from_a_small_order_id_is_refused(self):
+        for pubhex in self.SMALL_ORDER:
+            for ts in range(1760000000, 1760000200):
+                raw = json.dumps({"v": 1, "id": pubhex.upper(), "name": "x", "fw": "1", "bd": "b", "ts": ts, "nc": "a1b2c3d4e5f60718", "sig": "00" * 64})
+                info, why = self.E.verify_hello(raw, now=ts); self.assertIsNone(info)
+
+    def test_malleable_and_noncanonical_signatures_are_refused(self):
+        E = self.E; prv, pub = E.ed_keypair(b"\x07" * 32); msg = b"hello"; sig = E.ed_sign(prv, pub, msg); self.assertTrue(E.ed_verify(pub, msg, sig))
+        S = int.from_bytes(sig[32:], "little")
+        self.assertFalse(E.ed_verify(pub, msg, sig[:32] + (S + E.L).to_bytes(32, "little")))                    # S + L is the same point but S >= L
+        self.assertFalse(E.ed_verify(pub, msg, sig[:32] + (S | (1 << 255)).to_bytes(32, "little")))
+        self.assertFalse(E.ed_verify(pub, msg, sig[:32] + E.L.to_bytes(32, "little")))
+        self.assertFalse(E.ed_verify(pub, msg, sig[:32] + bytes([255]) * 32))
+        R = int.from_bytes(sig[:32], "little") & ((1 << 255) - 1)
+        self.assertFalse(E.ed_verify(pub, msg, (R + E.P).to_bytes(32, "little") + sig[32:]))                   # a y >= p encoding of R (or one that does not fit, which is as bad)
+        self.assertFalse(E.ed_verify(bytes([pub[0] ^ 1]) + pub[1:], msg, sig))
+        self.assertFalse(E.ed_verify(pub[:31], msg, sig)); self.assertFalse(E.ed_verify(pub, msg, sig[:63]))
+        for i in range(0, 64):
+            for bit in (0, 3, 7):
+                m = bytearray(sig); m[i] ^= 1 << bit; self.assertFalse(E.ed_verify(pub, msg, bytes(m)), (i, bit))
+        for i in range(0, 32, 5):
+            m = bytearray(pub); m[i] ^= 1; self.assertFalse(E.ed_verify(bytes(m), msg, sig))
+        self.assertFalse(E.ed_verify(pub, msg + b"!", sig))
+
     def hello(self, prv, pub, ts=None, name="Hill", **over):
         dev = pub.hex().upper(); ts = int(ts or time.time()); nc = "a1b2c3d4e5f60718"
         j = {"v": 1, "id": dev, "name": name, "fw": "0.2.0", "bd": "Heltec V3", "ts": ts, "nc": nc, "sig": self.E.ed_sign(prv, pub, self.E.hello_message(dev, ts, nc)).hex()}
@@ -1545,7 +1598,7 @@ class TxAdvice(unittest.TestCase):
 class Watchtower(unittest.TestCase):
     def test_view_has_all_four_parts_and_survives_empty_data(self):
         dash.db_init(); dash.DEV.clear(); dash.NODES.clear(); v = dash.watchtower_view(); self.assertEqual({"now", "snr", "drift", "hops", "tx", "tx_label"}, set(v)); json.dumps(v)
-        self.assertEqual("2.38", dash.VERSION)
+        self.assertEqual("2.39", dash.VERSION)
     def test_advert_parse_still_reports_what_it_did(self):
         k, pkt = make_advert(ts=1); i = dash.parse_packet(pkt); self.assertEqual((k, "Hill"), (i["fkey"], i["name"])); self.assertEqual(2, i["atype"])
 
