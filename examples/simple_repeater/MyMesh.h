@@ -189,9 +189,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks, public WebPanelComm
   CayenneLPP telemetry;
   unsigned long set_radio_at, revert_radio_at;
   // `tryset`: a timed, unsaved trial of one setting (src/helpers/umc/UmcTrial.h)
-  umctrial::Trial _trial;
-  umctrial::Snapshot _trial_snap;
-  bool _trial_applying = false;     // true while a trial value is applied or undone: the CLI's own save is skipped
+  umctrial::Controller _trial_ctl;   // lock + timer + originals; the web task and the loop task both reach it
   void trialCommand(uint32_t sender_timestamp, const char* args, char* reply);
   bool trialUndo();                 // put the old values back (live, unsaved), read them back, end the trial
   float pending_freq;
@@ -324,16 +322,8 @@ public:
   }
 
   void savePrefs() override {
-    if (_trial_applying) return;                  // a trial value is live only: never written
-    if (_trial.active()) {                        // some other save while on trial: write the original values, keep the trial live
-      umctrial::Snapshot live;
-      umctrial::capture(_prefs, live);
-      umctrial::restore(_prefs, _trial_snap);
-      _cli.savePrefs(_fs);
-      umctrial::restore(_prefs, live);
-      return;
-    }
-    _cli.savePrefs(_fs);
+    // while a trial runs this writes the original values and keeps the trial value live (all under the trial lock)
+    umctrial::save(_trial_ctl, _prefs, [this]() { _cli.savePrefs(_fs); });
   }
 
   void sendFloodScoped(const TransportKey& scope, mesh::Packet* pkt, uint32_t delay_millis, uint8_t path_hash_size);

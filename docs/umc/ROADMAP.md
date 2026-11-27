@@ -8,9 +8,9 @@ Last reviewed: 2026-10-24. Sources checked: upstream MeshCore `main` and `dev`, 
 
 ## Unreleased (repeater)
 
-- ✅ **`boot_id`** in the MQTT status and UMC Net telemetry: a random 64-bit value per boot, as 16 hex characters. Not stored, identifies nothing
-- ✅ **`tryset`**: timed, unsaved trial of one safe setting (`keep`, `revert`, `status`); `set` is refused during a trial and other saves write the original. Radio parameters and TX power are deliberately excluded until a hardware rollback is proven
-- ✅ **MQTT advert check**: adverts heard by radio are checked (structure and signature) before publishing; bad ones are dropped and counted (`mqtt.advert_drop`, `stats.advert_drop`). `set mqtt.advert.verify on|off`, default on. A valid signature is not trust
+- ✅ **`boot_id`** in the MQTT status and UMC Net telemetry: a random 64-bit value per boot, as 16 hex characters. Not stored, identifies nothing; custom broker only
+- ✅ **`tryset`**: timed, unsaved trial of one safe setting (`keep`, `revert`, `status`); `set` of the trialled settings is refused during a trial and other saves write the original; range limits per key, one lock for web and loop tasks. Radio parameters and TX power are deliberately excluded until a hardware rollback is proven
+- ✅ **MQTT advert check**: adverts heard by radio are checked (structure and signature) before publishing; bad ones are dropped and counted (`mqtt.advert_drop`, `stats.advert_drop`, `stats.advert_skip`); each advert is checked once, burst 2 and 2 a second. `set mqtt.advert.verify on|off`, default on. A valid signature is not trust
 - 📋 **Radio shutdown before restart (audit only, nothing changed).** `ESP32Board::reboot()` is a bare `esp_restart()`; the OTA/update-mode reboot (`UmcService::scheduleReboot`) and factory reset also end in `esp_restart()` after `umcBeforeReboot()` (companion: saves contacts only). WiFi, Bluetooth and the LoRa chip are not stopped by the firmware first; this relies on ESP-IDF's shutdown handlers, which should be checked on hardware. `enterDeepSleep()` powers off LoRa, GPS and the display but does not stop WiFi/Bluetooth; deep sleep drops the RF domain anyway. `esp_light_sleep_start()` (idle sleep) leaves them as configured. A fix (stop WiFi, then Bluetooth, then LoRa to standby, with bounded waits, before `esp_restart()`) needs hardware verification of the order and timeouts, and differs between core 2.0.17 and core 3 (`_csi`), so it is not made here
 
 ## Done in 0.1.38 (T-Deck)

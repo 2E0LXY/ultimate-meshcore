@@ -60,27 +60,43 @@ No-argument `get` commands must be entered exactly as shown.
 - `set mqtt.status on|off`: enables or disables periodic MQTT status publishing.
 - `get mqtt.tx`: shows whether TX packets are included.
 - `set mqtt.tx on|off`: enables or disables TX packet publishing.
-- `get mqtt.advert`: shows whether advert checking is on, how many adverts were checked, `mqtt.advert_drop` (the total dropped, split into bad signature and malformed), and how many were not checked because the check budget was empty (those are not published either).
-- `set mqtt.advert.verify on|off`: before an advert heard on the radio is published to MQTT, check its structure and Ed25519 signature (the same rule the mesh uses) and drop corrupted ones. Default `on`. Only adverts heard by radio are checked, not the repeater's own, and the check runs at publish time, at most 8 at once and 4 a second. A valid signature only means the advert is well formed and was signed by the key it names; it does not mean the node is trusted. The count is also published as `stats.advert_drop` in the MQTT status message.
+- `get mqtt.advert`: shows whether advert checking is on, how many adverts were checked, `mqtt.advert_drop` (the total dropped, split into `sig` bad signature and `short` malformed), `advert_skip` (adverts not checked because the check budget was empty; these are not published either) and `repeats` (adverts heard again, which reuse the earlier verdict without a new check).
+- `set mqtt.advert.verify on|off`: before an advert heard on the radio is published to MQTT, check its structure and Ed25519 signature (the same rule the mesh uses) and drop corrupted ones. Default `on`, including for settings files saved by older firmware (an older file never switches it off by accident). Only adverts heard by radio are checked, not the repeater's own. Each distinct advert is checked once: hearing it again within 2 minutes (by another route, or a retransmission) reuses the verdict and costs nothing. Fresh checks are limited to a burst of 2 and 2 a second, so a flood of adverts cannot stall the receiver; adverts beyond that are counted in `advert_skip` and not published. A valid signature only means the advert is well formed and was signed by the key it names; it does not mean the node is trusted. `advert_drop` and `advert_skip` are published as `stats.advert_drop` and `stats.advert_skip` in the status message sent to a custom broker only, not to the public brokers.
 
 ### MQTT Boot ID
 
-The MQTT status message (and its offline will) and the UMC Net telemetry message carry `"boot_id"`: a random 64-bit number chosen at each boot, sent as a 16-character upper-case hex string (for example `"3F9A07C1D2B84E65"`). A change means the repeater restarted. It is not stored, not derived from the device key, MAC or location, and holds no personal data. It is not a command; there is nothing to configure.
+The MQTT status message (and its offline will) and the UMC Net telemetry message carry `"boot_id"`: a random 64-bit number chosen at each boot, sent as a 16-character upper-case hex string (for example `"3F9A07C1D2B84E65"`). A change means the repeater restarted. It is chosen once, early in start-up, so status and telemetry always show the same value. It is sent to the custom (your own) broker only; the public brokers (LetsMesh, EastMesh, MeshMapper) do not receive it. It is not stored, not derived from the device key, MAC or location, and holds no personal data. It is not a command; there is nothing to configure.
 
 ### Trial Settings (tryset)
 
 Try a setting for a while and have it go back by itself if you lose contact. Available on repeater builds.
 
-- `tryset <secs> <key> <value>`: applies the setting now, without saving it, for 30 to 3600 seconds. The value is checked exactly as `set <key> <value>` checks it. One trial at a time.
-- `tryset keep`: ends the trial and saves the value.
+- `tryset <secs> <key> <value>`: applies the setting now, without saving it, for 30 to 3600 seconds. The value is checked exactly as `set <key> <value>` checks it, and also against the trial limits below. One trial at a time.
+- `tryset keep`: ends the trial and saves the value, the same way a plain `set` saves (so, for example, a local advert interval under 60 minutes is switched off, exactly as `set` does).
 - `tryset revert`: puts the original value back now and reads it back to confirm it.
 - `tryset status`: shows the setting on trial and the time left.
+- `tryset keys [n]`: lists the settings that can be trialled, a page at a time (`tryset keys 2` for the next page).
 
-If the timer runs out the original value is restored (and read back). A reboot also restores it, because the trial value was never saved. While a trial runs, `set` commands are refused (`tryset keep` or `tryset revert` first), and any other save of the settings writes the original value, so a trial value cannot reach flash by another route. `tryset` is an ordinary CLI command: it needs the same administrator access as `set`. Start, keep and revert are logged with the key only.
+Trailing spaces are ignored (`tryset keep ` is `tryset keep`).
 
-Settings that can be trialled: `dutycycle`, `af`, `advert.interval`, `flood.advert.interval`, `flood.max`, `flood.max.advert`, `flood.max.unscoped`, `rxdelay`, `txdelay`, `direct.txdelay`, `agc.reset.interval`, `multi.acks`.
+If the timer runs out the original value is restored (and read back). A reboot also restores it, because the trial value was never saved. While a trial runs, `set` of any trialable setting is refused (`tryset keep` or `tryset revert` first); `set` of anything else still works, so you can still change the node name, passwords and the like to recover. Any save of the settings made during a trial writes the original value of the trialled setting, so a trial value cannot reach flash by another route, and the trial value is put back live afterwards. `tryset` is an ordinary CLI command: it needs the same administrator access as `set`. Commands that change a trial run one at a time (a lock), because web and MQTT commands arrive on a different task from the one that expires trials; if the lock is busy at the moment the timer ends, the revert happens a moment later. Start, keep, revert and timer expiry are logged on the serial console (key only, never the value).
 
-Deliberately not trialable, so `tryset` refuses them: radio frequency, bandwidth, spreading factor, coding rate, presets and regions, TX power, the interference threshold, passwords and keys, access control, WiFi, MQTT and broker settings, and anything else that could cut you off. Radio parameters stay excluded until a hardware rollback has been proven; use `tempradio` for a timed radio test.
+Settings that can be trialled, with the limit applied to a trial (plain `set` is unchanged):
+
+| Key | Trial limit |
+| --- | --- |
+| `dutycycle` | 10 to 100 (lower would make an airtime factor the saved-settings loader clamps) |
+| `af` | 0 to 9 |
+| `advert.interval`, `flood.advert.interval` | as `set` (0 or 60 to 240 minutes; 0 or 3 to 168 hours) |
+| `flood.max`, `flood.max.advert`, `flood.max.unscoped` | 1 to 64 (0 would stop forwarding) |
+| `rxdelay` | 0 to 10 |
+| `txdelay`, `direct.txdelay` | 0 to 1 |
+| `agc.reset.interval` | 0 to 1020 |
+| `multi.acks` | 0 or 1 (the saved-settings loader clamps it to 0 to 1; plain `set multi.acks 300` wraps a byte, an upstream quirk left unchanged) |
+
+These were chosen to be recoverable by the timer: none touches the radio parameters the admin link depends on. That is a judgement, not a guarantee; a poor value can still cost airtime or reach until the timer ends or `tryset revert` is heard.
+
+Deliberately not trialable, so `tryset` refuses them (`Err - cannot trial that setting`): radio frequency, bandwidth, spreading factor, coding rate, presets and regions, TX power, the interference threshold, passwords and keys, access control, WiFi, MQTT and broker settings, and anything else that could cut you off. Radio parameters stay excluded until a hardware rollback has been proven; use `tempradio` for a timed radio test.
 
 ### MQTT Endpoints
 

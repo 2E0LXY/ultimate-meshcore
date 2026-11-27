@@ -13,6 +13,7 @@ constexpr uint32_t kFixedStatusIntervalMs = 300000;
 void MQTTPrefsStore::setDefaults(MQTTPrefs& prefs) {
   memset(&prefs, 0, sizeof(prefs));
   prefs.magic = kMagic;
+  prefs.advert_verify_tag = umcadv::kPrefsTag;
 #if defined(WITH_MQTT_BRIDGE)
   prefs.enabled_mask = 0x00;
   prefs.mqtt_bridge_uplink_migrated = 1;
@@ -67,6 +68,11 @@ bool MQTTPrefsStore::load(FILESYSTEM* fs, MQTTPrefs& prefs) {
     return false;
   }
   prefs = persisted;
+  prefs.advert_verify_off = umcadv::migrateVerifyOff(persisted.advert_verify_tag, persisted.advert_verify_off);
+  if (persisted.advert_verify_tag != umcadv::kPrefsTag) {
+    prefs.advert_verify_tag = umcadv::kPrefsTag;
+    save(fs, prefs);   // an older file: write it back in the current form once
+  }
   if (prefs.legacy_wifi_powersave > 2) {
     prefs.legacy_wifi_powersave = 0;
   }

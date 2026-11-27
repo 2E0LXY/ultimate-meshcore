@@ -36,12 +36,23 @@ inline Verdict check(const uint8_t* payload, int payload_len, Verify verify) {
   return verify(pub, sig, msg, n) ? V_VALID : V_BAD_SIG;
 }
 
-// Keeps the cost low: at most `kBurst` checks at once, refilled at `kPerSec` a second. An advert
-// that arrives with the budget empty is not published (counted as skipped), never published unchecked.
+// MQTTPrefs gained `advert_verify_off` in what used to be struct padding, which older builds wrote out
+// as whatever bytes happened to be there. A file is only trusted for that byte if it also carries
+// `verify_tag` (a 32-bit field appended after it: older files are shorter, so it reads as 0 there).
+// Anything else is an older file: verification stays at its default, ON.
+constexpr uint32_t kPrefsTag = 0x31565641u;   // "AVV1"
+inline uint8_t migrateVerifyOff(uint32_t verify_tag, uint8_t verify_off) {
+  if (verify_tag != kPrefsTag) return 0;
+  return verify_off ? 1 : 0;
+}
+
+// Keeps the cost low: at most `kBurst` checks at once, refilled at `kPerSec` a second (an Ed25519 check
+// takes milliseconds on the loop task, and the radio has one receive buffer). An advert that arrives with
+// the budget empty is not published (counted as skipped), never published unchecked.
 class Budget {
 public:
-  static constexpr uint32_t kBurst = 8;
-  static constexpr uint32_t kPerSec = 4;
+  static constexpr uint32_t kBurst = 2;
+  static constexpr uint32_t kPerSec = 2;
   bool take(uint32_t now_ms) {
     if (!_started) { _started = true; _last = now_ms; _tokens_milli = kBurst * 1000UL; }
     const uint32_t dt = now_ms - _last;       // unsigned: correct across a millis() wrap
@@ -60,20 +71,59 @@ private:
   uint32_t _tokens_milli = 0;
 };
 
+// The verdict for adverts seen lately, keyed by packet hash (the mesh's own hash, which ignores the path,
+// so the same advert heard again by another route has the same key). A repeat of an advert gets the same
+// answer with no signature check and no budget used. 16 entries, 2 minutes each, oldest replaced first.
+class VerdictCache {
+public:
+  static constexpr int kSlots = 16;
+  static constexpr uint32_t kTtlMs = 120000UL;
+  static constexpr int kHash = 8;             // MAX_HASH_SIZE
+
+  bool find(const uint8_t* hash, uint32_t now_ms, Verdict& v) const {
+    for (int i = 0; i < kSlots; i++) {
+      const Slot& s = _s[i];
+      if (s.used && (uint32_t)(now_ms - s.at) < kTtlMs && memcmp(s.hash, hash, kHash) == 0) { v = (Verdict)s.verdict; return true; }
+    }
+    return false;
+  }
+  void put(const uint8_t* hash, uint32_t now_ms, Verdict v) {
+    Slot& s = _s[_next];
+    _next = (_next + 1) % kSlots;
+    memcpy(s.hash, hash, kHash);
+    s.at = now_ms;
+    s.verdict = (uint8_t)v;
+    s.used = true;
+  }
+
+private:
+  struct Slot { uint8_t hash[kHash]; uint32_t at; uint8_t verdict; bool used; };
+  Slot _s[kSlots] = {};
+  int _next = 0;
+};
+
 struct Counters {
   uint32_t checked = 0;
   uint32_t dropped_sig = 0;     // well formed, signature wrong
   uint32_t dropped_short = 0;   // too short to be an advert
   uint32_t skipped = 0;         // not checked (budget empty), so not published
+  uint32_t repeats = 0;         // heard before lately: earlier verdict reused, no check made
   uint32_t dropped() const { return dropped_sig + dropped_short; }   // `mqtt.advert_drop`
 };
 
-// The whole decision for one advert about to be published. true = publish it.
+// The whole decision for one advert about to be published. true = publish it. `hash` is the packet hash
+// (kHash bytes). A repeat of a checked advert is not checked again: published if it was good, dropped
+// (not counted again) if it was bad.
 template <class Verify>
-inline bool shouldPublish(Counters& c, Budget& b, uint32_t now_ms, const uint8_t* payload, int payload_len, Verify verify) {
+inline bool shouldPublish(Counters& c, Budget& b, VerdictCache& cache, uint32_t now_ms, const uint8_t* hash,
+                          const uint8_t* payload, int payload_len, Verify verify) {
+  Verdict v;
+  if (cache.find(hash, now_ms, v)) { c.repeats++; return v == V_VALID; }
   if (!b.take(now_ms)) { c.skipped++; return false; }
   c.checked++;
-  switch (check(payload, payload_len, verify)) {
+  v = check(payload, payload_len, verify);
+  cache.put(hash, now_ms, v);
+  switch (v) {
     case V_VALID: return true;
     case V_SHORT: c.dropped_short++; return false;
     default: c.dropped_sig++; return false;

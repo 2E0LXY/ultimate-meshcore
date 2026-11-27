@@ -114,6 +114,7 @@ public:
   bool setAdvertVerify(const char* value);   // on | off
   bool getAdvertVerify() const { return _prefs.advert_verify_off == 0; }
   uint32_t getAdvertDrop() const { return _advert.dropped(); }   // mqtt.advert_drop
+  uint32_t getAdvertSkip() const { return _advert.skipped; }     // advert_skip
   void formatAdvertReply(char* reply, size_t reply_size) const;
   bool hasCustomPassword() const { return _prefs.custom_password[0] != 0; }
   bool sendStatusNow();
@@ -173,6 +174,7 @@ private:
   MQTTStatusSnapshot _last_status;
   umcadv::Counters _advert;
   umcadv::Budget _advert_budget;
+  umcadv::VerdictCache _advert_cache;
   char _device_id[65];
   const char* _node_name;
 
@@ -259,7 +261,7 @@ private:
   void publishStatus(bool online);
   void publishBrokerStatus(BrokerState& broker, bool online);
   bool queuePublish(BrokerState& broker, const char* topic, const char* payload, bool retain);
-  int buildStatusJson(char* buffer, size_t buffer_size, bool online) const;
+  int buildStatusJson(char* buffer, size_t buffer_size, bool online, bool custom) const;   // custom: adds boot_id and the advert counters
   int buildPacketJson(char* buffer, size_t buffer_size, const mesh::Packet& packet, bool is_tx, int rssi, float snr,
                       int score, int duration) const;
   int buildRawJson(char* buffer, size_t buffer_size, const mesh::Packet& packet, bool is_tx, int rssi, float snr) const;

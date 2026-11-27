@@ -2,6 +2,7 @@
 #include <Mesh.h>
 
 #include "MyMesh.h"
+#include <helpers/umc/UmcBootId.h>
 #include <helpers/ArchiveStorage.h>
 
 #ifdef DISPLAY_CLASS
@@ -41,6 +42,7 @@ static unsigned long userBtnDownAt = 0;
 #endif
 
 void setup() {
+  umcboot::bootId();   // fixed once, before any task or MQTT code can read it, so status and telemetry always agree
   Serial.begin(115200);
   delay(1000);
 

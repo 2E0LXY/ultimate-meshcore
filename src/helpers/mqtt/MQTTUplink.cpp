@@ -569,8 +569,13 @@ void MQTTUplink::refreshBrokerState(BrokerState& broker) {
   escapeJsonString(node_name, origin, sizeof(origin));
   char client_version[96];
   snprintf(client_version, sizeof(client_version), "%s", CLIENT_VERSION);
-  char boot_hex[17];
-  umcboot::toHex(umcboot::bootId(), boot_hex);
+  char boot_field[40];
+  boot_field[0] = 0;
+  if (broker.spec != nullptr && broker.spec->custom) {   // boot_id goes to the operator's own broker only
+    char boot_hex[17];
+    umcboot::toHex(umcboot::bootId(), boot_hex);
+    snprintf(boot_field, sizeof(boot_field), ",\"boot_id\":\"%s\"", boot_hex);
+  }
   char radio_info[48];
   snprintf(radio_info, sizeof(radio_info), "%.6f,%.1f,%u,%u", static_cast<double>(_last_status.radio_freq),
            static_cast<double>(_last_status.radio_bw), _last_status.radio_sf, _last_status.radio_cr);
@@ -579,9 +584,9 @@ void MQTTUplink::refreshBrokerState(BrokerState& broker) {
   formatIsoTimestamp(time(nullptr), ts, sizeof(ts));
   snprintf(broker.offline_payload, sizeof(broker.offline_payload),
            "{\"status\":\"offline\",\"timestamp\":\"%s\",\"origin\":\"%s\",\"origin_id\":\"%s\",\"model\":\"%s\","
-           "\"firmware_version\":\"%s\",\"radio\":\"%s\",\"client_version\":\"%s\",\"repeat\":\"%s\",\"boot_id\":\"%s\"}",
+           "\"firmware_version\":\"%s\",\"radio\":\"%s\",\"client_version\":\"%s\",\"repeat\":\"%s\"%s}",
            ts, origin, _device_id, safe_name, FIRMWARE_VERSION, radio_info, client_version,
-           _last_status.repeat_enabled ? "on" : "off", boot_hex);
+           _last_status.repeat_enabled ? "on" : "off", boot_field);
 }
 
 bool MQTTUplink::refreshToken(BrokerState& broker) {
@@ -687,7 +692,7 @@ bool MQTTUplink::queuePublish(BrokerState& broker, const char* topic, const char
   return enqueue_rc >= 0;
 }
 
-int MQTTUplink::buildStatusJson(char* buffer, size_t buffer_size, bool online) const {
+int MQTTUplink::buildStatusJson(char* buffer, size_t buffer_size, bool online, bool custom) const {
   char ts[32];
   formatIsoTimestamp(time(nullptr), ts, sizeof(ts));
   char model[48];
@@ -697,26 +702,35 @@ int MQTTUplink::buildStatusJson(char* buffer, size_t buffer_size, bool online) c
   escapeJsonString(node_name, origin, sizeof(origin));
   char client_version[96];
   snprintf(client_version, sizeof(client_version), "%s", CLIENT_VERSION);
-  char boot_hex[17];
-  umcboot::toHex(umcboot::bootId(), boot_hex);
+  // boot_id and the advert counters are for the operator's own (custom) broker; public brokers get the standard fields only
+  char boot_field[40];
+  char advert_fields[96];
+  boot_field[0] = 0;
+  advert_fields[0] = 0;
+  if (custom) {
+    char boot_hex[17];
+    umcboot::toHex(umcboot::bootId(), boot_hex);
+    snprintf(boot_field, sizeof(boot_field), ",\"boot_id\":\"%s\"", boot_hex);
+    snprintf(advert_fields, sizeof(advert_fields), ",\"advert_drop\":%lu,\"advert_skip\":%lu",
+             static_cast<unsigned long>(_advert.dropped()), static_cast<unsigned long>(_advert.skipped));
+  }
   char radio_info[48];
   snprintf(radio_info, sizeof(radio_info), "%.6f,%.1f,%u,%u", static_cast<double>(_last_status.radio_freq),
            static_cast<double>(_last_status.radio_bw), _last_status.radio_sf, _last_status.radio_cr);
   return snprintf(buffer, buffer_size,
                   "{\"status\":\"%s\",\"timestamp\":\"%s\",\"origin\":\"%s\",\"origin_id\":\"%s\","
                   "\"model\":\"%s\",\"firmware_version\":\"%s\",\"radio\":\"%s\",\"client_version\":\"%s\","
-                  "\"repeat\":\"%s\",\"boot_id\":\"%s\",\"stats\":{\"battery_mv\":%d,\"uptime_secs\":%lu,\"errors\":%u,\"queue_len\":%u,"
+                  "\"repeat\":\"%s\"%s,\"stats\":{\"battery_mv\":%d,\"uptime_secs\":%lu,\"errors\":%u,\"queue_len\":%u,"
                   "\"noise_floor\":%d,\"tx_air_secs\":%lu,\"rx_air_secs\":%lu,\"recv_errors\":%lu,"
-                  "\"packets_sent\":%lu,\"packets_received\":%lu,\"advert_drop\":%lu}}",
+                  "\"packets_sent\":%lu,\"packets_received\":%lu%s}}",
                   online ? "online" : "offline", ts, origin, _device_id, model, FIRMWARE_VERSION, radio_info, client_version,
-                  _last_status.repeat_enabled ? "on" : "off", boot_hex, _last_status.battery_mv,
+                  _last_status.repeat_enabled ? "on" : "off", boot_field, _last_status.battery_mv,
                   static_cast<unsigned long>(_last_status.uptime_secs), _last_status.error_flags, _last_status.queue_len,
                   _last_status.noise_floor, static_cast<unsigned long>(_last_status.tx_air_secs),
                   static_cast<unsigned long>(_last_status.rx_air_secs),
                   static_cast<unsigned long>(_last_status.recv_errors),
                   static_cast<unsigned long>(_last_status.packets_sent),
-                  static_cast<unsigned long>(_last_status.packets_received),
-                  static_cast<unsigned long>(_advert.dropped()));
+                  static_cast<unsigned long>(_last_status.packets_received), advert_fields);
 }
 
 int MQTTUplink::buildPacketJson(char* buffer, size_t buffer_size, const mesh::Packet& packet, bool is_tx, int rssi,
@@ -825,7 +839,7 @@ void MQTTUplink::publishBrokerStatus(BrokerState& broker, bool online) {
   if (payload == nullptr) {
     return;
   }
-  int len = buildStatusJson(payload, 768, online);
+  int len = buildStatusJson(payload, 768, online, broker.spec != nullptr && broker.spec->custom);
   if (len > 0 && static_cast<size_t>(len) < 768) {
     queuePublish(broker, broker.status_topic, payload, true);
   }
@@ -838,14 +852,17 @@ void MQTTUplink::publishStatus(bool online) {
   if (payload == nullptr) {
     return;
   }
-  int len = buildStatusJson(payload, 768, online);
-  if (len <= 0 || static_cast<size_t>(len) >= 768) {
-    freeScratchBuffer(payload);
-    return;
-  }
-  for (BrokerState& broker : _brokers) {
-    if (broker.spec != nullptr) {
-      queuePublish(broker, broker.status_topic, payload, true);
+  // two passes: the standard message for public brokers, then the one with boot_id and advert counters for custom ones
+  for (int pass = 0; pass < 2; pass++) {
+    const bool custom = pass == 1;
+    int len = buildStatusJson(payload, 768, online, custom);
+    if (len <= 0 || static_cast<size_t>(len) >= 768) {
+      continue;
+    }
+    for (BrokerState& broker : _brokers) {
+      if (broker.spec != nullptr && (broker.spec->custom != 0) == custom) {
+        queuePublish(broker, broker.status_topic, payload, true);
+      }
     }
   }
   freeScratchBuffer(payload);
@@ -1146,6 +1163,7 @@ void MQTTUplink::ensureBroker(BrokerState& broker, bool allow_new_connect) {
 }
 
 void MQTTUplink::begin(FILESYSTEM* fs) {
+  umcboot::bootId();   // fixed before the MQTT task starts, so status and telemetry agree
   _fs = fs;
   MQTTPrefsStore::load(_fs, _prefs);
   uint8_t normalized_mask = normalizeEnabledMask(_prefs.enabled_mask & kBrokerMask);
@@ -1227,7 +1245,10 @@ void MQTTUplink::publishPacket(const mesh::Packet& packet, bool is_tx, int rssi,
       mesh::Identity id(pub);
       return id.verify(sig, msg, n);
     };
-    if (!umcadv::shouldPublish(_advert, _advert_budget, millis(), packet.payload, packet.payload_len, verify)) {
+    static_assert(umcadv::VerdictCache::kHash == MAX_HASH_SIZE, "advert verdict cache hash size must match the packet hash");
+    uint8_t hash[MAX_HASH_SIZE];
+    packet.calculatePacketHash(hash);   // repeats of an advert are not checked again (see UmcAdvertVerify.h)
+    if (!umcadv::shouldPublish(_advert, _advert_budget, _advert_cache, millis(), hash, packet.payload, packet.payload_len, verify)) {
       MQTT_LOG("advert dropped (drops=%lu skipped=%lu)", static_cast<unsigned long>(_advert.dropped()),
                static_cast<unsigned long>(_advert.skipped));
       return;
@@ -1446,9 +1467,10 @@ bool MQTTUplink::setAdvertVerify(const char* value) {
 }
 
 void MQTTUplink::formatAdvertReply(char* reply, size_t reply_size) const {
-  snprintf(reply, reply_size, "> verify %s, checked %lu, mqtt.advert_drop %lu (bad signature %lu, malformed %lu), not checked %lu",
+  snprintf(reply, reply_size, "> verify %s, checked %lu, mqtt.advert_drop %lu (sig %lu, short %lu), advert_skip %lu, repeats %lu",
            getAdvertVerify() ? "on" : "off", (unsigned long)_advert.checked, (unsigned long)_advert.dropped(),
-           (unsigned long)_advert.dropped_sig, (unsigned long)_advert.dropped_short, (unsigned long)_advert.skipped);
+           (unsigned long)_advert.dropped_sig, (unsigned long)_advert.dropped_short, (unsigned long)_advert.skipped,
+           (unsigned long)_advert.repeats);
 }
 
 bool MQTTUplink::setTxEnabled(bool enabled) {
