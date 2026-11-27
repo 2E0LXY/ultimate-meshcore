@@ -24,10 +24,11 @@ CFG = {
     "logfile": os.environ.get("DASH_LOGFILE", ""), "ctl_pass_file": os.environ.get("DASH_CTL_PASS_FILE", "/opt/umcnet-dash/ctl.pass"),
     "ctl_user": os.environ.get("DASH_CTL_USER", "controller"), "admin_sock": os.environ.get("DASH_ADMIN_SOCK", "/run/umcnet-admin/admin.sock"),
     "keep_days": int(os.environ.get("DASH_KEEP_DAYS", "14")), "journal": os.environ.get("DASH_JOURNAL", "1") == "1",
+    "backup": os.environ.get("DASH_BACKUP", "1") == "1", "backup_dir": os.environ.get("DASH_BACKUP_DIR", ""),      # empty = a "backups" folder beside the database
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.33"
+VERSION = "2.34"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -104,7 +105,7 @@ def note_network(did, info, snr, rssi, now):
     if not info: return
     sender = None
     if info.get("fkey"):
-        k = info["fkey"]; n = NODES.get(k)
+        k = info["fkey"]; n = NODES.get(k); fresh = n is None
         if n is None:
             if len(NODES) >= 3000: return
             n = NODES[k] = {"key": k, "name": "", "type": 0, "lat": None, "lon": None, "first": now, "last": 0, "adverts": 0}
@@ -112,6 +113,9 @@ def note_network(did, info, snr, rssi, now):
         if info.get("name"): n["name"] = info["name"]
         if info.get("atype"): n["type"] = info["atype"]
         if info.get("lat") is not None: n["lat"], n["lon"] = info["lat"], info["lon"]
+        if fresh:
+            try: newnode_seen(k, n, did, now)
+            except Exception as e: sys.stderr.write("new node: %s\n" % e)
         sender = k
         try: decoded_advert(did, n, info, snr, now)
         except Exception as e: sys.stderr.write("advert copy: %s\n" % e)
@@ -374,7 +378,7 @@ def presence_view(hours=24, now=None, allowed=None):
     return out
 
 def telem_prune(now):
-    DB.execute("DELETE FROM telem WHERE ts<?", (now - 7 * 86400,))
+    return prune_batched("telem", "ts", now - max(8, CONF["telem_keep_days"]) * 86400)      # never under 8 days: the presence timeline reaches back 7
 
 def on_publish(topic, payload, retained=False):
     now = time.time()
@@ -405,7 +409,12 @@ def on_publish(topic, payload, retained=False):
             d["status"] = j.get("status", "unknown"); d["status_retained"] = retained
             for k_src, k_dst in (("model", "model"), ("firmware_version", "fw"), ("radio", "radio"), ("client_version", "client"), ("repeat", "repeat")):
                 if j.get(k_src) is not None: d[k_dst] = j[k_src]
-            if isinstance(j.get("stats"), dict): d["stats"] = j["stats"]
+            if isinstance(j.get("stats"), dict):
+                d["stats"] = j["stats"]
+                if not retained:
+                    boot_note(d, j.get("boot_id", j["stats"].get("boot_id")), now)
+                    try: airtime_note(did, j["stats"], now, d.get("boot_id"))
+                    except Exception as e: sys.stderr.write("airtime: %s\n" % e)
             return
         if kind == "telemetry":
             if not retained and isinstance(j.get("lpp"), str) and len(j["lpp"]) <= 400: telem_store(did, area, j["lpp"], now)
@@ -678,6 +687,10 @@ def db_init():
     DB.execute("CREATE TABLE IF NOT EXISTS links(a TEXT, b TEXT, first INTEGER, last INTEGER, snr REAL, rssi INTEGER, PRIMARY KEY(a, b))")
     DB.execute("CREATE TABLE IF NOT EXISTS traffic(h INTEGER, node TEXT, rx TEXT, ptype TEXT, hops INTEGER, n INTEGER, PRIMARY KEY(h, node, rx, ptype, hops))")
     DB.execute("CREATE TABLE IF NOT EXISTS events(ts INTEGER, kind TEXT, client TEXT, user TEXT, ip TEXT, text TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS e_ts ON events(ts)")
+    DB.execute("CREATE INDEX IF NOT EXISTS t_ts ON telem(ts)")
+    DB.execute("CREATE TABLE IF NOT EXISTS airtime(did TEXT, ts INTEGER, tx REAL, rx REAL, boot TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS air_k ON airtime(did, ts)")
+    if "boot" not in [r[1] for r in DB.execute("PRAGMA table_info(airtime)")]: DB.execute("ALTER TABLE airtime ADD COLUMN boot TEXT")
+    DB.execute("CREATE TABLE IF NOT EXISTS newnodes(key TEXT PRIMARY KEY, ts INTEGER, name TEXT, kind INTEGER, rx TEXT, state TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS nn_ts ON newnodes(ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS audit(ts INTEGER, who TEXT, action TEXT, target TEXT, detail TEXT, ok INTEGER)"); DB.execute("CREATE INDEX IF NOT EXISTS a_ts ON audit(ts)")
 
 def sysnum(topic, default=0):
@@ -709,7 +722,11 @@ def sampler_loop():
             if int(time.time()) % 600 < 60: nodes_housekeeping()
             now = int(time.time()); vals = snapshot_values()
             grp_prune(now)
-            if now % 3600 < 60: telem_prune(now)
+            if now % 3600 < 60:
+                try: retention_run(now)
+                except Exception as e: sys.stderr.write("retention: %s\n" % e)
+            if CFG["backup"] and backup_due(now, BACKUP["ts"], BACKUP["try"], CONF["backup_hour"]):
+                BACKUP["try"] = now; threading.Thread(target=backup_run, daemon=True, name="backup").start()
             DB.executemany("INSERT INTO samples VALUES(?,?,?)", [(now, k, float(v)) for k, v in vals.items()])
             if now % 3600 < 60:
                 cut = now - CONF["keep_days"] * 86400; DB.execute("DELETE FROM samples WHERE ts<?", (cut,)); DB.execute("DELETE FROM events WHERE ts<?", (cut,)); DB.execute("DELETE FROM audit WHERE ts<?", (now - max(90, CONF["keep_days"]) * 86400,))
@@ -756,11 +773,13 @@ MSG_DEFAULTS = {"tx_enabled": True, "sender": "UMC-DASH", "keep_days": 30,
                 "channels": [{"name": "Public", "psk": MSG.PUBLIC_PSK}, {"name": "#yorkshire"}, {"name": "#northwest"}, {"name": "#northeast"}, {"name": "#derbyshire"}, {"name": "#lincolnshire"}, {"name": "#sheffield"}, {"name": "#wakefield"}],
                 "regions": ["yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire", "sheffield", "wakefield"]}
 DEFAULTS = {"publish_decoded": True, "web_users": {}, "messages": MSG_DEFAULTS, "map_hours": 24, "enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
-            "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14, "confirm_risky": True, "control_enabled": True,
-            "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True},
+            "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14,
+            "traffic_keep_days": 30, "telem_keep_days": 90, "backup_keep": 7, "backup_hour": 3, "airtime_warn_pct": 10, "airtime_warn_minutes": 15, "newnode_max_per_hour": 6, "newnode_warmup_minutes": 30, "confirm_risky": True, "control_enabled": True,
+            "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True, "collision": True, "airtime": True, "newnode": True},
             "labels": {}}
 RANGES = {"map_hours": (1, 8760), "stale_minutes": (2, 1440), "cert_warn_days": (2, 60), "cert_bad_days": (1, 30), "disk_warn_pct": (50, 99), "mem_warn_pct": (50, 99), "flap_count": (2, 50),
-          "skew_seconds": (5, 3600), "auth_fail_warn": (1, 1000), "auth_fail_bad": (2, 10000), "keep_days": (1, 90)}
+          "skew_seconds": (5, 3600), "auth_fail_warn": (1, 1000), "auth_fail_bad": (2, 10000), "keep_days": (1, 90),
+          "traffic_keep_days": (7, 1000), "telem_keep_days": (8, 730), "backup_keep": (1, 60), "backup_hour": (0, 23), "airtime_warn_pct": (1, 100), "airtime_warn_minutes": (5, 120), "newnode_max_per_hour": (1, 100), "newnode_warmup_minutes": (0, 1440)}
 CONF = json.loads(json.dumps(DEFAULTS))
 
 def conf_path(): return os.path.join(CFG["data"], "config.json")
@@ -1556,7 +1575,6 @@ def confirmed_links(hours=48):
 # Every heard packet with a known sender is counted per hour, per node, per receiving repeater, per type and per hop count.
 # Counts are held in memory and written to the traffic table every minute, so the history survives a restart.
 TRAFFIC_BUF = collections.Counter(); TRAFFIC_LOCK = threading.Lock()
-TRAFFIC_KEEP_DAYS = 400
 
 def traffic_flush():
     with TRAFFIC_LOCK:
@@ -1571,7 +1589,6 @@ def traffic_loop():
     while True:
         try:
             traffic_flush()
-            with LOCK: DB.execute("DELETE FROM traffic WHERE h < ?", (int(time.time()) - TRAFFIC_KEEP_DAYS * 86400,))
         except Exception as e: sys.stderr.write("traffic: %s\n" % e)
         time.sleep(60)
 
@@ -1666,6 +1683,298 @@ def setup_commands(name, password, dev, area):
     if key: lines += ["set mqtt.control.key %s" % key, "set mqtt.control on"]
     return "\n".join(lines)
 
+# ----------------------------------------------------------------------------- housekeeping: retention, backup, ID collisions, airtime, new nodes
+def prune_batched(table, col, cut, batch=5000):
+    """Delete rows older than `cut` a few thousand at a time, letting the packet handler in between. Table and column names are ours, never user input."""
+    total = 0
+    while True:
+        with LOCK:
+            n = DB.execute("DELETE FROM %s WHERE rowid IN (SELECT rowid FROM %s WHERE %s<? LIMIT ?)" % (table, table, col), (cut, batch)).rowcount
+        total += n
+        if n < batch: return total
+        time.sleep(0.05)
+
+def retention_run(now=None):
+    """Trim the high-volume tables to their configured age. Presence and history views read telem (kept at least 8 days) and traffic (at least 7)."""
+    now = int(now or time.time()); C = CONF
+    return {"traffic": prune_batched("traffic", "h", now - max(7, C["traffic_keep_days"]) * 86400),
+            "telem": telem_prune(now),
+            "airtime": prune_batched("airtime", "ts", now - max(8, C["telem_keep_days"]) * 86400),
+            "newnodes": prune_batched("newnodes", "ts", now - 365 * 86400)}
+
+# --- D1: nightly consistent backup of the database
+BACKUP_RX = re.compile(r"^dash-\d{8}-\d{6}\.sqlite$")
+BACKUP = {"ts": 0, "size": 0, "ok": None, "error": "", "secs": 0.0, "count": 0, "try": 0}
+BACKUP_LOCK = threading.Lock()
+
+def db_path(): return os.path.join(CFG["data"], "dash.sqlite")
+def backup_dir(): return CFG["backup_dir"] or os.path.join(CFG["data"], "backups")
+def backup_name(ts): return time.strftime("dash-%Y%m%d-%H%M%S.sqlite", time.gmtime(ts))
+
+def backup_split(names, keep):
+    """(kept, removed): the newest `keep` backup files stay. Names that are not ours are never touched."""
+    ours = sorted(n for n in names if BACKUP_RX.match(n))
+    keep = max(1, int(keep))
+    return ours[-keep:], ours[:-keep]
+
+def backup_space_needed(path):
+    """Free space wanted before a backup: twice the database and its WAL."""
+    return 2 * sum(os.path.getsize(path + x) for x in ("", "-wal") if os.path.exists(path + x))
+
+def backup_restore_check(path, table="messages"):
+    """Open a backup read-only and count rows in `table`: proof that it can be restored. Returns the count."""
+    c = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+    try: return c.execute("SELECT COUNT(*) FROM %s" % table).fetchone()[0]
+    finally: c.close()
+
+def backup_due(now, last_ok, last_try, hour):
+    """One backup a day, at or after `hour` (UTC); the first one as soon as there is none; a failed or fresh try is not repeated for an hour."""
+    if now - last_try < 3600: return False
+    if not last_ok: return True
+    if now - last_ok < 23 * 3600: return False
+    return time.gmtime(now).tm_hour >= hour
+
+def backup_run(now=None):
+    """Copy the live database with SQLite's online backup (a consistent snapshot, the packet handler keeps writing), check it, then rename it into place."""
+    if not BACKUP_LOCK.acquire(blocking=False): return dict(BACKUP)
+    t0 = time.time(); now = int(now or t0); d = backup_dir(); tmp = os.path.join(d, ".tmp-" + backup_name(now))
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        need = backup_space_needed(db_path())
+        free = shutil.disk_usage(d).free
+        if free < need: raise RuntimeError("skipped: %.0f MB free, %.0f MB needed (twice the database)" % (free / 1e6, need / 1e6))
+        src = sqlite3.connect(db_path(), timeout=30); dst = sqlite3.connect(tmp)
+        try:
+            src.backup(dst)
+            chk = dst.execute("PRAGMA integrity_check").fetchone()
+            if not chk or chk[0] != "ok": raise RuntimeError("the copy failed its integrity check")
+        finally:
+            dst.close(); src.close()
+        os.chmod(tmp, 0o600)
+        with open(tmp, "rb") as f: os.fsync(f.fileno())
+        final = os.path.join(d, backup_name(now)); os.replace(tmp, final)
+        _kept, gone = backup_split(os.listdir(d), CONF["backup_keep"])
+        for n in gone:
+            try: os.remove(os.path.join(d, n))
+            except OSError: pass
+        BACKUP.update({"ts": now, "size": os.path.getsize(final), "ok": True, "error": "", "secs": round(time.time() - t0, 2), "count": len(_kept)})
+    except Exception as e:
+        try: os.remove(tmp)
+        except OSError: pass
+        BACKUP.update({"ok": False, "error": str(e)[:200]}); sys.stderr.write("backup: %s\n" % e)
+    finally:
+        BACKUP_LOCK.release()
+    return dict(BACKUP)
+
+def backup_load():
+    """After a restart, pick up the newest backup already on disk, so the Checks card does not start from nothing."""
+    d = backup_dir()
+    try: names = sorted(n for n in os.listdir(d) if BACKUP_RX.match(n))
+    except OSError: return
+    if names:
+        st = os.stat(os.path.join(d, names[-1])); BACKUP.update({"ts": int(st.st_mtime), "size": st.st_size, "ok": True, "error": "", "count": len(names)})
+
+def backup_view(now=None):
+    now = now or time.time()
+    return {"enabled": CFG["backup"], "dir": backup_dir(), "ts": BACKUP["ts"], "age": int(now - BACKUP["ts"]) if BACKUP["ts"] else None, "size": BACKUP["size"], "ok": BACKUP["ok"],
+            "error": BACKUP["error"], "count": BACKUP["count"], "keep": CONF["backup_keep"], "secs": BACKUP["secs"]}
+
+def backup_check(v, uptime):
+    """The Checks line for a backup view: (level, title, detail), or None when backups are switched off."""
+    if not v["enabled"]: return None
+    if v["ok"] is False: return ("bad", "Database backup failed", "%s (last good: %s)" % (v["error"] or "unknown error", time.strftime("%d %b %H:%M", time.localtime(v["ts"])) if v["ts"] else "none"))
+    if not v["ts"]: return ("warn", "No database backup yet", "the first one runs shortly after start") if uptime > 7200 else None
+    when = time.strftime("%d %b %H:%M", time.localtime(v["ts"])); size = "%.1f MB" % (v["size"] / 1e6)
+    if v["age"] > 36 * 3600: return ("warn", "Database backup is old", "last one %s, %s: the nightly run has not worked" % (when, size))
+    return ("ok", "Database backup", "%s, %s, %d kept" % (when, size, v["count"]))
+
+# --- D2: repeater ID collisions (the path in a packet names a repeater by the first 1, 2 or 3 bytes of its key)
+COLL = {"seen": {}}
+def collisions_path(): return os.path.join(CFG["data"], "collisions.json")
+
+def collisions_load():
+    try: seen = json.load(open(collisions_path())).get("seen", {})
+    except Exception: seen = {}
+    COLL["seen"] = {k: v for k, v in seen.items() if isinstance(k, str)} if isinstance(seen, dict) else {}
+
+def collisions_save():
+    seen = dict(sorted(COLL["seen"].items(), key=lambda kv: kv[1])[-2000:]); COLL["seen"] = seen
+    tmp = collisions_path() + ".tmp"
+    with open(tmp, "w") as f: json.dump({"seen": seen}, f)
+    os.replace(tmp, collisions_path())
+
+def collisions_find(nodes):
+    """nodes: [(full key hex, name)]. Every group of two or more sharing the first 1, 2 or 3 bytes, with a severity: 1 byte info, 2 warn, 3 bad."""
+    uniq = {}
+    for k, nm in nodes:
+        if isinstance(k, str) and len(k) >= 6: uniq[k.upper()] = nm or ""
+    out = []
+    for nb, level in ((1, "info"), (2, "warn"), (3, "bad")):
+        groups = collections.defaultdict(list)
+        for k, nm in uniq.items(): groups[k[:2 * nb]].append((k, nm))
+        for p, mem in sorted(groups.items()):
+            if len(mem) < 2: continue
+            mem.sort()
+            out.append({"bytes": nb, "prefix": p, "level": level, "nodes": [{"key": k, "name": nm} for k, nm in mem],
+                        "id": "%d:%s:%s" % (nb, p, hashlib.sha1(",".join(k for k, _ in mem).encode()).hexdigest()[:10])})
+    return out
+
+def collisions_new(found, seen):
+    """The collisions worth an alert that we have not alerted about: 2 and 3 byte ones (a 1 byte overlap is normal beyond a few dozen repeaters)."""
+    return [c for c in found if c["bytes"] >= 2 and c["id"] not in seen]
+
+def repeater_keys(now=None):
+    now = now or time.time(); out = {}
+    for k, n in NODES.items():
+        if n["type"] == 2 and n["last"] and now - n["last"] < 30 * 86400: out[k] = n["name"]
+    for d in DEV.values(): out[d["id"]] = d["name"] or out.get(d["id"], "")
+    return list(out.items())
+
+def collisions_view(now=None): return collisions_find(repeater_keys(now))
+
+def collision_alerts(now=None):
+    now = int(now or time.time()); new = collisions_new(collisions_view(now), COLL["seen"])
+    if not new: return 0
+    for c in new:
+        COLL["seen"][c["id"]] = now
+        names = ", ".join((x["name"] or x["key"][:8]) for x in c["nodes"][:6])
+        if CONF["alerts"].get("collision", True):
+            send_alert("Repeater ID clash (%d byte)" % c["bytes"], "%d repeaters share the ID %s: %s" % (len(c["nodes"]), c["prefix"], names), "bad" if c["bytes"] >= 3 else "warn", "collision")
+    try: collisions_save()
+    except OSError as e: sys.stderr.write("collisions: %s\n" % e)
+    return len(new)
+
+# --- D3: airtime and duty cycle per repeater, from the tx_air_secs / rx_air_secs counters in each status message
+AIR_LAST = {}
+def airtime_sample(stats):
+    """(tx_air_secs, rx_air_secs) from a status block, or None."""
+    try:
+        tx = float(stats["tx_air_secs"]); rx = float(stats.get("rx_air_secs", 0))
+    except (KeyError, TypeError, ValueError): return None
+    return (tx, rx) if tx >= 0 and rx >= 0 else None
+
+def airtime_note(did, stats, now, boot=None):
+    s = airtime_sample(stats)
+    if not s or now - AIR_LAST.get(did, 0) < 55: return False
+    AIR_LAST[did] = now
+    with LOCK: DB.execute("INSERT INTO airtime VALUES(?,?,?,?,?)", (did, int(now), s[0], s[1], boot))
+    return True
+
+def boot_note(d, boot, now):
+    """Remember the repeater's boot id (a 64-bit hex string in its status). A change means it rebooted; an absent id is unknown, never a reboot."""
+    if not isinstance(boot, str) or not re.match(r"^[0-9A-Fa-f]{1,16}$", boot): return False
+    boot = boot.upper(); old = d.get("boot_id"); d["boot_id"] = boot
+    if old and old != boot:
+        d["boot_changed"] = now; d["reboots"] = d.get("reboots", 0) + 1; return True
+    return False
+
+def duty_steps(rows, max_gap=3600):
+    """rows: [(ts, tx_total, rx_total[, boot_id])] oldest first -> [(ts, seconds, tx_seconds, rx_seconds)] for each pair.
+    A counter that went backwards, a changed boot id (both mean a reboot) or a long silence gives no step: that time is missing data, not zero."""
+    out = []
+    for a, b in zip(rows, rows[1:]):
+        t0, x0, r0 = a[:3]; t1, x1, r1 = b[:3]
+        dt = t1 - t0
+        if len(a) > 3 and len(b) > 3 and a[3] and b[3] and a[3] != b[3]: continue
+        if dt <= 0 or dt > max_gap or x1 < x0 or r1 < r0: continue
+        out.append((t1, dt, min(x1 - x0, dt), min(r1 - r0, dt)))
+    return out
+
+def duty_buckets(steps, since, now, n=120):
+    """Steps averaged into at most n buckets: [[time, tx %, rx %]]."""
+    width = max(60, (now - since) / float(n)); acc = {}
+    for t, dt, tx, rx in steps:
+        if t < since: continue
+        b = acc.setdefault(min(n - 1, int((t - since) // width)), [0.0, 0.0, 0.0]); b[0] += dt; b[1] += tx; b[2] += rx
+    return [[int(since + (i + 0.5) * width), round(100.0 * b[1] / b[0], 2), round(100.0 * b[2] / b[0], 2)] for i, b in sorted(acc.items()) if b[0] > 0]
+
+def duty_window(steps, since):
+    """(tx duty % over the window, seconds of the window covered by readings)."""
+    dt = sum(s[1] for s in steps if s[0] > since); tx = sum(s[2] for s in steps if s[0] > since)
+    return (100.0 * tx / dt if dt else None), dt
+
+AIR_COOLDOWN = 1800
+def duty_alert_step(active, avg, covered, thr, minutes, since_recover=None):
+    """'fire' when the rolling average reaches thr (with readings for most of the window) and it is not within the cooldown after the last recovery;
+    'recover' once it is back under 80 % of thr; else None. No readings is neither: the state is kept."""
+    if avg is None or covered < 0.6 * minutes * 60: return None
+    if not active and avg >= thr: return None if since_recover is not None and since_recover < AIR_COOLDOWN else "fire"
+    if active and avg < thr * 0.8: return "recover"
+    return None
+
+def airtime_rows(did, since):
+    with LOCK: return DB.execute("SELECT ts,tx,rx,boot FROM airtime WHERE did=? AND ts>=? ORDER BY ts", (did, int(since))).fetchall()
+
+def airtime_view(hours=24, now=None, allowed=None):
+    now = int(now or time.time()); hours = max(1, min(168, float(hours))); since = now - int(hours * 3600); out = []
+    with LOCK: ids = [r[0] for r in DB.execute("SELECT DISTINCT did FROM airtime WHERE ts>=?", (since,)).fetchall()]
+    for did in ids:
+        if allowed is not None and did not in allowed: continue
+        pts = duty_buckets(duty_steps(airtime_rows(did, since - 3600)), since, now)
+        if not pts: continue
+        out.append({"id": did, "name": (DEV.get(did) or {}).get("name") or did[:8], "points": pts, "tx_now": pts[-1][1], "tx_avg": round(sum(p[1] for p in pts) / len(pts), 2), "tx_max": max(p[1] for p in pts), "rx_avg": round(sum(p[2] for p in pts) / len(pts), 2)})
+    out.sort(key=lambda r: r["name"].lower())
+    return {"hours": hours, "since": since, "now": now, "warn_pct": CONF["airtime_warn_pct"], "warn_minutes": CONF["airtime_warn_minutes"], "devices": out}
+
+def airtime_alerts(now=None):
+    now = int(now or time.time()); thr = CONF["airtime_warn_pct"]; mins = CONF["airtime_warn_minutes"]; st = ALERT_STATE
+    with LOCK: ids = [r[0] for r in DB.execute("SELECT DISTINCT did FROM airtime WHERE ts>=?", (now - mins * 60 - 300,)).fetchall()]
+    for did in ids:
+        steps = duty_steps(airtime_rows(did, now - mins * 60 - 300)); avg, cov = duty_window(steps, now - mins * 60)
+        act = st.get("air:" + did, False); step = duty_alert_step(act, avg, cov, thr, mins, now - st["airrec:" + did] if "airrec:" + did in st else None); nm = (DEV.get(did) or {}).get("name") or did[:8]
+        if step == "fire":
+            st["air:" + did] = True
+            if CONF["alerts"].get("airtime", True): send_alert("High airtime: " + nm, "transmitting %.1f%% of the time over %d minutes (limit %d%%)" % (avg, mins, thr), "warn", "airtime")
+        elif step == "recover":
+            st["air:" + did] = False; st["airrec:" + did] = now
+            if CONF["alerts"].get("airtime", True): send_alert("Airtime back to normal: " + nm, "%.1f%% over %d minutes" % (avg, mins), "ok", "airtime")
+
+# --- D4: a node never heard before
+NEWNODE_ALERTS = collections.deque(maxlen=500)
+def newnode_decide(now, started, warm_s, recent, cap):
+    """'warmup' for the first minutes after start (the whole mesh looks new then), 'capped' past `cap` alerts in the last hour, else 'alert'."""
+    if now - started < warm_s: return "warmup"
+    if len([t for t in recent if now - t < 3600]) >= cap: return "capped"
+    return "alert"
+
+def newnode_seen(key, n, rx, now):
+    state = newnode_decide(now, START, CONF["newnode_warmup_minutes"] * 60, NEWNODE_ALERTS, CONF["newnode_max_per_hour"])
+    with LOCK: added = DB.execute("INSERT OR IGNORE INTO newnodes VALUES(?,?,?,?,?,?)", (key, int(now), n["name"], n["type"], rx, state)).rowcount
+    if not added: return "known"                      # recorded before (persistent), however NODES came to forget it
+    if state == "alert":
+        NEWNODE_ALERTS.append(now)
+        if CONF["alerts"].get("newnode", True):
+            send_alert("New node heard: " + (n["name"] or key[:8]), "%s, id %s, first heard by %s" % (NODE_KIND.get(n["type"], "node"), key[:8], (DEV.get(rx) or {}).get("name") or rx[:8]), "ok", "newnode")
+    return state
+
+def newnodes_baseline(now=None):
+    """Nodes already known (loaded from nodes.json, or present while the table is empty after a restore) are recorded as the baseline, silently."""
+    now = int(now or time.time())
+    with LOCK:
+        have = {r[0] for r in DB.execute("SELECT key FROM newnodes")}
+        rows = [(k, int(n.get("first") or now), n.get("name", ""), n.get("type", 0), "", "baseline") for k, n in NODES.items() if k not in have]
+        DB.executemany("INSERT OR IGNORE INTO newnodes VALUES(?,?,?,?,?,?)", rows)
+    return len(rows)
+
+def newnodes_recent(limit=20):
+    with LOCK: rows = DB.execute("SELECT key,ts,name,kind,rx,state FROM newnodes WHERE state!='baseline' ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
+    return [{"key": k, "ts": ts, "name": nm or "", "kind": NODE_KIND.get(kd, "node"), "rx": (DEV.get(rx) or {}).get("name") or (rx or "")[:8], "state": st} for k, ts, nm, kd, rx, st in rows if st != "baseline"]
+
+def extra_diagnostics(now):
+    """Checks lines for backup, ID collisions and airtime."""
+    out = []
+    b = backup_check(backup_view(now), now - START)
+    if b: out.append({"level": b[0], "title": b[1], "detail": b[2]})
+    cols = collisions_view(now); one = [c for c in cols if c["bytes"] == 1]
+    for c in cols:
+        if c["bytes"] >= 2: out.append({"level": c["level"], "title": "Repeater ID clash (%d byte): %s" % (c["bytes"], c["prefix"]), "detail": ", ".join(x["name"] or x["key"][:8] for x in c["nodes"]) + (": routes that name them by this prefix cannot tell them apart (a clash of short IDs, not a sign of a stolen key)" if c["bytes"] >= 3 else ": routes that name them by this short prefix can be mixed up (a clash of short IDs, not a sign of a stolen key)")})
+    if one: out.append({"level": "ok", "title": "%d shared 1-byte repeater ID%s" % (len(one), "" if len(one) == 1 else "s"), "detail": "informational, normal once a mesh has more than a few dozen repeaters: " + ", ".join("%s (%d)" % (c["prefix"], len(c["nodes"])) for c in one[:12])})
+    for d in list(DEV.values()):
+        if d.get("boot_changed") and now - d["boot_changed"] < 3600: out.append({"level": "warn", "title": "Rebooted: " + (d["name"] or d["id"][:8]), "detail": "its boot id changed %d min ago (%d reboot%s seen since the dashboard started)" % ((now - d["boot_changed"]) // 60, d["reboots"], "" if d["reboots"] == 1 else "s")})
+    for did, st in list(ALERT_STATE.items()):
+        if did.startswith("air:") and st: out.append({"level": "warn", "title": "High airtime: " + ((DEV.get(did[4:]) or {}).get("name") or did[4:12]), "detail": "transmitting over %d%% of the time (sustained %d minutes)" % (CONF["airtime_warn_pct"], CONF["airtime_warn_minutes"])})
+    return out
+
 # ----------------------------------------------------------------------------- alerts
 ALERT_STATE = {}
 def build_alert_request(url, title, text, level="warn"):
@@ -1721,6 +2030,9 @@ def alert_loop():
             sy = system(); used = 100.0 * (1 - sy["disk_free"] / sy["disk_total"]) if sy["disk_total"] else 0
             if used > CONF["disk_warn_pct"] and now - st.get("disk", 0) > 86400 and a["disk"]:
                 st["disk"] = now; send_alert("Disk nearly full", "%.0f%% used" % used, "warn", "disk")
+            if now - st.get("slow", 0) > 60:
+                st["slow"] = now; airtime_alerts(now)
+                if now - st.get("coll", 0) > 300: st["coll"] = now; collision_alerts(now)
         except Exception as e:
             sys.stderr.write("alerts: %s\n" % e)
         time.sleep(30)
@@ -1821,6 +2133,7 @@ def diagnostics(sysinfo, accs, cert):
         b = d.get("bridge") or {}
         if b.get("heard") and b.get("dropped") and b["dropped"] / max(1, b["heard"]) > 0.10:
             add("warn", "Bridge holding back packets: %s" % nm, "%d of %d heard were held back by the rate limit" % (b["dropped"], b["heard"]))
+    out.extend(extra_diagnostics(now))
     return out
 
 def prometheus_text():
@@ -1875,13 +2188,14 @@ def overview():
     res["pending"] = pending_list()
     res["enrol"] = enrol_view()
     res["diagnostics"] = diagnostics(sysinfo, accs, cert)
+    res["backup"] = backup_view(); res["collisions"] = collisions_view(); res["new_nodes"] = newnodes_recent()
     return res
 
 def public_overview():
     """Operational data safe to publish: no accounts, addresses, logs, keys or write state."""
     o = overview(); now = o["now"]; devices = []
     for d in o["devices"]:
-        devices.append({k: d.get(k) for k in ("id", "area", "name", "first", "last", "last_status", "status", "model", "fw", "radio", "client", "repeat", "stats", "n_raw", "n_pkt", "n_rx", "n_tx", "types", "rssi", "snr", "bytes", "skew", "topics", "pm", "label", "age", "last_pkt", "last_tx")})
+        devices.append({k: d.get(k) for k in ("id", "area", "name", "first", "last", "last_status", "status", "model", "fw", "radio", "client", "repeat", "stats", "n_raw", "n_pkt", "n_rx", "n_tx", "types", "rssi", "snr", "bytes", "skew", "topics", "pm", "label", "age", "last_pkt", "last_tx", "boot_id", "boot_changed", "reboots")})
         br = d.get("bridge") or {}
         devices[-1]["pm"] = d.get("pm"); devices[-1]["age"] = d.get("age")
         devices[-1]["bridge"] = {k: br.get(k) for k in ("heard_pm", "passed_pm", "dropped_pm")} if br else None      # rates only: how much each bridge passes on
@@ -2075,6 +2389,9 @@ class H(BaseHTTPRequestHandler):
                 else:                                           # nothing secret leaves for other users
                     c = json.loads(json.dumps(o["config"])); c.get("alerts", {})["url"] = "(set by the administrator)" if c.get("alerts", {}).get("url") else ""; c.pop("web_users", None); o["config"] = c
                 return self.send(200, json.dumps(o, default=str))
+            if u.path == "/api/airtime":
+                try: return self.send(200, json.dumps(airtime_view(float(q.get("hours", ["24"])[0]))))
+                except ValueError: return self.send(400, '{"error":"bad request"}')
             if u.path == "/api/presence":
                 try: return self.send(200, json.dumps(presence_view(float(q.get("hours", ["24"])[0]))))
                 except ValueError: return self.send(400, '{"error":"bad request"}')
@@ -2097,7 +2414,7 @@ def export_accounts_soon():
     pass                                         # the account list is re-read from its copy on every request
 
 def main():
-    db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); settings_load(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
+    db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); settings_load(); collisions_load(); backup_load(); newnodes_baseline(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
     for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop, neighbour_loop, group_scan_loop, traffic_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)

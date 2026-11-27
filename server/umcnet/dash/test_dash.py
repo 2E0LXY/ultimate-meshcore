@@ -917,3 +917,165 @@ class ValidPosition(unittest.TestCase):
         self.assertFalse(dash.valid_position(91, 0))
         self.assertFalse(dash.valid_position(53.6, 181))
         self.assertTrue(dash.valid_position(53.6, -1.5))
+
+
+class Retention(unittest.TestCase):
+    def setUp(self): dash.db_init(); [dash.DB.execute("DELETE FROM " + t) for t in ("traffic", "telem", "airtime", "newnodes")]
+    def test_old_rows_go_recent_stay_in_batches(self):
+        now = int(time.time()); old = now - 40 * 86400
+        dash.DB.executemany("INSERT INTO traffic VALUES(?,?,?,?,?,?)", [(old, "N%d" % i, "R", "ADVERT", 0, 1) for i in range(30)] + [(now // 3600 * 3600, "X", "R", "ADVERT", 0, 1)])
+        self.assertEqual(30, dash.prune_batched("traffic", "h", now - 30 * 86400, batch=7))
+        self.assertEqual(1, dash.DB.execute("SELECT COUNT(*) FROM traffic").fetchone()[0])
+    def test_retention_keeps_what_presence_needs(self):
+        now = int(time.time()); dash.CONF["telem_keep_days"] = 8
+        dash.DB.execute("INSERT INTO telem VALUES('A','x',?,1,102,'presence',1)", (now - 7 * 86400,)); dash.DB.execute("INSERT INTO telem VALUES('A','x',?,1,102,'presence',1)", (now - 9 * 86400,))
+        r = dash.retention_run(now); self.assertEqual(1, r["telem"]); self.assertEqual(1, dash.DB.execute("SELECT COUNT(*) FROM telem").fetchone()[0])
+        dash.CONF["telem_keep_days"] = 90
+    def test_config_ranges(self):
+        self.assertIsNone(dash.conf_update({"traffic_keep_days": 45, "backup_keep": 5})); self.assertIsNotNone(dash.conf_update({"telem_keep_days": 3}))
+        dash.conf_update({"traffic_keep_days": 30, "backup_keep": 7})
+
+
+class Backup(unittest.TestCase):
+    def setUp(self):
+        dash.db_init(); self.d = tempfile.mkdtemp(); dash.CFG["backup_dir"] = self.d; dash.BACKUP.update({"ts": 0, "ok": None, "error": "", "try": 0, "count": 0})
+        dash.DB.execute("DELETE FROM messages"); dash.DB.executemany("INSERT INTO messages(ts,seen,chan,pkey) VALUES(1,1,'c',?)", [("k%d" % i,) for i in range(5)])
+    def tearDown(self): dash.CFG["backup_dir"] = ""
+    def test_backup_is_atomic_private_and_restorable(self):
+        r = dash.backup_run(1700000000)
+        self.assertTrue(r["ok"], r["error"]); names = os.listdir(self.d); self.assertEqual(["dash-20231114-221320.sqlite"], names)
+        p = os.path.join(self.d, names[0]); self.assertEqual(0o600, os.stat(p).st_mode & 0o777)
+        self.assertEqual(5, dash.backup_restore_check(p))
+        self.assertFalse([n for n in os.listdir(self.d) if n.startswith(".tmp")])
+    def test_keeps_only_the_newest_n_and_ignores_foreign_files(self):
+        dash.CONF["backup_keep"] = 3; open(os.path.join(self.d, "notes.txt"), "w").close()
+        for i in range(5): dash.backup_run(1700000000 + i * 86400)
+        self.assertEqual(3, len([n for n in os.listdir(self.d) if n.startswith("dash-")])); self.assertIn("notes.txt", os.listdir(self.d)); dash.CONF["backup_keep"] = 7
+    def test_split_pure(self):
+        k, g = dash.backup_split(["dash-20240101-000000.sqlite", "dash-20240103-000000.sqlite", "dash-20240102-000000.sqlite", "x"], 2)
+        self.assertEqual(["dash-20240102-000000.sqlite", "dash-20240103-000000.sqlite"], k); self.assertEqual(["dash-20240101-000000.sqlite"], g)
+    def test_due_rules(self):
+        t = 1700000000; h = time.gmtime(t).tm_hour
+        self.assertTrue(dash.backup_due(t, 0, 0, 3)); self.assertFalse(dash.backup_due(t, 0, t - 60, 3))
+        self.assertFalse(dash.backup_due(t, t - 3600, 0, h)); self.assertTrue(dash.backup_due(t, t - 25 * 3600, 0, h)); self.assertFalse(dash.backup_due(t, t - 25 * 3600, 0, (h + 1) % 24 if h < 23 else 24))
+    def test_low_disk_skips_and_flags(self):
+        real = dash.shutil.disk_usage
+        class U: free = 10
+        dash.shutil.disk_usage = lambda p: U
+        try: r = dash.backup_run(1700000000)
+        finally: dash.shutil.disk_usage = real
+        self.assertFalse(r["ok"]); self.assertIn("skipped", r["error"]); self.assertEqual([], os.listdir(self.d))
+    def test_checks_line(self):
+        v = {"enabled": True, "ok": True, "ts": int(time.time()), "age": 60, "size": 2e6, "count": 3, "error": ""}
+        self.assertEqual("ok", dash.backup_check(v, 10)[0]); self.assertEqual("warn", dash.backup_check(dict(v, age=40 * 3600), 10)[0])
+        self.assertEqual("bad", dash.backup_check(dict(v, ok=False, error="x"), 10)[0]); self.assertIsNone(dash.backup_check(dict(v, enabled=False), 10))
+        self.assertIsNone(dash.backup_check(dict(v, ts=0, age=None), 10)); self.assertEqual("warn", dash.backup_check(dict(v, ts=0, age=None), 9999)[0])
+    def test_overview_exposes_backup(self):
+        dash.backup_run(); self.assertTrue(dash.backup_view()["ok"])
+
+
+class Collisions(unittest.TestCase):
+    A = "AB12CD" + "00" * 29; B = "AB12CD" + "11" * 29; C = "AB34EE" + "22" * 29; D = "CC" + "33" * 31
+    def test_groups_by_prefix_length_with_severity(self):
+        f = dash.collisions_find([(self.A, "a"), (self.B, "b"), (self.C, "c"), (self.D, "d")])
+        by = {(c["bytes"], c["prefix"]): c for c in f}
+        self.assertEqual("bad", by[(3, "AB12CD")]["level"]); self.assertEqual("warn", by[(2, "AB12")]["level"]); self.assertEqual("info", by[(1, "AB")]["level"])
+        self.assertEqual(3, len(by[(1, "AB")]["nodes"])); self.assertNotIn((1, "CC"), by)
+    def test_same_key_twice_is_not_a_collision(self): self.assertEqual([], dash.collisions_find([(self.A, "a"), (self.A.lower(), "a")]))
+    def test_alerts_only_for_new_2_and_3_byte(self):
+        f = dash.collisions_find([(self.A, "a"), (self.B, "b"), (self.C, "c")]); new = dash.collisions_new(f, {})
+        self.assertEqual({2, 3}, {c["bytes"] for c in new}); self.assertEqual([], dash.collisions_new(f, {c["id"]: 1 for c in f}))
+    def test_id_changes_when_membership_changes(self):
+        a = dash.collisions_find([(self.A, ""), (self.B, "")]); b = dash.collisions_find([(self.A, ""), (self.B, ""), ("AB12CD" + "44" * 29, "")])
+        self.assertNotEqual({c["id"] for c in a}, {c["id"] for c in b})
+    def test_alert_once_and_survives_restart(self):
+        dash.NODES.clear(); dash.DEV.clear(); dash.COLL["seen"] = {}; sent = []
+        dash.NODES[self.A] = {"name": "a", "type": 2, "last": time.time()}; dash.NODES[self.B] = {"name": "b", "type": 2, "last": time.time()}
+        real = dash.send_alert; dash.send_alert = lambda *a, **k: sent.append(a[0])
+        try:
+            self.assertEqual(2, dash.collision_alerts()); self.assertEqual(0, dash.collision_alerts())
+            dash.COLL["seen"] = {}; dash.collisions_load(); self.assertEqual(0, dash.collision_alerts())
+        finally: dash.send_alert = real; dash.NODES.clear()
+        self.assertEqual(2, len(sent))
+    def test_stale_repeaters_expire(self):
+        dash.NODES.clear(); dash.DEV.clear()
+        dash.NODES[self.A] = {"name": "a", "type": 2, "last": time.time()}; dash.NODES[self.B] = {"name": "b", "type": 2, "last": time.time() - 40 * 86400}
+        self.assertEqual([], dash.collisions_view()); dash.NODES.clear()
+    def test_checks_wording_is_not_an_accusation(self):
+        dash.NODES.clear(); dash.DEV.clear(); dash.NODES[self.A] = {"name": "a", "type": 2, "last": time.time()}; dash.NODES[self.B] = {"name": "b", "type": 2, "last": time.time()}
+        txt = json.dumps(dash.extra_diagnostics(time.time())); dash.NODES.clear()
+        self.assertIn("not a sign of a stolen key", txt)
+
+
+class Airtime(unittest.TestCase):
+    DID = "EE" * 32
+    def setUp(self): dash.db_init(); dash.DB.execute("DELETE FROM airtime"); dash.AIR_LAST.clear(); dash.ALERT_STATE.clear(); dash.DEV.clear()
+    def test_steps_skip_resets_boot_changes_and_gaps(self):
+        rows = [(0, 0, 0, "A"), (60, 6, 3, "A"), (120, 1, 0, "A"), (180, 7, 1, "A"), (240, 9, 2, "B"), (300, 12, 3, "B"), (5000, 20, 4, "B")]
+        st = dash.duty_steps(rows)
+        self.assertEqual([(60, 60, 6, 3), (180, 60, 6, 1), (300, 60, 3, 1)], st)
+    def test_missing_data_is_not_zero(self):
+        self.assertEqual([], dash.duty_buckets([], 0, 1000)); self.assertEqual((None, 0), dash.duty_window([], 0))
+    def test_buckets_and_window(self):
+        st = [(t, 60, 6, 3) for t in range(60, 1860, 60)]
+        self.assertAlmostEqual(10.0, dash.duty_window(st, 0)[0]); self.assertEqual(1800, dash.duty_window(st, 0)[1])
+        b = dash.duty_buckets(st, 0, 1800, n=3); self.assertEqual(3, len(b)); self.assertTrue(all(abs(x[1] - 10) < 0.01 and abs(x[2] - 5) < 0.01 for x in b))
+    def test_alert_hysteresis_cooldown_and_gaps(self):
+        f = dash.duty_alert_step
+        self.assertEqual("fire", f(False, 12, 900, 10, 15)); self.assertIsNone(f(True, 12, 900, 10, 15)); self.assertIsNone(f(True, 9, 900, 10, 15))
+        self.assertEqual("recover", f(True, 7, 900, 10, 15)); self.assertIsNone(f(False, 12, 100, 10, 15)); self.assertIsNone(f(True, None, 0, 10, 15))
+        self.assertIsNone(f(False, 12, 900, 10, 15, since_recover=60)); self.assertEqual("fire", f(False, 12, 900, 10, 15, since_recover=7200))
+    def test_status_is_stored_throttled_and_viewed(self):
+        now = time.time() - 1800
+        for i in range(30):
+            dash.airtime_note(self.DID, {"tx_air_secs": 6 * i, "rx_air_secs": 3 * i}, now + i * 60, "AA")
+        self.assertEqual(30, dash.DB.execute("SELECT COUNT(*) FROM airtime").fetchone()[0])
+        self.assertFalse(dash.airtime_note(self.DID, {"tx_air_secs": 1}, now + 29 * 60 + 10))
+        v = dash.airtime_view(1); self.assertEqual(1, len(v["devices"])); self.assertAlmostEqual(10.0, v["devices"][0]["tx_avg"], 1)
+        self.assertFalse(dash.airtime_note("x", {"tx_air_secs": "nope"}, now))
+    def test_alert_fires_once_then_recovers(self):
+        sent = []; real = dash.send_alert; dash.send_alert = lambda t, *a, **k: sent.append(t); now = int(time.time()); dash.CONF["airtime_warn_pct"] = 10; dash.CONF["airtime_warn_minutes"] = 15
+        try:
+            for i in range(20): dash.DB.execute("INSERT INTO airtime VALUES(?,?,?,?,?)", (self.DID, now - 1200 + i * 60, i * 9.0, 0, "A"))
+            dash.airtime_alerts(now); dash.airtime_alerts(now + 1); self.assertEqual(1, len(sent))
+            dash.DB.execute("DELETE FROM airtime")
+            for i in range(20): dash.DB.execute("INSERT INTO airtime VALUES(?,?,?,?,?)", (self.DID, now + 1 + i * 60, 200 + i * 1.0, 0, "A"))
+            dash.airtime_alerts(now + 1200); self.assertEqual(2, len(sent)); self.assertTrue(sent[1].startswith("Airtime back"))
+        finally: dash.send_alert = real
+    def test_boot_id(self):
+        d = {}
+        self.assertFalse(dash.boot_note(d, None, 1)); self.assertNotIn("boot_id", d)
+        self.assertFalse(dash.boot_note(d, "00AB00AB00AB00AB", 1)); self.assertFalse(dash.boot_note(d, "00ab00ab00ab00ab", 2))
+        self.assertTrue(dash.boot_note(d, "1122334455667788", 3)); self.assertEqual((3, 1), (d["boot_changed"], d["reboots"]))
+        self.assertFalse(dash.boot_note(d, 12345, 4)); self.assertEqual("1122334455667788", d["boot_id"])
+
+
+class NewNodes(unittest.TestCase):
+    def setUp(self): dash.db_init(); dash.DB.execute("DELETE FROM newnodes"); dash.NEWNODE_ALERTS.clear(); dash.NODES.clear(); dash.DEV.clear()
+    def test_decide(self):
+        d = dash.newnode_decide
+        self.assertEqual("warmup", d(100, 90, 60, [], 6)); self.assertEqual("alert", d(200, 90, 60, [], 6)); self.assertEqual("capped", d(200, 0, 60, [150] * 6, 6)); self.assertEqual("alert", d(5000, 0, 60, [150] * 6, 6))
+    def test_alert_listed_deduped_and_capped(self):
+        sent = []; real = dash.send_alert; dash.send_alert = lambda t, *a, **k: sent.append(t); dash.CONF["newnode_warmup_minutes"] = 0; dash.CONF["newnode_max_per_hour"] = 2
+        try:
+            for i in range(4): dash.newnode_seen("%02X" % i * 32, {"name": "n%d" % i, "type": 2}, "R" * 64, time.time())
+            self.assertEqual("known", dash.newnode_seen("00" * 32, {"name": "n0", "type": 2}, "R", time.time()))
+        finally: dash.send_alert = real; dash.CONF["newnode_warmup_minutes"] = 30; dash.CONF["newnode_max_per_hour"] = 6
+        self.assertEqual(2, len(sent)); self.assertEqual(["capped", "capped", "alert", "alert"], [n["state"] for n in dash.newnodes_recent()])
+    def test_warmup_is_silent_but_listed(self):
+        sent = []; real = dash.send_alert; dash.send_alert = lambda t, *a, **k: sent.append(t)
+        try: self.assertEqual("warmup", dash.newnode_seen("AA" * 32, {"name": "n", "type": 1}, "R" * 64, dash.START + 1))
+        finally: dash.send_alert = real
+        self.assertEqual([], sent); self.assertEqual(1, len(dash.newnodes_recent()))
+    def test_baseline_is_silent_hidden_and_persistent(self):
+        dash.NODES["AA" * 32] = {"name": "old", "type": 2, "first": 5}
+        self.assertEqual(1, dash.newnodes_baseline()); self.assertEqual(0, dash.newnodes_baseline()); self.assertEqual([], dash.newnodes_recent())
+        dash.NODES.clear(); sent = []; real = dash.send_alert; dash.send_alert = lambda t, *a, **k: sent.append(t); dash.CONF["newnode_warmup_minutes"] = 0
+        try: self.assertEqual("known", dash.newnode_seen("AA" * 32, {"name": "old", "type": 2}, "R", time.time()))     # NODES forgot it, the table did not
+        finally: dash.send_alert = real; dash.CONF["newnode_warmup_minutes"] = 30
+        self.assertEqual([], sent)
+    def test_note_network_hook(self):
+        key = "77" * 32; body = bytes.fromhex(key) + bytes(4) + bytes(64) + bytes([0x82]) + b"Hill"
+        raw = bytes([(4 << 2) | 1, 0]) + body
+        dash.note_network("R" * 64, dash.parse_packet(raw), 1, -90, time.time())
+        self.assertEqual([key.upper()], [n["key"] for n in dash.newnodes_recent()])
