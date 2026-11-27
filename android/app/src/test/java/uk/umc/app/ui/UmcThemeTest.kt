@@ -32,13 +32,13 @@ class UmcThemeTest {
     private val expected: Map<String, Map<String, String>> = mapOf(
         "overview" to mapOf(
             "page" to "#05070c", "surface" to "#0e1626", "surface2" to "#131c2e", "sidebar" to "#0f1522", "card" to "#0a0c11",
-            "border" to "#1a2030", "chip" to "#1a1d24", "track" to "#23262d", "ink" to "#ffffff", "muted" to "#8a93a6", "faint" to "#5b6475",
+            "border" to "#1a2030", "chip" to "#1a1d24", "track" to "#23262d", "ink" to "#ffffff", "muted" to "#a0a9bb", "faint" to "#808aa0",
             "accent" to "#2563eb", "accentInk" to "#ffffff", "navActive" to "#2563eb", "navActiveInk" to "#ffffff",
             "ok" to "#22c55e", "okBg" to "#0d2a1b", "warn" to "#f59e0b", "warnBg" to "#2b2108", "bad" to "#ef4444", "badBg" to "#2b0f15",
         ),
         "analytics" to mapOf(
             "page" to "#f3f4f6", "surface" to "#0b0b0d", "surface2" to "#0b0b0d", "sidebar" to "#0b0b0d", "card" to "#111114",
-            "border" to "#1c1c21", "chip" to "#17171b", "track" to "#232329", "ink" to "#f4f4f5", "muted" to "#8f8f98", "faint" to "#5d5d66",
+            "border" to "#1c1c21", "chip" to "#17171b", "track" to "#232329", "ink" to "#f4f4f5", "muted" to "#a5a5ae", "faint" to "#84848e",
             "accent" to "#3b5bff", "accentInk" to "#ffffff", "navActive" to "#17171b", "navActiveInk" to "#ffffff",
             "ok" to "#22c55e", "okBg" to "#0d2417", "warn" to "#f5a524", "warnBg" to "#2a2008", "bad" to "#ef4444", "badBg" to "#2b0f15",
         ),
