@@ -701,7 +701,12 @@ class Batch2(unittest.TestCase):
         dash.NODES[n["key"]] = n
         d = dash.device("DD" * 32, "LBA"); d["last"] = now; d["name"] = "Tired"; d["stats"] = {"battery_mv": 3300}; d["bridge"] = {"heard": 100, "dropped": 30, "passed": 70}
         sysinfo = {"services": {}, "clock": None, "disk_total": 100, "disk_free": 50, "swap_total": 0, "swap_free": 0, "mem_total": 1, "mem_avail": 1, "load": [0, 0, 0], "cores": 1, "uptime": 1, "temp": None, "cert_days": None}
-        titles = [x["title"] for x in dash.diagnostics(sysinfo, [], None)]
+        dash.NODES[d["id"]] = dict(n, key=d["id"], name="Managed", last=now - 2 * 86400)
+        diagnostics = dash.diagnostics(sysinfo, [], None)
+        quiet = next(x for x in diagnostics if x.get("kind") == "quiet_nodes")
+        self.assertEqual("1 mesh node quiet for over a day", quiet["title"])
+        self.assertEqual([{"name": "Quiet", "last": n["last"]}], dash.quiet_mesh_nodes(now))
+        titles = [x["title"] for x in diagnostics]
         self.assertIn("1 mesh node quiet for over a day", titles); self.assertIn("Low battery: Tired", titles); self.assertIn("Bridge holding back packets: Tired", titles)
         self.assertNotIn("Stale: Quiet", titles)
 
