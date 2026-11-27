@@ -57,6 +57,23 @@ footer{text-align:center;color:var(--muted);padding:6px 22px 24px}
 @keyframes pulse{0%{box-shadow:0 0 0 0 currentColor}75%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}@keyframes packet{from{left:0}to{left:100%}}@keyframes ripple{0%{opacity:.8;transform:scale(.92)}100%{opacity:0;transform:scale(1.18)}}@keyframes sourceGlow{0%,100%{border-color:var(--border)}50%{border-color:var(--s1)}}@keyframes spinGlow{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}@keyframes bars{50%{height:5px;opacity:.45}}
 .lf canvas{display:block;width:100%;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border)}
 .lf-legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:12px;color:var(--muted);align-items:center}.lf-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}.lf-note{color:var(--muted);margin-left:auto}
+
+.intro{padding:22px;margin:0 0 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2)}
+.intro h2{font-size:clamp(20px,2.5vw,27px);margin:5px 0}.intro p{color:var(--muted);margin:4px 0;max-width:820px}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0}
+.section-head h2{font-size:18px;margin:0}
+.data-note{color:var(--muted);font-size:12px;margin:8px 0 0}
+.mini-list{display:grid;gap:8px}.mini-item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)}
+.mini-item:last-child{border-bottom:0}
+.mini-item strong{display:block;overflow-wrap:anywhere}.mini-item small{display:block;color:var(--muted)}
+.flow-summary{display:flex;gap:10px;flex-wrap:wrap}.flow-summary .tag{font-size:13px}
+.topology{width:100%;height:auto;display:block;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm)}
+.topology text{fill:var(--ink);font:12px system-ui,sans-serif}.topology .edge{stroke:var(--s2);opacity:.65;stroke-width:1.8;fill:none}
+.topology .node{fill:var(--card);stroke:var(--s1);stroke-width:2}.topology .receiving{stroke:var(--ok);stroke-width:3}
+.notice{padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--chip);color:var(--muted);margin:10px 0}
+tr:focus-within{background:var(--chip)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+@media(max-width:600px){.topology{min-height:220px}.intro{padding:16px}.tabs{width:100%;border-radius:var(--radius-sm)}.tabs button{white-space:nowrap}.mini-item{align-items:flex-start}.flow-summary{display:grid}}
 @media(max-width:900px){.kpi,.card,.half{grid-column:span 12}.kpi{grid-column:span 6}.flow-track{grid-template-columns:1fr;gap:10px}.route{height:38px;width:3px;margin:auto;background:linear-gradient(180deg,var(--track),var(--s1),var(--track))}}
 @media(max-width:700px){.shell{margin:0;border-radius:0;border-width:0}header,main{padding:14px 12px}.big{font-size:24px;overflow-wrap:anywhere}.head-actions{justify-content:flex-start}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
@@ -64,12 +81,12 @@ footer{text-align:center;color:var(--muted);padding:6px 22px 24px}
 </head>
 <body>
 <div class="shell">
-<header><div><div class="eyebrow">LIVE MESH STATUS</div><h1><span class="brand">UMC Net</span> Live Dashboard</h1></div><div class="head-actions"><div class="themesw" role="group" aria-label="Theme"><button type="button" data-theme-set="overview" aria-pressed="true">Overview</button><button type="button" data-theme-set="analytics" aria-pressed="false">Analytics</button></div><span class="pill"><i class="dot"></i> Public read-only</span><span id="updated" class="muted">Connecting...</span><a class="admin" href="/">Admin &rarr;</a></div></header>
-<main><nav class="tabs" aria-label="Dashboard views"><button class="active" data-view="overview">Overview</button><button data-view="repeaters">Repeaters</button><button data-view="network">Network</button><button data-view="traffic">Traffic</button></nav><div id="app" class="empty">Loading live network data...</div></main>
+<header><div><div class="eyebrow">LIVE MESH STATUS</div><h1><span class="brand">UMC Net</span> Live Dashboard</h1></div><div class="head-actions"><div class="themesw" role="group" aria-label="Theme"><button type="button" data-theme-set="overview" aria-pressed="true">Overview</button><button type="button" data-theme-set="analytics" aria-pressed="false">Analytics</button></div><span class="pill"><i class="dot"></i> Public read-only</span><span id="updated" class="muted" role="status" aria-live="polite">Connecting...</span><a class="admin" href="/admin/">Admin login &rarr;</a></div></header>
+<main><nav class="tabs" aria-label="Dashboard views"><button class="active" data-view="overview" aria-current="page">Overview</button><button data-view="discovery">Local discovery</button><button data-view="neighbours">Neighbours</button><button data-view="routes">Observed routes</button><button data-view="repeaters">Repeaters</button><button data-view="network">Network</button><button data-view="traffic">Traffic</button></nav><div id="app" class="empty">Loading live network data...</div></main>
 <footer>No controls, credentials, private keys, account details or private locations are published here.</footer>
 </div>
 <script>
-const state={overview:null,network:null,view:'overview'};
+const state={overview:null,network:null,view:'overview',loading:false,lastOK:0,error:''};
 const THEMES=['overview','analytics'];
 const curTheme=()=>document.documentElement.getAttribute('data-theme')||'overview';
 const syncTheme=()=>document.querySelectorAll('[data-theme-set]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.themeSet===curTheme())));
@@ -83,19 +100,53 @@ const ago=t=>{const n=Math.max(0,Date.now()/1000-Number(t||0));return n<60?Math.
 const name=d=>d.label?.label||d.name||String(d.id||'').slice(0,12)||'Repeater';
 const online=d=>Number(d.age??(Date.now()/1000-Number(d.last||0)))<900;
 const status=d=>online(d)?'<span class="ok"><i class="dot"></i> online</span>':Number(d.age||99999)<3600?'<span class="warn"><i class="dot"></i> quiet</span>':'<span class="bad"><i class="dot"></i> offline</span>';
-function kpis(o){const on=o.devices.filter(online).length;return '<div class="grid"><section class="card kpi"><div class="label">Repeaters online</div><div class="big">'+on+' / '+o.devices.length+'</div></section><section class="card kpi"><div class="label">Packets seen</div><div class="big">'+fmt(o.totals?.packets)+'</div></section><section class="card kpi"><div class="label">Known nodes</div><div class="big">'+fmt(o.nodes)+'</div></section><section class="card kpi"><div class="label">Broker link</div><div class="big '+(o.mqtt?.state==='connected'?'ok':'warn')+'">'+esc(o.mqtt?.state||'unknown')+'</div></section></div>'}
+function kpis(o){const n=state.network||{},nodes=n.nodes||[],links=n.links||[],on=o.devices.filter(online).length;return '<div class="grid"><section class="card kpi"><div class="label">Repeaters online</div><div class="big">'+on+' / '+o.devices.length+'</div></section><section class="card kpi"><div class="label">Nodes discovered</div><div class="big">'+fmt(nodes.length||o.nodes)+'</div></section><section class="card kpi"><div class="label">Observed links</div><div class="big">'+fmt(links.length)+'</div></section><section class="card kpi"><div class="label">Reported packets</div><div class="big">'+fmt(o.totals?.packets)+'</div></section></div>'}
 function trafficMode(packets){let up=false,down=false;for(const p of packets){const d=String(p.dir||'').toLowerCase();if(/rx|recv|receive|in|up/.test(d))up=true;if(/tx|send|out|down/.test(d))down=true;if(!d)up=true}return up&&down?'both':down?'reverse':up?'forward':'idle'}
 function repeaterTraffic(o,d){const cutoff=Date.now()/1000-30,dn=name(d);const packets=(o.packets||[]).filter(p=>Number(p.t||0)>=cutoff&&(p.dev===d.id||p.dname===dn));return {count:packets.length,mode:trafficMode(packets)}}
 function packetDots(){return '<i class="packet"></i><i class="packet"></i><i class="packet"></i>'}
 function flow(o){const connected=o.devices.filter(online),broker=o.mqtt?.state==='connected',cutoff=Date.now()/1000-30,recent=(o.packets||[]).filter(p=>Number(p.t||0)>=cutoff),allMode=trafficMode(recent),lanes=connected.length?connected.map(d=>{const a=repeaterTraffic(o,d),label=a.mode==='both'?'RX + TX':a.mode==='reverse'?'TX':a.mode==='forward'?'RX':'IDLE';return '<div class="repeater-lane"><div class="source '+(a.count?'active':'idle')+'"><i></i><span>'+esc(name(d))+'</span><b class="flow-dir">'+label+'</b></div><div class="lane-route '+(a.count?'active ':'')+a.mode+'">'+packetDots()+'</div></div>'}).join(''):'<span class="muted">Waiting for a repeater connection</span>';return '<section class="card wide flow"><div class="flow-title"><h2>Live bidirectional MQTT flow</h2><span class="'+(recent.length?'ok':'muted')+'"><i class="dot"></i> '+(recent.length?recent.length+' recent packet'+(recent.length===1?'':'s'):'Waiting for traffic')+'</span></div><div class="flow-track"><div class="flow-box repeater-bank"><strong>'+connected.length+' connected repeater'+(connected.length===1?'':'s')+'</strong><small>Each lane moves only when that repeater carries data</small><div class="repeater-lanes">'+lanes+'</div></div><div class="flow-box broker"><div class="broker-icon">&#8635;</div><strong>UMC MQTT broker</strong><small>'+esc(o.mqtt?.state||'unknown')+'</small></div><div class="route '+(recent.length?'active ':'')+allMode+'">'+packetDots()+'</div><div class="flow-box screen"><strong>Public dashboard</strong><div class="mini-bars"><i></i><i></i><i></i><i></i></div><small>Read-only live telemetry</small></div></div></section>'}
 function card(d){const s=d.settings||{};return '<section class="card"><div class="row"><div><b>'+esc(name(d))+'</b><div>'+status(d)+'</div></div><span class="tag">'+esc(d.area||'-')+'</span></div><p class="muted">'+esc(d.model||'Unknown board')+' &middot; '+esc(d.fw||'Unknown firmware')+'</p><code>'+esc(d.id)+'</code><div class="stats"><div><span class="label">Received</span><b>'+fmt(d.n_rx)+'</b></div><div><span class="label">Sent</span><b>'+fmt(d.n_tx)+'</b></div><div><span class="label">RSSI / SNR</span><b>'+esc(d.rssi??'-')+' / '+esc(d.snr??'-')+'</b></div><div><span class="label">Last data</span><b>'+ago(d.last)+'</b></div><div><span class="label">Radio</span><b>'+esc(s.radio||d.radio||'-')+'</b></div><div><span class="label">TX power</span><b>'+esc(s.tx||'-')+' dBm</b></div></div></section>'}
-function renderOverview(o){return kpis(o)+'<div id="lfSlot"></div>'+'<div class="grid">'+o.devices.map(card).join('')+'</div>'}
-function renderRepeaters(o){return '<div class="grid">'+(o.devices.length?o.devices.map(card).join(''):'<div class="card wide empty">No repeaters have reported yet.</div>')+'</div>'}
-function renderTraffic(o){const p=(o.packets||[]).slice().reverse().slice(0,100);return '<section class="card wide scroll"><h2>Recent public traffic</h2><table><thead><tr><th>When</th><th>Repeater</th><th>Direction</th><th>Type</th><th>Route</th><th>Signal</th></tr></thead><tbody>'+p.map(x=>'<tr><td>'+ago(x.t)+'</td><td>'+esc(x.dname||x.dev||'-')+'</td><td>'+esc(x.dir||'-')+'</td><td>'+esc(x.type||'-')+'</td><td>'+esc([x.src,x.dst].filter(Boolean).join(' to ')||'-')+'</td><td>'+esc(x.rssi??'-')+' / '+esc(x.snr??'-')+'</td></tr>').join('')+'</tbody></table></section>'}
-function renderNetwork(n){if(!n)return '<div class="empty">Loading network view...</div>';const nodes=(n.nodes||[]).slice(0,250),links=(n.links||[]).slice(0,250);return '<div class="grid"><section class="card half scroll"><h2>Known nodes</h2><table><thead><tr><th>Node</th><th>Type</th><th>Status</th><th>Last seen</th></tr></thead><tbody>'+nodes.map(x=>'<tr><td>'+esc(x.name||x.key||'-')+'</td><td>'+esc(x.type??'-')+'</td><td>'+esc(x.status||'heard')+'</td><td>'+ago(x.last)+'</td></tr>').join('')+'</tbody></table></section><section class="card half scroll"><h2>Observed links</h2><table><thead><tr><th>From</th><th>To</th><th>Packets</th><th>Signal</th></tr></thead><tbody>'+links.map(x=>'<tr><td>'+esc(x.a_name||x.a||x.from||'-')+'</td><td>'+esc(x.b_name||x.b||x.to||'-')+'</td><td>'+fmt(x.n||x.count)+'</td><td>'+esc(x.rssi??'-')+' / '+esc(x.snr??'-')+'</td></tr>').join('')+'</tbody></table></section></div>'}
-function draw(){const app=document.getElementById('app'),o=state.overview;if(!o){app.className='empty';app.textContent='Loading live network data...';return}app.className='';app.innerHTML=state.view==='overview'?renderOverview(o):state.view==='repeaters'?renderRepeaters(o):state.view==='traffic'?renderTraffic(o):renderNetwork(state.network);const slot=document.getElementById('lfSlot');if(slot){slot.appendChild(lfElement());lfLayout(o)}}
-async function load(){try{const [a,b]=await Promise.all([fetch('/public/api/overview',{cache:'no-store'}),fetch('/public/api/network',{cache:'no-store'})]);if(!a.ok)throw new Error('Overview '+a.status);state.overview=await a.json();lfIngest(state.overview);state.network=b.ok?await b.json():null;document.getElementById('updated').textContent='Updated '+new Date().toLocaleTimeString();draw()}catch(e){document.getElementById('updated').textContent='Connection problem';document.getElementById('app').innerHTML='<div class="card wide bad">Live data could not be loaded: '+esc(e.message)+'</div>'}}
-document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-view]').forEach(x=>x.classList.toggle('active',x===b));state.view=b.dataset.view;draw()}));
+const NODE_KIND={1:'Person',2:'Repeater',3:'Room server',4:'Sensor'};
+const kind=x=>NODE_KIND[Number(x)]||'Node';
+const hop=x=>Number(x)===0?'Direct':Number(x)===1?'1 hop':fmt(x)+' hops';
+const netName=(n,k)=>((n.nodes||[]).find(x=>x.key===k)||{}).name||String(k||'Unknown').slice(0,12);
+const sortedNodes=n=>(n?.nodes||[]).slice().sort((a,b)=>Number(b.last||0)-Number(a.last||0));
+const filteredLinks=n=>(n?.links||[]).slice().sort((a,b)=>Number(a.hops||0)-Number(b.hops||0)||Number(b.last||0)-Number(a.last||0));
+function panelTitle(label,note){return '<div class="section-head"><h2>'+esc(label)+'</h2><span class="muted">'+esc(note||'')+'</span></div>'}
+function repeaterSummary(o){const a=o.devices.slice().sort((a,b)=>Number(b.last||0)-Number(a.last||0)).slice(0,8);return '<div class="mini-list">'+(a.length?a.map(d=>'<div class="mini-item"><div><strong>'+esc(name(d))+'</strong><small>'+esc(d.area||'')+' · last data '+ago(d.last)+'</small></div><span>'+status(d)+'</span></div>').join(''):'<p class="muted">No repeater reports yet.</p>')+'</div>'}
+function discoverySummary(n){const a=sortedNodes(n).slice(0,8);return '<div class="mini-list">'+(a.length?a.map(x=>'<div class="mini-item"><div><strong>'+esc(x.name||String(x.key||'').slice(0,12))+'</strong><small>'+kind(x.type)+' · '+ago(x.last)+'</small></div><span class="tag">'+(x.connected?'Connected':'Heard')+'</span></div>').join(''):'<p class="muted">No nodes discovered in the current network window.</p>')+'</div>'}
+function linkSummary(n){const a=filteredLinks(n).slice(0,8);return '<div class="mini-list">'+(a.length?a.map(l=>'<div class="mini-item"><div><strong>'+esc(netName(n,l.node))+' → '+esc(netName(n,l.recv))+'</strong><small>'+hop(l.hops)+' · '+fmt(l.n)+' packet observations</small></div><span class="tag">'+ago(l.last)+'</span></div>').join(''):'<p class="muted">No observed links yet.</p>')+'</div>'}
+function renderOverview(o){const n=state.network;const intro='<section class="intro"><div class="eyebrow">PUBLIC · READ ONLY · LIVE</div><h2>Explore the local MeshCore network</h2><p>Discover nodes, follow observed radio links and see which repeaters are reporting. Data reflects what the network has actually heard; paths are observations, not guaranteed connections or geographic coverage.</p><div class="flow-summary"><span class="tag">MQTT broker: '+esc(o.mqtt?.state||'unknown')+'</span><span class="tag">Packet reports: '+fmt((o.packets||[]).length)+' in recent feed</span><span class="tag">Network window: '+esc(n?.hours||24)+' hours</span></div></section>';
+return intro+kpis(o)+'<div id="lfSlot"></div><div class="grid"><section class="card half">'+panelTitle('Recent local discovery','latest heard')+discoverySummary(n)+'</section><section class="card half">'+panelTitle('Repeaters and connections','last reported')+repeaterSummary(o)+'</section><section class="card wide">'+panelTitle('Observed neighbours','direct and relayed receptions')+linkSummary(n)+'<p class="data-note">An observed link identifies the receiving repeater and the source of a packet. A multi-hop reception is not proof of a direct radio link.</p></section></div>'}
+function renderRepeaters(o){return panelTitle('Repeater connections',o.devices.length+' repeaters reporting')+'<div class="grid">'+(o.devices.length?o.devices.map(card).join(''):'<div class="card wide empty">No repeaters have reported yet.</div>')+'</div>'}
+function renderDiscovery(n){if(!n)return '<div class="empty">Waiting for network discovery data.</div>';const nodes=sortedNodes(n);return panelTitle('Local discovery',nodes.length+' public nodes heard')+'<section class="card wide scroll"><table><thead><tr><th>Node</th><th>Type</th><th>Connection</th><th>Adverts</th><th>Last heard</th></tr></thead><tbody>'+(nodes.length?nodes.slice(0,250).map(x=>'<tr><td><b>'+esc(x.name||String(x.key||'').slice(0,12))+'</b></td><td>'+kind(x.type)+'</td><td>'+(x.connected?'<span class="ok">Connected repeater</span>':'Observed')+'</td><td>'+fmt(x.adverts)+'</td><td>'+ago(x.last)+'</td></tr>').join(''):'<tr><td colspan="5" class="muted">No discovery adverts in the selected window.</td></tr>')+'</tbody></table><p class="data-note">Only observed public node names and metadata are shown. No locations or private messages are published.</p></section>'}
+function renderNeighbours(n){if(!n)return '<div class="empty">Waiting for neighbours.</div>';const links=filteredLinks(n);return panelTitle('Observed neighbours',links.length+' directional observations')+'<section class="card wide scroll"><table><thead><tr><th>Transmitting node</th><th>Heard by repeater</th><th>Hops</th><th>Packet observations</th><th>SNR / RSSI</th><th>Last heard</th></tr></thead><tbody>'+(links.length?links.slice(0,250).map(l=>'<tr><td>'+esc(netName(n,l.node))+'</td><td><b>'+esc(netName(n,l.recv))+'</b></td><td>'+hop(l.hops)+'</td><td>'+fmt(l.n)+'</td><td>'+(Number(l.hops)===0?esc(l.snr??'–')+' / '+esc(l.rssi??'–'):'Relayed')+'</td><td>'+ago(l.last)+'</td></tr>').join(''):'<tr><td colspan="6" class="muted">No observed neighbour links yet.</td></tr>')+'</tbody></table><p class="data-note">Source → receiving repeater. Only zero-hop observations have direct-link signal readings; relayed links are not direct neighbours.</p></section>'}
+function renderRoutes(n){if(!n)return '<div class="empty">Waiting for observed routes.</div>';const a=(n.journeys||[]).slice(0,80);const route=j=>{const start=j.from?netName(n,j.from):'Unidentified source',end=j.to?netName(n,j.to):'Unidentified receiver',via=(j.path||[]).map(p=>p.n||'unidentified hop');return [start,...via,end].join(' → ')};return panelTitle('Observed packet routes',a.length+' latest journeys')+'<section class="card wide scroll"><table><thead><tr><th>Seen</th><th>Packet type</th><th>Observed path</th><th>Hops</th><th>SNR</th></tr></thead><tbody>'+(a.length?a.map(j=>'<tr><td>'+ago(j.t)+'</td><td>'+esc(j.type||'–')+'</td><td>'+esc(route(j))+'</td><td>'+hop(j.hops)+'</td><td>'+esc(j.snr??'–')+'</td></tr>').join(''):'<tr><td colspan="5" class="muted">No packet journeys observed yet.</td></tr>')+'</tbody></table><p class="data-note">These routes were reconstructed from received packet metadata, not inferred from a theoretical coverage map. Unknown identities remain anonymous.</p></section>'}
+function renderTraffic(o){const p=(o.packets||[]).slice().reverse().slice(0,100),recv=p.filter(x=>/rx|recv|in/i.test(x.dir||'')).length,tx=p.filter(x=>/tx|out/i.test(x.dir||'')).length;return panelTitle('Recent packet reports','last '+p.length+' samples')+'<div class="flow-summary"><span class="tag">Received reports: '+fmt(recv)+'</span><span class="tag">Transmitted reports: '+fmt(tx)+'</span><span class="tag">MQTT: '+esc(o.mqtt?.state||'unknown')+'</span></div><section class="card wide scroll" style="margin-top:14px"><table><thead><tr><th>When</th><th>Repeater</th><th>Direction</th><th>Type</th><th>Hops</th><th>Signal</th></tr></thead><tbody>'+(p.length?p.map(x=>'<tr><td>'+ago(x.t)+'</td><td>'+esc(x.dname||x.dev||'–')+'</td><td>'+esc(x.dir||'–')+'</td><td>'+esc(x.type||'–')+'</td><td>'+hop(x.hops)+'</td><td>'+esc(x.rssi??'–')+' / '+esc(x.snr??'–')+'</td></tr>').join(''):'<tr><td colspan="6" class="muted">No recent traffic observed.</td></tr>')+'</tbody></table><p class="data-note">Counts represent packet reports in the feed, not a regulatory airtime measurement. MQTT housekeeping is not counted as RF traffic.</p></section>'}
+function topology(n){const links=filteredLinks(n).slice(0,45),ids=[...new Set(links.flatMap(l=>[l.node,l.recv]))].slice(0,16);if(!ids.length)return '<div class="empty">No observed links to draw yet.</div>';const cx=290,cy=195,rx=218,ry=143,pts={};ids.forEach((id,i)=>{const a=-Math.PI/2+2*Math.PI*i/ids.length;pts[id]={x:cx+Math.cos(a)*rx,y:cy+Math.sin(a)*ry}});const edges=links.filter(l=>pts[l.node]&&pts[l.recv]).map(l=>'<line class="edge" x1="'+pts[l.node].x+'" y1="'+pts[l.node].y+'" x2="'+pts[l.recv].x+'" y2="'+pts[l.recv].y+'" marker-end="url(#arrow)"><title>'+esc(netName(n,l.node))+' heard by '+esc(netName(n,l.recv))+' · '+hop(l.hops)+'</title></line>').join('');const dots=ids.map(id=>{const p=pts[id],x=(n.nodes||[]).find(z=>z.key===id)||{},nm=String(x.name||id.slice(0,8));return '<g><circle class="node '+(x.connected?'receiving':'')+'" cx="'+p.x+'" cy="'+p.y+'" r="10"><title>'+esc(nm)+'</title></circle><text x="'+p.x+'" y="'+(p.y+25)+'" text-anchor="middle">'+esc(nm.length>19?nm.slice(0,18)+'…':nm)+'</text></g>'}).join('');return '<svg class="topology" viewBox="0 0 580 390" role="img" aria-label="Schematic of observed radio receptions, with arrows pointing towards the receiver"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="13" refY="4" orient="auto"><path d="M1 1 L7 4 L1 7" fill="none" stroke="var(--s2)" stroke-width="1.5"/></marker></defs>'+edges+dots+'</svg><p class="data-note">Schematic only, not a geographic map. Arrows show who heard whom; a relay may be involved.</p>'}
+function renderNetwork(n){if(!n)return '<div class="empty">Waiting for public network data...</div>';return panelTitle('Network connections','observed receptions')+'<div class="grid"><section class="card wide"><h2>Radio link topology</h2>'+topology(n)+'</section><section class="card half"><h2>Recently discovered nodes</h2>'+discoverySummary(n)+'</section><section class="card half"><h2>Observed links</h2>'+linkSummary(n)+'</section></div>'}
+function draw(){const app=document.getElementById('app'),o=state.overview;if(!o){app.className='empty';app.textContent='Loading live network data...';return}app.className='';app.innerHTML=({overview:()=>renderOverview(o),discovery:()=>renderDiscovery(state.network),neighbours:()=>renderNeighbours(state.network),routes:()=>renderRoutes(state.network),repeaters:()=>renderRepeaters(o),network:()=>renderNetwork(state.network),traffic:()=>renderTraffic(o)}[state.view]||(()=>renderOverview(o)))();const slot=document.getElementById('lfSlot');if(slot){slot.appendChild(lfElement());lfLayout(o)}}
+async function load(){
+  if(state.loading)return;
+  state.loading=true;
+  try{
+    const [a,b]=await Promise.all([fetch('/public/api/overview',{cache:'no-store',signal:AbortSignal.timeout(12000)}),fetch('/public/api/network',{cache:'no-store',signal:AbortSignal.timeout(12000)})]);
+    if(!a.ok||!b.ok)throw new Error('Public data '+(!a.ok?a.status:b.status));
+    const overview=await a.json(),network=await b.json();
+    state.overview=overview;state.network=network;state.lastOK=Date.now();state.error='';
+    lfIngest(overview);
+    document.getElementById('updated').textContent='Live · updated '+new Date().toLocaleTimeString();
+    draw();
+  }catch(e){
+    state.error=e.message;
+    document.getElementById('updated').textContent=state.lastOK?'Stale · last updated '+new Date(state.lastOK).toLocaleTimeString():'Network unavailable';
+    if(!state.overview){const app=document.getElementById('app');app.className='';app.innerHTML='<div class="notice" role="alert">The public network feed is unavailable. Retrying automatically. '+esc(e.message)+'</div>';}
+  }finally{state.loading=false;}
+}
+document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('[data-view]').forEach(x=>{x.classList.toggle('active',x===b);if(x===b)x.setAttribute('aria-current','page');else x.removeAttribute('aria-current')});
+  state.view=b.dataset.view;draw();
+}));
 load();setInterval(load,5000);
 // ---------------------------------------------------------------- live data flow (canvas)
 // Every particle is a real packet: heard by a repeater on the radio, published to the broker, then handed by the bridge to
@@ -117,7 +168,7 @@ function lfElement() {
   w.innerHTML = '<div class="flow-title"><h2>Live data flow, both ways</h2><span id="lfStat" class="muted">waiting for packets</span></div>' +
     '<canvas id="lfCanvas" aria-label="Animated map of packets moving between the repeaters, the broker, the dashboards and apps"></canvas>' +
     '<div class="lf-legend"><span><i style="background:var(--s1)"></i>advert</span><span><i style="background:var(--s2)"></i>channel message</span><span><i style="background:var(--s3)"></i>direct message</span><span><i style="background:var(--s4)"></i>ack</span><span><i style="background:var(--s5)"></i>path</span><span><i style="background:var(--muted)"></i>other</span>' +
-    '<span class="lf-note">heard on the radio ⟶ broker ⟶ every other repeater (ripple = sent out on the radio), the dashboards and the apps</span></div>';
+    '<span class="lf-note">observed RX → broker → dashboard; observed TX = outward ripple. No unconfirmed retransmissions are animated</span></div>';
   LF.el = w; LF.cv = w.querySelector("canvas"); LF.ctx = LF.cv.getContext("2d");
   addEventListener("resize", () => lfLayout(LF.o)); requestAnimationFrame(lfTick);
   return w;
@@ -133,14 +184,14 @@ function lfLayout(o) {
   const Rx = W * 0.36, Ry = H * 0.40, span = Math.min(Math.PI * 1.1, 0.7 + n * 0.38), a0 = Math.PI - span / 2;
   LF.rep = reps.map((d, i) => { const a = n === 1 ? Math.PI : a0 + span * i / (n - 1); const p = {x: bx + Math.cos(a) * Rx, y: by + Math.sin(a) * Ry, label: name(d), d}; LF.pos["r:" + d.id] = p; return p; });
   LF.pos.dash = {x: W * 0.88, y: H * 0.32, label: "Dashboards", sub: "admin + this page"};
-  LF.pos.apps = {x: W * 0.88, y: H * 0.68, label: "Apps", sub: "decoded messages & adverts"};
+  LF.pos.apps = {x: W * 0.88, y: H * 0.68, label: "Apps", sub: "delivery not confirmed"};
 }
 function lfIngest(o) {
   const first = !LF.o; LF.o = o; lfLayout(o);
   const now = Date.now() / 1000, pk = (o.packets || []).filter(p => Number(p.t || 0) > 0);
   const maxT = pk.reduce((m, p) => Math.max(m, Number(p.t)), 0) || now;
   for (const p of pk) {
-    const id = [p.t, p.dev, p.key, p.len, p.type, p.dir].join("|");
+    const id = [p.t, p.dev, p.len, p.type, p.dir].join("|");
     if (LF.seen.has(id)) continue; LF.seen.add(id);
     if (first && maxT - Number(p.t) > 20) continue;                               // on opening, replay only the last 20 s
     const delay = Math.max(0, Math.min(10, Number(p.t) - (maxT - 10))) * 1000;    // replay with the packets' real spacing
@@ -156,21 +207,18 @@ function lfIngest(o) {
 function lfSpawn(from, to, col, size, bend, after) { if (from && to) LF.parts.push({from, to, col, size, bend, t0: performance.now(), dur: 900 + Math.hypot(to.x - from.x, to.y - from.y) * 2.1, after}); }
 function lfRipple(at, col, out) { if (at) LF.ripples.push({at, col, out, t0: performance.now()}); }
 function lfPacket(p) {
+  // Animate only observed RX/TX reports; never invent a retransmission or use
+  // a random drop rate to imply a repeater transmitted a packet.
   const o = LF.o; if (!o) return;
   const src = LF.pos["r:" + p.dev] || LF.rep.find(r => r.label === p.dname); if (!src) return;
   const col = lfCol(p.type), dir = String(p.dir || "rx").toLowerCase();
-  if (/tx|out/.test(dir)) { lfRipple(src, col, true); return; }                    // a repeater's own transmission (when reported)
+  if (/tx|out/.test(dir)) { lfRipple(src, col, true); LF.count.down++; return; }
   lfRipple(src, col, false); LF.count.up++;
-  lfSpawn(src, LF.pos.broker, col, 3.4, -18, () => {                               // up to the broker
+  lfSpawn(src, LF.pos.broker, col, 3.4, -18, () => {
     LF.pulse = performance.now();
+    // The public dashboard received this broker report; app delivery and other
+    // repeater transmissions are not implied unless separately observed.
     lfSpawn(LF.pos.broker, LF.pos.dash, col, 2.6, -10);
-    if (/GRP_TXT|ADVERT/i.test(p.type || "")) { lfSpawn(LF.pos.broker, LF.pos.apps, col, 2.6, 10); LF.count.out++; }
-    for (const r of LF.rep) {
-      if (r === src) continue;                                                     // a bridge never sends a repeater its own packet back
-      const b = r.d.bridge || {}, drop = (b.dropped_pm || 0) / Math.max(1, (b.heard_pm || 0)), held = Math.random() < drop;
-      LF.count.down += held ? 0 : 1;
-      lfSpawn(LF.pos.broker, r, held ? al(col, .33) : col, held ? 2.2 : 3.2, 18, held ? null : () => lfRipple(r, col, true));
-    }
   });
 }
 function lfQuad(a, b, bend, t) {

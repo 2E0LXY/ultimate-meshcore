@@ -3311,15 +3311,34 @@ def public_overview():
         devices[-1]["settings_updated"] = d.get("settings_updated", 0)
         st = devices[-1].get("stats")
         if isinstance(st, dict): devices[-1]["stats"] = {k: v for k, v in st.items() if k not in PUBLIC_HIDE_STATS}      # a boot id is a device fingerprint: not for the public page
-    packets = [{k: p.get(k) for k in ("t", "area", "dev", "dname", "dir", "type", "flood", "hops", "via", "src", "dst", "chan", "key", "name", "len", "rssi", "snr")} for p in o["packets"]]
+    # Public activity contains packet metadata only: never publish message endpoints,
+    # channel names, packet keys or payloads. Device identities are already broadcast.
+    packets = [{k: p.get(k) for k in ("t", "area", "dev", "dname", "dir", "type", "flood", "hops", "len", "rssi", "snr")} for p in o["packets"]]
     return {"version": VERSION, "now": now, "title": CONF["title"], "mqtt": {"state": o["mqtt"].get("state", "unknown")}, "devices": devices,
             "packets": packets, "totals": {"packets": sum(d.get("n_pkt", 0) for d in devices)}, "nodes": len(NODES),
             "rates": o["rates"], "types": o["types"], "heard_by": o["heard_by"], "latency": o["latency"]}
 
 def public_network_view():
     n = network_view()
-    nodes = [{k: v for k, v in node.items() if k not in ("lat", "lon")} for node in n["nodes"]]
-    return {"now": n["now"], "nodes": nodes, "links": n["links"], "journeys": n["journeys"]}
+    # Explicit public schema, not a blacklist. device_info() contains control and
+    # configuration state that must not become public through a future new field.
+    fields = ("key", "name", "type", "last", "first", "adverts", "connected", "online")
+    nodes = [{k: node.get(k) for k in fields} for node in n["nodes"]]
+    known = {node["key"] for node in nodes if node.get("key")}
+    public_names = {node.get("name") for node in nodes if node.get("name")}
+    links = [{k: link.get(k) for k in ("recv", "node", "hops", "n", "snr", "rssi", "last")}
+             for link in n["links"] if link.get("recv") in known and link.get("node") in known]
+    journeys = []
+    for j in n["journeys"]:
+        # A route is an observation, not proof of a bidirectional RF link.
+        # Only name nodes already publicly discovered; mask unknown endpoint IDs.
+        path = [{"n": hop.get("n") if hop.get("n") in public_names else "unidentified hop"}
+                for hop in j.get("path", []) if isinstance(hop, dict)]
+        journeys.append({"t": j.get("t"), "type": j.get("type"), "hops": j.get("hops"),
+                         "from": j.get("from") if j.get("from") in known else "",
+                         "to": j.get("to") if j.get("to") in known else "", "path": path,
+                         "snr": j.get("snr")})
+    return {"now": n["now"], "nodes": nodes, "links": links, "journeys": journeys}
 
 # ----------------------------------------------------------------------------- HTTP
 def csv_text(header, rows):
