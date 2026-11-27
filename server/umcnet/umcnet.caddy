@@ -1,5 +1,6 @@
-# UMC Net: MQTT over WebSockets, behind TLS, and the dashboard behind a login. A separate site; the other
-# sites are untouched. Installed as /etc/caddy/conf.d/umcnet.caddy and pulled in with one `import` line.
+# UMC Net: public network observatory at /, protected dashboard at /admin/.
+# Public APIs are read-only; admin API and metrics require Caddy authentication.
+# Keep admin/protected login lists identical: installer and account helper update each block.
 net.2e0lxy.uk {
 	@mqtt path /mqtt /mqtt/*
 	handle @mqtt {
@@ -11,12 +12,37 @@ net.2e0lxy.uk {
 			header_up -X-UMC-User
 		}
 	}
-	handle {
+	@landing path / /index.html
+	handle @landing {
+		rewrite * /public/
+		reverse_proxy 127.0.0.1:9102 {
+			header_up -X-UMC-User
+		}
+	}
+	@admin_entry path /admin
+	handle @admin_entry {
+		redir * /admin/ 308
+	}
+	@admin path /admin/*
+	handle @admin {
+		uri strip_prefix /admin
 		basic_auth {
 			__DASH_USERS__
 		}
 		reverse_proxy 127.0.0.1:9102 {
 			header_up X-UMC-User {http.auth.user.id}
 		}
+	}
+	@protected path /api /api/* /metrics
+	handle @protected {
+		basic_auth {
+			__DASH_USERS__
+		}
+		reverse_proxy 127.0.0.1:9102 {
+			header_up X-UMC-User {http.auth.user.id}
+		}
+	}
+	handle {
+		respond "Not found" 404
 	}
 }

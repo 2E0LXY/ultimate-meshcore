@@ -87,7 +87,15 @@ def write_caddy_users(users):
     old, span = caddy_users(text)
     if span is None:
         return {"ok": False, "error": "could not find the login list in the Caddy site file"}
-    new_text = text[:span[0]] + "\n".join("\t\t\t%s %s" % u for u in users) + text[span[1]:]
+    entries = "\n".join("\t\t\t%s %s" % u for u in users)
+    # Both protected route blocks share identical credentials. Update both
+    # atomically so a password change never leaves the API on an older password.
+    spans = list(re.finditer(r"basic_auth\s*\{\n(.*?)\n[ \t]*\}", text, re.S))
+    if not spans:
+        return {"ok": False, "error": "could not find the login list in the Caddy site file"}
+    new_text = text
+    for block in reversed(spans):
+        new_text = new_text[:block.start(1)] + entries + new_text[block.end(1):]
     open(CADDY_FILE + ".backup-before-users", "w").write(text)
     open(CADDY_FILE, "w").write(new_text)
     rc, out = run("caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile")

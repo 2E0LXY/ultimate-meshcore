@@ -174,6 +174,74 @@ class PublicViewer(unittest.TestCase):
         self.assertNotIn("lat", out["nodes"][0]); self.assertNotIn("lon", out["nodes"][0])
 
 
+
+class PublicObservatory(unittest.TestCase):
+    """Public landing, data shape and privacy regressions."""
+
+    def test_public_network_is_an_allowlist_and_routes_mask_unknown_identities(self):
+        old = dash.network_view
+        dash.network_view = lambda: {
+            "now": 100, "nodes": [
+                {"key": "AAA", "name": "Hill", "last": 98, "lat": 53.2, "lon": -1.5,
+                 "info": {"has_key": True, "private_password": "DO-NOT-PUBLISH"}},
+                {"key": "BBB", "name": "Valley", "last": 97, "lat": 53.1, "lon": -1.6}],
+            "links": [
+                {"recv": "AAA", "node": "BBB", "hops": 0, "n": 2, "last": 99, "secret": "DO-NOT-PUBLISH"},
+                {"recv": "MISSING", "node": "AAA", "hops": 1, "n": 1}],
+            "journeys": [{"t": 99, "type": "ADVERT", "hops": 2, "from": "SECRET-CLIENT",
+                          "to": "AAA", "path": [{"n": "SECRET-HOP"}, {"n": "Hill"}],
+                          "private_payload": "DO-NOT-PUBLISH"}],
+        }
+        try: out = dash.public_network_view()
+        finally: dash.network_view = old
+        self.assertEqual(2, len(out["nodes"]))
+        self.assertEqual(["key", "name", "type", "last", "first", "adverts", "connected", "online"],
+                         list(out["nodes"][0]))
+        self.assertEqual(1, len(out["links"]))
+        self.assertEqual("", out["journeys"][0]["from"])
+        self.assertEqual("unidentified hop", out["journeys"][0]["path"][0]["n"])
+        self.assertEqual("Hill", out["journeys"][0]["path"][1]["n"])
+        raw = json.dumps(out)
+        for bad in ("DO-NOT-PUBLISH", "SECRET-CLIENT", "SECRET-HOP", "lat", "lon", "has_key"):
+            self.assertNotIn(bad, raw)
+
+    def test_public_traffic_hides_message_endpoints_and_channel_names(self):
+        original = dash.overview
+        dash.overview = lambda: {
+            "now": 1, "mqtt": {"state": "connected"}, "devices": [],
+            "packets": [{"t": 99, "dev": "AAA", "dir": "rx", "type": "GRP_TXT",
+                         "src": "PRIVATE-SENDER", "dst": "PRIVATE-RECEIVER",
+                         "chan": "PRIVATE-ROOM", "key": "PRIVATE-KEY",
+                         "name": "PRIVATE-NAME", "len": 42}],
+            "rates": {}, "types": {}, "heard_by": {}, "latency": {},
+        }
+        try: out = dash.public_overview()
+        finally: dash.overview = original
+        self.assertEqual("GRP_TXT", out["packets"][0]["type"])
+        self.assertEqual(42, out["packets"][0]["len"])
+        for forbidden in ("PRIVATE-SENDER", "PRIVATE-RECEIVER", "PRIVATE-ROOM",
+                          "PRIVATE-KEY", "PRIVATE-NAME"):
+            self.assertNotIn(forbidden, json.dumps(out))
+
+    def test_public_root_and_admin_are_separate_at_reverse_proxy(self):
+        caddy = open(os.path.join(HERE, "..", "umcnet.caddy"), encoding="utf-8").read()
+        self.assertEqual(2, caddy.count("basic_auth {"))
+        for required in ("@landing path / /index.html", "rewrite * /public/",
+                         "@public path /public /public/*", "@admin path /admin/*", "redir * /admin/ 308",
+                         "uri strip_prefix /admin", "@protected path /api /api/* /metrics",
+                         "header_up X-UMC-User {http.auth.user.id}", "header_up -X-UMC-User"):
+            self.assertIn(required, caddy)
+
+    def test_public_front_page_has_required_views_without_simulated_transmits(self):
+        page = open(os.path.join(HERE, "public.html"), encoding="utf-8").read()
+        for term in ('href="/admin/"', 'data-view="discovery"',
+                     'data-view="neighbours"', 'data-view="routes"',
+                     'function topology(n)', 'function renderTraffic(o)',
+                     'function renderNetwork(n)'):
+            self.assertIn(term, page)
+        self.assertNotIn("Math.random()", page)
+        self.assertIn("No unconfirmed retransmissions are animated", page)
+
 class Settings(unittest.TestCase):
     def setUp(self): dash.conf_load()
 

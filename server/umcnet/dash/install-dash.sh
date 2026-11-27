@@ -2,8 +2,8 @@
 # Installs the UMC Net dashboard beside the broker:
 #   - a read-only "monitor" account for the broker,
 #   - a service on 127.0.0.1:9102 (Python standard library only, nothing to pip install),
-#   - the admin page at https://net.<domain>/ behind a login,
-#   - a read-only public viewer at https://net.<domain>/public/ (the MQTT path /mqtt is unchanged).
+#   - the admin page at https://net.<domain>/admin/ behind a login,
+#   - a read-only public viewer at https://net.<domain>/ (also /public/) (the MQTT path /mqtt is unchanged).
 # Run as root, after install.sh and enable-caddy.sh. Safe to run again: it updates in place.
 set -euo pipefail
 REF=${REF:-main}
@@ -59,14 +59,14 @@ have enrol || { /opt/umcnet/umcnet-user add enrol enrol --password "$ENROL_PASSW
 CRED=/root/umcnet-credentials.txt; touch "$CRED"; chmod 600 "$CRED"
 # a login that already exists is never touched by a re-run (it may have been changed from the Settings tab)
 # every login already in the site file (admin and any users added from the Users tab) is kept
-users=$(awk '/basic_auth[[:space:]]*\{/{f=1;next} f&&/^[[:space:]]*\}/{f=0} f{sub(/^[[:space:]]+/,""); print}' /etc/caddy/conf.d/umcnet.caddy 2>/dev/null | grep -E '^[a-z0-9][a-z0-9_.-]* [$]2' || true)
+users=$(awk '/basic_auth[[:space:]]*\{/{f=1;next} f&&/^[[:space:]]*\}/{f=0} f{sub(/^[[:space:]]+/,""); print}' /etc/caddy/conf.d/umcnet.caddy 2>/dev/null | grep -E '^[a-z0-9][a-z0-9_.-]* [$]2' | sort -u || true)
 hash=$(printf '%s\n' "$users" | sed -n 's/^admin \([$]2[^ ]*\).*/\1/p' | head -1)
 if [ -n "$hash" ]; then
   webpw="(unchanged: the login you already have)"
 else
   webpw=$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)
   grep -v '^dashboard-login ' "$CRED" > "$CRED.new" || true; mv "$CRED.new" "$CRED"; chmod 600 "$CRED"
-  printf 'dashboard-login admin %s   (https://%s/)\n' "$webpw" "$HOST" >> "$CRED"
+  printf 'dashboard-login admin %s   (https://%s/admin/)\n' "$webpw" "$HOST" >> "$CRED"
   hash=$(caddy hash-password --plaintext "$webpw")
   rm -f /etc/umcnet-dash/admin.pbkdf2          # the helper's own check must match the new login
 fi
@@ -83,7 +83,7 @@ DASH_USERS="$users" python3 - /etc/caddy/conf.d/umcnet.caddy.new <<'PYUSERS'
 import os, sys
 p = sys.argv[1]; t = open(p).read()
 lines = [l.strip() for l in os.environ["DASH_USERS"].splitlines() if l.strip()]
-open(p, "w").write(t.replace("__DASH_USERS__", "\n\t\t\t".join(lines)))
+assert t.count("__DASH_USERS__") == 2, "expected admin and API login blocks"\nopen(p, "w").write(t.replace("__DASH_USERS__", "\n\t\t\t".join(lines)))
 PYUSERS
 mv /etc/caddy/conf.d/umcnet.caddy.new /etc/caddy/conf.d/umcnet.caddy
 if caddy validate --config "$CF" --adapter caddyfile >/tmp/caddy-validate.log 2>&1; then
@@ -100,5 +100,5 @@ if [ -n "${NEWACCOUNT:-}" ]; then systemctl reload umcnet-mosquitto 2>/dev/null 
 sleep 3
 systemctl is-active umcnet-admin umcnet-dash umcnet-mosquitto caddy
 curl -fsS http://127.0.0.1:9102/api/health && echo
-echo "dashboard: https://$HOST/   login: admin / $webpw"
-echo "public viewer: https://$HOST/public/   read-only, no login"
+echo "dashboard: https://$HOST/admin/   login: admin / $webpw"
+echo "public viewer: https://$HOST/   read-only, no login"
