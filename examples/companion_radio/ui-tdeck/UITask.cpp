@@ -10,6 +10,7 @@
 #include "FreeSans7pt7b.h"
 #include "FreeSans6pt7b.h"
 #include <helpers/ui/ST7789LCDDisplay.h>
+#include <helpers/ui/UmcTheme.h>
 
 #include "../MyMesh.h"
 #include "UmcSplash.h"
@@ -73,16 +74,20 @@ static int g_theme = 0;
 #define TH (kThemes[g_theme])
 
 // ---- colours (RGB565) ----
-#define C_BG 0x0861
-#define C_CARD 0x18E3
-#define C_LINE 0x3186
-#define C_TXT 0xE73C
-#define C_DIM 0x8410
-#define C_ACC 0x2D7F
-#define C_OK 0x3DE6
-#define C_WARN 0xFC60
-#define C_BAD 0xF9A6
-#define C_ME 0x1C9F
+// The app look comes from the UMC theme palette (helpers/ui/UmcTheme.h, "overview" or
+// "analytics"; chosen in Setup > Display or with `set theme overview|analytics`). The chat
+// bubble colours above are a separate choice and are not part of it.
+static const UmcPalette* g_pal = &kUmcPalettes[UMC_THEME_DEFAULT];
+#define C_BG (g_pal->surface)
+#define C_CARD (g_pal->card)
+#define C_LINE (g_pal->border)
+#define C_TXT (g_pal->ink)
+#define C_DIM (g_pal->muted)
+#define C_ACC (g_pal->accent)
+#define C_OK (g_pal->ok)
+#define C_WARN (g_pal->warn)
+#define C_BAD (g_pal->bad)
+#define C_ME (g_pal->series[0])
 
 // Everything is drawn through gfx(). Normally that is the screen; while a screenshot is
 // being taken it is an off-screen canvas of the same size, so the same code paints both.
@@ -1091,6 +1096,8 @@ void UITask::drawAlert() {
 void UITask::applyTheme() {
   const int want = the_mesh.getUmc().prefs().theme;
   g_theme = want >= 0 && want < kThemeCount ? want : 0;
+  g_pal = &umcPalette(the_mesh.getUmc().prefs().ui_theme);
+  ST7789LCDDisplay::setUmcTheme(the_mesh.getUmc().prefs().ui_theme);
 }
 
 // One message bubble, drawn upwards from y_bottom. Returns the new bottom for the next one.
@@ -2519,7 +2526,7 @@ int UITask::setupRowCount() const {
     case SP_CONTACTS_CFG: return 8;
     case SP_TELEMETRY: return 4;
     case SP_CONSOLE: return 2;
-    case SP_DISPLAY: return 9;   // theme, touch, brightness, five switches, back
+    case SP_DISPLAY: return 10;  // chat theme, touch, brightness, five switches, app theme, back
     case SP_THEME: return 1;
     case SP_QUICK: return UMC_QUICK_REPLIES + 1;
     default: return 1;
@@ -2749,6 +2756,10 @@ void UITask::setupRow(int row, char* label, size_t label_n, char* value, size_t 
           snprintf(label, label_n, "Delivery marks");
           snprintf(value, value_n, "%s", umcCli("get ack.show"));
           break;
+        case 8:
+          snprintf(label, label_n, "App theme");
+          snprintf(value, value_n, "%s  (tap to change)", umcThemeName(the_mesh.getUmc().prefs().ui_theme));
+          break;
         default:
           snprintf(label, label_n, "< Back");
           break;
@@ -2828,7 +2839,7 @@ void UITask::drawSetup() {
     if (_setup_page == SP_ROOT) {        // a coloured mark per section, to find them by eye
       static const uint8_t icons[14] = {IC_RADIO, IC_DISH, IC_GLOBE, IC_BOLT, IC_PIN, IC_PLANE, IC_CHECK,
                                         IC_TOWER, IC_FACE, IC_PAW, IC_SUN, IC_STAR, IC_HEART, IC_DOT};
-      static const uint16_t cols[14] = {C_ACC, C_WARN, C_OK, C_ME, C_ACC, C_OK, C_TXT,
+      const uint16_t cols[14] = {C_ACC, C_WARN, C_OK, C_ME, C_ACC, C_OK, C_TXT,
                                         C_WARN, C_ME, C_ACC, C_OK, C_DIM, C_WARN, C_ME};
       if (row < 14) drawIcon(6, y + 6, icons[row], on ? C_TXT : cols[row], 9);
       lx = 20;
@@ -3154,6 +3165,12 @@ void UITask::setupAction(int row) {
         const bool on = strstr(umcCli(q), "on") != NULL;
         snprintf(cmd2, sizeof(cmd2), "set %s %s", name, on ? "off" : "on");
         StrHelper::strncpy(_setup_status, umcCli(cmd2), sizeof(_setup_status));
+      } else if (row == 8) {
+        snprintf(cmd2, sizeof(cmd2), "set theme %s",
+                 umcThemeName((the_mesh.getUmc().prefs().ui_theme + 1) % UMC_THEME_COUNT));
+        StrHelper::strncpy(_setup_status, umcCli(cmd2), sizeof(_setup_status));
+        applyTheme();
+        _dirty = true;
       } else {
         setupOpen(SP_ROOT);
         return;

@@ -1,3 +1,4 @@
+#include <helpers/ui/UmcTheme.h>
 #include "UmcHealth.h"
 #include "UmcService.h"
 #include "UmcLog.h"
@@ -1050,14 +1051,32 @@ bool UmcService::handleCommand(const char* command, char* reply, size_t reply_si
     }
   }
 
+  // `theme` is the app look: overview | analytics (helpers/ui/UmcTheme.h). The chat colour
+  // scheme keeps its number: `set theme 0..15` still works, and `get chat.theme` reads it.
   if (strcmp(command, "get theme") == 0) {
+    snprintf(reply, reply_size, "> %s", umcThemeName(_prefs.ui_theme));
+    return true;
+  }
+  if (strcmp(command, "get chat.theme") == 0) {
     snprintf(reply, reply_size, "> %u", (unsigned)_prefs.theme);
     return true;
   }
   if (startsWith(command, "set theme ")) {
-    const int v = atoi(command + 10);
+    const int named = umcThemeParse(command + 10);
+    if (named >= 0) {
+      _prefs.ui_theme = (uint8_t)named;
+      UmcPrefsStore::save(_prefs);
+      snprintf(reply, reply_size, "OK");
+      return true;
+    }
+    const char* arg = command + 10;
+    if (*arg < '0' || *arg > '9') {
+      snprintf(reply, reply_size, "Err - overview|analytics (or 0 to 15 for the chat colours)");
+      return true;
+    }
+    const int v = atoi(arg);
     if (v < 0 || v > 15) {
-      snprintf(reply, reply_size, "Err - 0 to 15");
+      snprintf(reply, reply_size, "Err - overview|analytics (or 0 to 15 for the chat colours)");
       return true;
     }
     _prefs.theme = (uint8_t)v;

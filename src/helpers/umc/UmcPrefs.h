@@ -24,7 +24,8 @@ struct UmcPrefs {
   bool app_tcp;                // MeshCore app connection on TCP
   uint16_t app_tcp_port;       // default 5000
   uint8_t touch_map;           // touch panel orientation on touch clients (0-7)
-  uint8_t theme;               // colour scheme on screens that have one
+  uint8_t theme;               // chat colour scheme on screens that have one
+  uint8_t ui_theme;            // UMC app theme (helpers/ui/UmcTheme.h): 0 = overview, 1 = analytics
   char admin_pw[33];           // web/telnet password on roles without a mesh admin password (companion)
 
   // ---- touch client extras ----

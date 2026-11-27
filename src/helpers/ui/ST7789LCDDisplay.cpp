@@ -85,6 +85,19 @@ void ST7789LCDDisplay::turnOff() {
   }
 }
 
+void ST7789LCDDisplay::setUmcTheme(int theme) {
+  const UmcPalette& p = umcPalette(theme);
+  UIColor::window_bkg = p.surface;
+  UIColor::title_bkg = p.accent;
+  UIColor::title_txt = p.accentInk;
+  UIColor::primary_txt = p.ink;
+  UIColor::secondary_txt = p.muted;
+  UIColor::warning_txt = p.warn;
+  UIColor::popup_bkg = p.card;
+  UIColor::popup_txt = p.ink;
+  UIColor::corp_blue = p.accent;
+}
+
 void ST7789LCDDisplay::clear() {
   display.fillScreen(ST77XX_BLACK);
 }

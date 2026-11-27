@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DisplayDriver.h"
+#include "UmcTheme.h"
 #include <Wire.h>
 #include <SPI.h>
 #include <Adafruit_GFX.h>
@@ -42,6 +43,10 @@ public:
   }
 #endif
   bool begin();
+
+  // Re-point the shared UIColor roles (window, title, text, popup) at a UMC theme palette
+  // (UmcTheme.h). Rich UIs that paint through gfx() read the palette directly instead.
+  static void setUmcTheme(int theme);
 
   // Direct access for rich UIs (T-Deck touch screens and map tiles) and for the SD card,
   // which shares this SPI bus.

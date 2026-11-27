@@ -25,6 +25,9 @@ jobs:
       - name: Test Web Flasher Provisioning
         run: node --test scripts/test_umc_provision.mjs
 
+      - name: Test UMC theme tokens (web panel, firmware palette)
+        run: python3 scripts/test_umc_theme.py
+
       - name: Upload Test Results
         # Upload test results even if the test step failed.
         if: always()

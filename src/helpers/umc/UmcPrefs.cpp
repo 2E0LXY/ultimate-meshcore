@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <helpers/ui/UmcTheme.h>
+
 #if defined(ESP_PLATFORM)
   #include <Preferences.h>
   #include <esp_random.h>
@@ -91,6 +93,7 @@ void UmcPrefsStore::setDefaults(UmcPrefs& p) {
   p.app_tcp = true;
   p.app_tcp_port = 5000;
   p.theme = 0;
+  p.ui_theme = UMC_THEME_DEFAULT;
   p.touch_map = 0;
   strcpy(p.admin_pw, "password");
   // Starting points for the canned replies: short, and useful on a radio.
@@ -148,6 +151,9 @@ void UmcPrefsStore::load(UmcPrefs& p) {
     p.app_tcp = nvs.getBool("app_tcp", p.app_tcp);
     p.app_tcp_port = nvs.getUShort("app_port", p.app_tcp_port);
     p.touch_map = nvs.getUChar("touch_map", p.touch_map);
+    // Added later: an older NVS has no "uitheme" key, so this keeps the default (overview).
+    p.ui_theme = nvs.getUChar("uitheme", p.ui_theme);
+    if (p.ui_theme >= UMC_THEME_COUNT) p.ui_theme = UMC_THEME_DEFAULT;
     nvs.getString("pin", p.pin, sizeof(p.pin));
     if (nvs.isKey("admin_pw")) nvs.getString("admin_pw", p.admin_pw, sizeof(p.admin_pw));
     for (int i = 0; i < UMC_QUICK_REPLIES; i++) {
@@ -202,6 +208,7 @@ bool UmcPrefsStore::save(const UmcPrefs& p) {
   nvs.putBool("app_tcp", p.app_tcp);
   nvs.putUShort("app_port", p.app_tcp_port);
   nvs.putUChar("touch_map", p.touch_map);
+  nvs.putUChar("uitheme", p.ui_theme);
   nvs.putString("pin", p.pin);
   nvs.putString("admin_pw", p.admin_pw);
   for (int i = 0; i < UMC_QUICK_REPLIES; i++) {

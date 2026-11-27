@@ -378,3 +378,10 @@ No new CLI commands. UMC builds of `simple_repeater` read the sensors every `SEN
 ## Heap Health Check Script
 
 `eastmesh-tools/web-heap-check.sh <host> [--stress] [--rounds N]` reads `memory`, `get web.status`, `get mqtt.status` and `get wifi.status` over the HTTPS API and, with `--stress`, simulates browser page-load bursts before re-reading `memory`. Authenticate with `REPEATER_PASSWORD` or `REPEATER_TOKEN` in the environment (or enter the password at the prompt). Watch `heap_max` (largest internal block; TLS needs ~40KB), `heap_min`, and the `heals`/`deferred`/`leaked` counters.
+
+## Colour Display Theme (UMC colour clients, e.g. T-Deck)
+
+- `get theme`: `overview` or `analytics`, the app look on colour screens (palettes in `src/helpers/ui/UmcTheme.h`, from `docs/umc/theme/tokens.json`).
+- `set theme overview|analytics`: saved (NVS key `uitheme`; boxes upgraded from older firmware start on `overview`). Also in Setup > Display > App theme.
+- `set theme <0-15>` is unchanged and still picks the chat bubble colour scheme; `get chat.theme` reads it back (before this change `get theme` returned that number).
+- Monochrome OLED and e-paper displays ignore the theme. The repeater web panel theme is a per-browser switch in its header (`localStorage["umc-theme"]`), not a CLI setting.
