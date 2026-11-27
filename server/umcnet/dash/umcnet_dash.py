@@ -5,7 +5,7 @@ Reads the broker as a read-only 'monitor' account (its $SYS statistics and the m
 broker's log for who connects and who is refused, samples the machine, and serves a JSON API and the page on
 127.0.0.1 for Caddy to put behind a login. Python standard library only: no packages to install.
 """
-import base64, collections, csv, hashlib, hmac, io, json, os, re, secrets, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.request
+import base64, collections, csv, hashlib, hmac, io, json, os, re, secrets, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.error, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -28,7 +28,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.35"
+VERSION = "2.36"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -76,7 +76,7 @@ def parse_packet(raw):
         if ptype in (0, 1, 2, 8) and len(p) >= 2: out["dst"], out["src"] = "%02X" % p[0], "%02X" % p[1]
         elif ptype in (5, 6) and p: out["chan"] = "%02X" % p[0]
         elif ptype == 4 and len(p) > 100:
-            out["key"] = p[:4].hex().upper(); out["fkey"] = p[:32].hex().upper(); j = 100; f = p[j]; j += 1
+            out["key"] = p[:4].hex().upper(); out["fkey"] = p[:32].hex().upper(); out["hdr"] = h; out["advp"] = bytes(p); j = 100; f = p[j]; j += 1
             out["atype"] = f & 0x0F
             if f & 0x10:
                 if j + 8 <= len(p):
@@ -104,6 +104,9 @@ def note_network(did, info, snr, rssi, now):
     """Called for every packet a connected repeater heard: learn the node behind an advert, and the link to it."""
     if not info: return
     sender = None
+    if info.get("flood"):
+        try: hop_note(did, info.get("hops"), now)
+        except Exception as e: sys.stderr.write("hop histogram: %s\n" % e)
     if info.get("fkey"):
         k = info["fkey"]; n = NODES.get(k); fresh = n is None
         if n is None:
@@ -117,6 +120,8 @@ def note_network(did, info, snr, rssi, now):
             try: newnode_seen(k, n, did, now)
             except Exception as e: sys.stderr.write("new node: %s\n" % e)
         sender = k
+        try: advert_note(k, info, now)
+        except Exception as e: sys.stderr.write("advert check: %s\n" % e)
         try: decoded_advert(did, n, info, snr, now)
         except Exception as e: sys.stderr.write("advert copy: %s\n" % e)
     elif info.get("src"): sender = node_for_hash(info["src"])
@@ -449,6 +454,9 @@ def on_publish(topic, payload, retained=False):
             if direction == "tx" and raw:
                 try: note_sent(did, raw, now)
                 except Exception as e: sys.stderr.write("sent: %s\n" % e)
+                if info.get("fkey") == did:                                # the repeater's own advert, as it sent it
+                    try: advert_note(did, info, now)
+                    except Exception as e: sys.stderr.write("advert check: %s\n" % e)
             if direction == "rx" and raw:
                 note_network(did, info, j.get("SNR"), j.get("RSSI"), now)
                 try: note_message(did, raw, j.get("SNR"), j.get("RSSI"), now)
@@ -697,6 +705,9 @@ def db_init():
     DB.execute("CREATE TABLE IF NOT EXISTS routes(h INTEGER, path TEXT, rx TEXT, n INTEGER, last INTEGER, PRIMARY KEY(h, path, rx))")
     DB.execute("CREATE TABLE IF NOT EXISTS snr(h INTEGER, node TEXT, n INTEGER, s REAL, lo REAL, hi REAL, PRIMARY KEY(h, node))"); DB.execute("CREATE INDEX IF NOT EXISTS snr_n ON snr(node, h)")
     DB.execute("CREATE TABLE IF NOT EXISTS alertstate(key TEXT PRIMARY KEY, state TEXT, ts INTEGER)")
+    DB.execute("CREATE TABLE IF NOT EXISTS hophist(h INTEGER, rx TEXT, hops INTEGER, n INTEGER, PRIMARY KEY(h, rx, hops))")
+    DB.execute("CREATE TABLE IF NOT EXISTS adverts(key TEXT PRIMARY KEY, ts INTEGER, ats INTEGER, raw TEXT)")
+    DB.execute("CREATE TABLE IF NOT EXISTS clockdrift(key TEXT PRIMARY KEY, ts INTEGER, samples TEXT)")
     DB.execute("CREATE TABLE IF NOT EXISTS newnodes(key TEXT PRIMARY KEY, ts INTEGER, name TEXT, kind INTEGER, rx TEXT, state TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS nn_ts ON newnodes(ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS audit(ts INTEGER, who TEXT, action TEXT, target TEXT, detail TEXT, ok INTEGER)"); DB.execute("CREATE INDEX IF NOT EXISTS a_ts ON audit(ts)")
 
@@ -781,13 +792,14 @@ MSG_DEFAULTS = {"tx_enabled": True, "sender": "UMC-DASH", "keep_days": 30,
                 "regions": ["yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire", "sheffield", "wakefield"]}
 DEFAULTS = {"publish_decoded": True, "web_users": {}, "messages": MSG_DEFAULTS, "map_hours": 24, "enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
             "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14,
-            "traffic_keep_days": 30, "telem_keep_days": 90, "backup_keep": 7, "backup_hour": 3, "airtime_warn_pct": 10, "airtime_warn_minutes": 15, "newnode_max_per_hour": 6, "newnode_warmup_minutes": 30, "route_live_minutes": 60, "route_silent_minutes": 720, "route_busy_packets": 20, "battery_low_mv": 3500, "silent_overrides": {}, "confirm_risky": True, "control_enabled": True,
-            "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True, "collision": True, "airtime": True, "newnode": True, "route_silent": False},
+            "traffic_keep_days": 30, "telem_keep_days": 90, "backup_keep": 7, "backup_hour": 3, "airtime_warn_pct": 10, "airtime_warn_minutes": 15, "newnode_max_per_hour": 6, "newnode_warmup_minutes": 30, "route_live_minutes": 60, "route_silent_minutes": 720, "route_busy_packets": 20, "battery_low_mv": 3500, "silent_overrides": {}, "confirm_risky": True, "control_enabled": True, "map_publish": False, "snr_worse_db": 4, "snr_min_samples": 20, "drift_seconds": 600, "tx_headroom_db": 10,
+            "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True, "collision": True, "airtime": True, "newnode": True, "route_silent": False, "snr_worse": True, "clock_drift": False},
             "labels": {}}
 RANGES = {"map_hours": (1, 8760), "stale_minutes": (2, 1440), "cert_warn_days": (2, 60), "cert_bad_days": (1, 30), "disk_warn_pct": (50, 99), "mem_warn_pct": (50, 99), "flap_count": (2, 50),
           "skew_seconds": (5, 3600), "auth_fail_warn": (1, 1000), "auth_fail_bad": (2, 10000), "keep_days": (1, 90),
           "traffic_keep_days": (7, 1000), "telem_keep_days": (8, 730), "backup_keep": (1, 60), "backup_hour": (0, 23), "airtime_warn_pct": (1, 100), "airtime_warn_minutes": (5, 120), "newnode_max_per_hour": (1, 100), "newnode_warmup_minutes": (0, 1440),
-          "route_live_minutes": (5, 1440), "route_silent_minutes": (30, 10080), "route_busy_packets": (1, 100000), "battery_low_mv": (3000, 4000)}
+          "route_live_minutes": (5, 1440), "route_silent_minutes": (30, 10080), "route_busy_packets": (1, 100000), "battery_low_mv": (3000, 4000),
+          "snr_worse_db": (1, 30), "snr_min_samples": (5, 1000), "drift_seconds": (60, 86400), "tx_headroom_db": (3, 30)}
 CONF = json.loads(json.dumps(DEFAULTS))
 
 def conf_path(): return os.path.join(CFG["data"], "config.json")
@@ -819,7 +831,7 @@ def conf_update(patch):
             lo, hi = RANGES[k]
             if not lo <= v <= hi: return "%s must be between %d and %d" % (k, lo, hi)
             new[k] = v
-        elif k in ("confirm_risky", "control_enabled", "join_bridge", "enrol_enabled", "publish_decoded"): new[k] = bool(v)
+        elif k in ("confirm_risky", "control_enabled", "join_bridge", "enrol_enabled", "publish_decoded", "map_publish"): new[k] = bool(v)
         elif k == "join_iata":
             if not isinstance(v, str) or not re.match(r"^[A-Za-z0-9]{3}$", v): return "join_iata: the three-character area code"
             new[k] = v.upper()
@@ -1598,6 +1610,7 @@ def confirmed_links(hours=48):
 TRAFFIC_BUF = collections.Counter(); TRAFFIC_LOCK = threading.Lock()
 ROUTE_BUF = {}      # (hour, path, receiving repeater) -> [receptions, newest time]; flood packets only (their path is the one actually travelled)
 SNR_BUF = {}        # (hour, node) -> [count, sum, min, max]; only packets heard with no repeater between (flood, 0 hops)
+HOP_BUF = collections.Counter()   # (hour, receiving repeater, hop count) -> packets; flood packets only (a direct-routed packet's path is what is left to travel, not what it has travelled)
 BUF_CAP = 20000
 
 def route_note(path, rx, now):
@@ -1631,9 +1644,10 @@ def snr_note(node, snr, now):
 def traffic_flush():
     with TRAFFIC_LOCK:
         items = list(TRAFFIC_BUF.items()); TRAFFIC_BUF.clear()
-        routes = list(ROUTE_BUF.items()); ROUTE_BUF.clear(); snrs = list(SNR_BUF.items()); SNR_BUF.clear()
-    if not (items or routes or snrs): return
+        routes = list(ROUTE_BUF.items()); ROUTE_BUF.clear(); snrs = list(SNR_BUF.items()); SNR_BUF.clear(); hops = list(HOP_BUF.items()); HOP_BUF.clear()
+    if not (items or routes or snrs or hops): return
     with LOCK:
+        if hops: DB.executemany("INSERT INTO hophist VALUES(?,?,?,?) ON CONFLICT(h, rx, hops) DO UPDATE SET n = n + excluded.n", [(h, rx, hp, n) for (h, rx, hp), n in hops])
         if items: DB.executemany("INSERT INTO traffic VALUES(?,?,?,?,?,?) ON CONFLICT(h, node, rx, ptype, hops) DO UPDATE SET n = n + excluded.n",
                                  [(h, node, rx, pt, hp, n) for (h, node, rx, pt, hp), n in items])
         if routes: DB.executemany("INSERT INTO routes VALUES(?,?,?,?,?) ON CONFLICT(h, path, rx) DO UPDATE SET n = n + excluded.n, last = MAX(last, excluded.last)",
@@ -1759,7 +1773,9 @@ def retention_run(now=None):
             "routes": prune_batched("routes", "h", now - max(8, C["traffic_keep_days"]) * 86400),
             "snr": prune_batched("snr", "h", now - max(8, C["traffic_keep_days"]) * 86400),
             "airtime": prune_batched("airtime", "ts", now - max(8, C["telem_keep_days"]) * 86400),
-            "newnodes": prune_batched("newnodes", "ts", now - 365 * 86400)}
+            "newnodes": prune_batched("newnodes", "ts", now - 365 * 86400),
+            "hophist": prune_batched("hophist", "h", now - max(8, C["traffic_keep_days"]) * 86400),
+            "clockdrift": prune_batched("clockdrift", "ts", now - 14 * 86400)}
 
 # --- D1: nightly consistent backup of the database
 BACKUP_RX = re.compile(r"^dash-\d{8}-\d{6}\.sqlite$")
@@ -2200,7 +2216,342 @@ def extra_diagnostics(now):
         if d.get("boot_changed") and now - d["boot_changed"] < 3600: out.append({"level": "warn", "title": "Rebooted: " + (d["name"] or d["id"][:8]), "detail": "its boot id changed %d min ago (%d reboot%s seen since the dashboard started)" % ((now - d["boot_changed"]) // 60, d["reboots"], "" if d["reboots"] == 1 else "s")})
     for did, st in list(ALERT_STATE.items()):
         if did.startswith("air:") and st: out.append({"level": "warn", "title": "High airtime: " + ((DEV.get(did[4:]) or {}).get("name") or did[4:12]), "detail": "transmitting over %d%% of the time (sustained %d minutes)" % (CONF["airtime_warn_pct"], CONF["airtime_warn_minutes"])})
+    try:
+        for k in alert_keys("snrw:"): out.append({"level": "warn", "title": "Signal worse: " + _name_of(k[5:]), "detail": "heard at least %d dB weaker over the last 24 hours than over the 7 days before (see Watchtower below)" % CONF["snr_worse_db"]})
+    except Exception: pass
     return out
+
+# ----------------------------------------------------------------------------- 2.36: map publishing, hop advice, SNR trend, clock drift, TX advice
+# Everything here is advisory or manual. Nothing changes a repeater, and nothing is sent to the internet map except by an administrator pressing the button.
+def _median(v):
+    v = sorted(v); n = len(v)
+    return None if not n else (v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2.0)
+
+def _name_of(key):
+    return (DEV.get(key) or {}).get("name") or (NODES.get(key) or {}).get("name") or key[:8]
+
+def grouped_alert(title, items, level, kind):
+    """One alert per item up to three, else a single alert listing them, so a mass event is one message."""
+    if not items: return
+    if len(items) <= 3:
+        for label, text in items: send_alert("%s: %s" % (title, label), text, level, kind)
+    else: send_alert("%s: %d nodes" % (title, len(items)), "; ".join("%s (%s)" % x for x in items[:8]) + ("; and %d more" % (len(items) - 8) if len(items) > 8 else ""), level, kind)
+
+# --- adverts: check the signature, keep the newest one for each own repeater, and take clock samples
+ADV_MIN_GAP = 1200                 # seconds between signature checks for one node
+ADV_LAST = {}; ADV_BUDGET = collections.deque(maxlen=120)
+MAX_ADVERT_DATA = 32               # firmware MAX_ADVERT_DATA_SIZE
+
+def advert_parts(payload):
+    """(public key, timestamp, signature, app data) of an advert payload, or None when it cannot be one."""
+    if not payload or not 100 <= len(payload) <= 184 or len(payload) - 100 > MAX_ADVERT_DATA: return None
+    return bytes(payload[:32]), struct.unpack("<I", payload[32:36])[0], bytes(payload[36:100]), bytes(payload[100:])
+
+def advert_verified(payload):
+    """The advert's parts when its Ed25519 signature (over key + timestamp + app data) is good, else None."""
+    parts = advert_parts(payload)
+    if not parts: return None
+    pub, ts, sig, app = parts
+    return parts if ENR.ed_verify(pub, pub + payload[32:36] + app, sig) else None
+
+def advert_packet(hdr, payload):
+    """The advert the way a companion exports it: flood route, no transport codes, empty path (the path is not signed)."""
+    return bytes([(int(hdr) & 0xFC) | 1, 0]) + bytes(payload)
+
+def advert_note(key, info, now):
+    """Called for each advert heard. Verified here, throttled per node and overall, so forged adverts neither count nor cost much."""
+    p = info.get("advp")
+    if not p or info.get("hdr") is None: return None
+    if now - ADV_LAST.get(key, 0) < ADV_MIN_GAP: return None
+    while ADV_BUDGET and now - ADV_BUDGET[0] > 60: ADV_BUDGET.popleft()
+    if len(ADV_BUDGET) >= ADV_BUDGET.maxlen: return None            # more than 120 checks a minute: skip, not an error
+    ADV_BUDGET.append(now)
+    parts = advert_verified(p)
+    if parts is None or parts[0].hex().upper() != key: COUNT["advert_badsig"] += 1; return False
+    if len(ADV_LAST) > 6000: ADV_LAST.clear()
+    ADV_LAST[key] = now
+    drift_note(key, parts[1], now)
+    if key in DEV: advert_store(key, advert_packet(info["hdr"], p), parts[1], now)
+    return True
+
+def advert_store(key, packet, ats, now):
+    """The newest verified advert of an own repeater (one row each, so bounded). An older advert never replaces a newer one."""
+    with LOCK:
+        r = DB.execute("SELECT ats FROM adverts WHERE key=?", (key,)).fetchone()
+        if r and r[0] is not None and ats < r[0]: return False
+        DB.execute("INSERT OR REPLACE INTO adverts VALUES(?,?,?,?)", (key, int(now), int(ats), packet.hex()))
+    return True
+
+# --- publish one repeater to the internet map (manual, administrator, switched on in Settings)
+MAP_URL = "https://map.meshcore.dev/api/v1/nodes"
+MAP_MAX_AGE = 7 * 86400
+MAP_LAST = {}                      # device -> the last attempt: {"ts", "ok", "status", "text"}
+MAP_SEND = None                    # tests replace this: a function taking the request and returning (status, body bytes)
+
+def map_uri(packet):
+    """meshcore://<hex of the advert packet>, as the apps export a contact. Re-checks the signature; raises ValueError when the packet is not a good advert."""
+    packet = bytes(packet)
+    info = parse_packet(packet)
+    if not info or info.get("type") != "ADVERT" or not info.get("advp") or info["hops"] != 0 or packet[0] & 3 != 1: raise ValueError("that is not a clean advert packet")
+    parts = advert_verified(info["advp"])
+    if not parts: raise ValueError("the advert's signature does not check out")
+    return "meshcore://" + packet.hex()
+
+def map_request(uri):
+    """The POST the map's own uploader makes: JSON {"links": [uri]} to the nodes endpoint."""
+    if not isinstance(uri, str) or not re.match(r"^meshcore://[0-9a-f]{200,500}$", uri): raise ValueError("not a contact link")
+    return urllib.request.Request(MAP_URL, data=json.dumps({"links": [uri]}).encode(), method="POST",
+                                  headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "umcnet-dash/" + VERSION})
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k): return None          # a redirect is shown as it is, never followed
+
+def _map_open(req, timeout=15):
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl.create_default_context()), _NoRedirect)   # certificate and host name are checked
+    try:
+        with opener.open(req, timeout=timeout) as r: return r.status, r.read(2048)
+    except urllib.error.HTTPError as e:
+        try: return e.code, e.read(2048)
+        finally: e.close()
+
+def map_summary(row):
+    """What the stored advert says (and whether it may be published), from the row (key, ts, ats, raw hex)."""
+    key, ts, ats, raw = row; out = {"id": key, "stored": int(ts), "advert_time": ats, "name": "", "lat": None, "lon": None, "age": None, "why_not": ""}
+    try: info = parse_packet(bytes.fromhex(raw)) or {}
+    except ValueError: info = {}
+    out["name"] = info.get("name", ""); out["lat"] = info.get("lat"); out["lon"] = info.get("lon")
+    return out
+
+def map_status(now=None):
+    now = int(now or time.time())
+    with LOCK: rows = {r[0]: r for r in DB.execute("SELECT key, ts, ats, raw FROM adverts").fetchall()}
+    out = []
+    for d in sorted(DEV.values(), key=lambda x: (x["name"] or x["id"]).lower()):
+        r = rows.get(d["id"]); last = MAP_LAST.get(d["id"])
+        if not r: s = {"id": d["id"], "stored": None, "advert_time": None, "name": "", "lat": None, "lon": None, "age": None, "why_not": "no verified advert has been heard from this repeater yet"}
+        else:
+            s = map_summary(r); s["age"] = now - s["stored"]
+            if s["age"] > MAP_MAX_AGE: s["why_not"] = "the stored advert is older than 7 days: send an advert from the repeater first"
+            elif s["lat"] is None: s["why_not"] = "the advert carries no position, so there is nothing to put on the map"
+        s["repeater"] = d["name"] or d["id"][:8]; s["last"] = dict(last) if last else None; out.append(s)
+    return {"enabled": bool(CONF.get("map_publish")), "url": MAP_URL, "repeaters": out}
+
+def map_publish(who, dev, confirm=False, now=None):
+    """Publish one repeater's verified advert to the map. Administrator only, switched on in Settings, confirmed by the operator, one repeater per call."""
+    now = int(now or time.time()); dev = str(dev or "").upper()
+    def fail(msg, **extra):
+        audit(who, "map publish", dev[:12], msg, False); return dict({"ok": False, "error": msg}, **extra)
+    if role_of(who) != "admin": return fail("only the administrator can publish to the map")
+    if not CONF.get("map_publish"): return fail("publishing to the map is switched off in the settings")
+    if not re.match(r"^[0-9A-F]{64}$", dev) or dev not in DEV: return fail("no such repeater")
+    with LOCK: row = DB.execute("SELECT key, ts, ats, raw FROM adverts WHERE key=?", (dev,)).fetchone()
+    if not row: return fail("no verified advert has been heard from this repeater yet")
+    s = map_summary(row)
+    if now - s["stored"] > MAP_MAX_AGE: return fail("the stored advert is older than 7 days: send an advert from the repeater first")
+    if s["lat"] is None: return fail("the advert carries no position, so there is nothing to put on the map")
+    if not confirm: return {"ok": False, "needs_confirm": True, "error": "confirm that %s's name and position become public" % (s["name"] or dev[:8]), "name": s["name"], "lat": s["lat"], "lon": s["lon"]}
+    if now - (MAP_LAST.get(dev) or {}).get("ts", 0) < 60: return fail("published a moment ago: wait a minute")
+    try:
+        uri = map_uri(bytes.fromhex(row[3])); req = map_request(uri)
+        status, body = (MAP_SEND or _map_open)(req)
+    except (ValueError, OSError) as e:                    # URLError, timeouts and TLS failures are all OSError
+        MAP_LAST[dev] = {"ts": now, "ok": False, "status": None, "text": str(e)[:200]}
+        return fail("could not publish: %s" % e)
+    text = re.sub(r"[^\x20-\x7e]", " ", bytes(body or b"").decode("utf-8", "replace"))[:300].strip()
+    ok = 200 <= int(status) < 300
+    MAP_LAST[dev] = {"ts": now, "ok": ok, "status": int(status), "text": text}
+    audit(who, "map publish", dev[:12], "%s: HTTP %s %s" % (s["name"] or dev[:8], status, text[:150]), ok)
+    return {"ok": ok, "status": int(status), "response": text, "error": None if ok else "the map answered HTTP %s" % status}
+
+# --- hop histogram advice for flood.max (flood packets only; a direct-routed packet's path is what is left to travel)
+HOP_MIN_SAMPLES = 200; HOP_MIN_DAYS = 3; HOP_WINDOW_DAYS = 14
+
+def hop_note(rx, hops, now):
+    try: h = int(hops)
+    except (TypeError, ValueError): return False
+    if not 0 <= h <= 63: return False
+    key = (int(now) // 3600 * 3600, rx, h)
+    with TRAFFIC_LOCK:
+        if key not in HOP_BUF and len(HOP_BUF) >= BUF_CAP: return False
+        HOP_BUF[key] += 1
+    return True
+
+def hop_advice(counts, first_h, last_h, current=None):
+    """counts: {hops: packets}. Advises the smallest flood.max covering the 95th percentile of hop counts plus one, within 2..64, from at least 200 packets over 3 days."""
+    n = sum(counts.values()); days = (last_h - first_h + 3600) / 86400.0 if n else 0.0
+    out = {"samples": n, "days": round(days, 1), "current": current, "p95": None, "recommended": None, "status": "not enough data", "histogram": sorted(counts.items())}
+    if n < HOP_MIN_SAMPLES or days < HOP_MIN_DAYS:
+        out["why"] = "needs at least %d flood packets over %d days (has %d over %.1f days)" % (HOP_MIN_SAMPLES, HOP_MIN_DAYS, n, days); return out
+    need = 0.95 * n; cum = 0
+    for h, c in sorted(counts.items()):
+        cum += c
+        if cum >= need: out["p95"] = h; break
+    out["recommended"] = max(2, min(64, out["p95"] + 1))
+    out["status"] = "unknown setting" if current is None else "matches" if current == out["recommended"] else "differs"
+    return out
+
+def setting_int(dev, key):
+    try: return int(float(re.sub(r"^[>\s]+", "", str((SETTINGS.get(dev) or {}).get("values", {}).get(key, ""))).strip()))
+    except ValueError: return None
+
+def hop_advice_view(now=None):
+    now = int(now or time.time()); since = now // 3600 * 3600 - HOP_WINDOW_DAYS * 86400
+    traffic_flush()
+    with LOCK: rows = DB.execute("SELECT rx, hops, SUM(n), MIN(h), MAX(h) FROM hophist WHERE h>=? GROUP BY rx, hops", (since,)).fetchall()
+    acc = {}
+    for rx, hp, n, lo, hi in rows:
+        e = acc.setdefault(rx, [{}, lo, hi]); e[0][hp] = n; e[1] = min(e[1], lo); e[2] = max(e[2], hi)
+    out = []
+    for d in sorted(DEV.values(), key=lambda x: (x["name"] or x["id"]).lower()):
+        c, lo, hi = acc.get(d["id"], [{}, 0, 0]); a = hop_advice(c, lo, hi, setting_int(d["id"], "flood.max")); a["id"] = d["id"]; a["name"] = d["name"] or d["id"][:8]; out.append(a)
+    return out
+
+# --- SNR worsening (packets heard with no repeater between, flood, hour by hour, from the snr table)
+SNR_COOLDOWN = 12 * 3600
+
+def snr_trend(recent, base, min_samples):
+    """recent, base: [(packets, sum of SNR)] per hour. Median of the hourly means, last 24 hours against the 7 days before.
+    delta > 0 means worse. None when either window lacks readings: no readings is unknown, never 0 dB or 'unchanged'."""
+    r = [(n, s) for n, s in recent if n > 0]; b = [(n, s) for n, s in base if n > 0]
+    nr = sum(n for n, s in r); nb = sum(n for n, s in b)
+    if nr < min_samples or nb < min_samples or len(r) < 3 or len(b) < 12: return None
+    mr = _median([s / n for n, s in r]); mb = _median([s / n for n, s in b])
+    return {"recent": round(mr, 2), "base": round(mb, 2), "delta": round(mb - mr, 2), "n_recent": nr, "n_base": nb}
+
+def snr_alert_step(active, delta, thr, since_recover=None, cooldown=SNR_COOLDOWN):
+    """'fire' at delta >= thr (not within `cooldown` of the last recovery); 'recover' once it is back under half of thr. No delta changes nothing."""
+    if delta is None: return None
+    if not active and delta >= thr: return None if since_recover is not None and since_recover < cooldown else "fire"
+    if active and delta <= thr / 2.0: return "recover"
+    return None
+
+def snr_view(now=None):
+    now = int(now or time.time()); cur = now // 3600 * 3600; rstart = cur - 23 * 3600; bstart = rstart - 7 * 86400
+    traffic_flush()
+    with LOCK: rows = DB.execute("SELECT node, h, n, s FROM snr WHERE h>=? AND h<=?", (bstart, cur)).fetchall()
+    acc = {}
+    for node, h, n, s in rows: acc.setdefault(node, ([], []))[0 if h >= rstart else 1].append((n, s))
+    out = []
+    for node, (rec, base) in acc.items():
+        nd = NODES.get(node)
+        if not (node in DEV or (nd and nd.get("type") in (2, 3))): continue       # repeaters and rooms: a phone that was carried away is not a worse link
+        t = snr_trend(rec, base, CONF["snr_min_samples"])
+        if t: t.update(key=node, name=_name_of(node), own=node in DEV, alert=alert_get("snrw:" + node)[0] == "active"); out.append(t)
+    out.sort(key=lambda r: -r["delta"])
+    return out
+
+def snr_alerts(now=None):
+    if not CONF["alerts"].get("snr_worse"): return {}
+    now = int(now or time.time()); thr = CONF["snr_worse_db"]; fires = []; backs = []
+    for r in snr_view(now):
+        key = "snrw:" + r["key"]; state, ts = alert_get(key); step = snr_alert_step(state == "active", r["delta"], thr, now - ts if state == "clear" else None)
+        if step == "fire": alert_put(key, "active", now); fires.append((r["name"], "%.1f dB worse: median %.1f dB over the last 24 h against %.1f dB over the 7 days before" % (r["delta"], r["recent"], r["base"])))
+        elif step == "recover": alert_put(key, "clear", now); backs.append((r["name"], "signal back to %.1f dB (7 day median %.1f dB)" % (r["recent"], r["base"])))
+    grouped_alert("Signal worse", fires, "warn", "snr"); grouped_alert("Signal back", backs, "ok", "snr")
+    return {"fired": len(fires), "recovered": len(backs)}
+
+# --- clocks: each node's own clock (the time in its signed adverts) against ours
+DRIFT_WINDOW = 48 * 3600; DRIFT_COOLDOWN = 12 * 3600
+
+def drift_note(key, ats, now):
+    """Keep up to five (our time, node clock minus ours, node time) samples. The same advert heard twice, or a second sample within 20 minutes, adds nothing."""
+    with LOCK:
+        r = DB.execute("SELECT samples FROM clockdrift WHERE key=?", (key,)).fetchone()
+        try: s = json.loads(r[0]) if r else []
+        except ValueError: s = []
+        if s and (s[-1][2] == ats or now - s[-1][0] < ADV_MIN_GAP): return False
+        s = [x for x in s if now - x[0] < DRIFT_WINDOW] + [[int(now), int(ats - now), int(ats)]]
+        DB.execute("INSERT OR REPLACE INTO clockdrift VALUES(?,?,?)", (key, int(now), json.dumps(s[-5:])))
+    return True
+
+def drift_median(samples, now):
+    """Median drift in seconds (positive = the node is ahead of us) from at least two samples in the last 48 hours, else None."""
+    v = [x[1] for x in samples if now - x[0] < DRIFT_WINDOW]
+    return _median(v) if len(v) >= 2 else None
+
+def drift_alert_step(active, drift, thr, since_recover=None, cooldown=DRIFT_COOLDOWN):
+    if drift is None: return None
+    if not active and abs(drift) > thr: return None if since_recover is not None and since_recover < cooldown else "fire"
+    if active and abs(drift) <= thr / 2.0: return "recover"
+    return None
+
+def drift_covered(key):
+    """An own repeater whose clock the existing 'Clock off' check already watches (from its status timestamps) is not alerted on twice."""
+    d = DEV.get(key)
+    return bool(d and d.get("skew") is not None)
+
+def drift_view(now=None):
+    now = int(now or time.time()); thr = CONF["drift_seconds"]
+    with LOCK: rows = DB.execute("SELECT key, ts, samples FROM clockdrift").fetchall()
+    out = []
+    for key, ts, raw in rows:
+        try: s = json.loads(raw)
+        except ValueError: continue
+        nd = NODES.get(key) or {}
+        if not (key in DEV or nd.get("type") in (2, 3)): continue              # repeaters and rooms; phones and sensors often have no clock source at all
+        m = drift_median(s, now)
+        out.append({"key": key, "name": _name_of(key), "kind": NODE_KIND.get(nd.get("type"), "node"), "own": key in DEV, "samples": len([x for x in s if now - x[0] < DRIFT_WINDOW]), "last": ts,
+                    "drift": None if m is None else round(m), "beyond": m is not None and abs(m) > thr, "covered": drift_covered(key), "alert": alert_get("drift:" + key)[0] == "active"})
+    out.sort(key=lambda r: (not r["beyond"], -abs(r["drift"] or 0), r["name"].lower()))
+    return out
+
+def drift_alerts(now=None):
+    if not CONF["alerts"].get("clock_drift"): return {}
+    now = int(now or time.time()); thr = CONF["drift_seconds"]; fires = []; backs = []
+    for r in drift_view(now):
+        if r["covered"]: continue
+        key = "drift:" + r["key"]; state, ts = alert_get(key); step = drift_alert_step(state == "active", r["drift"], thr, now - ts if state == "clear" else None)
+        if step == "fire": alert_put(key, "active", now); fires.append((r["name"], "its clock is %+d s against this server (limit %d s)" % (r["drift"], thr)))
+        elif step == "recover": alert_put(key, "clear", now); backs.append((r["name"], "its clock is within %d s again (%+d s)" % (thr, r["drift"])))
+    grouped_alert("Clock off", fires, "warn", "drift"); grouped_alert("Clock back", backs, "ok", "drift")
+    return {"fired": len(fires), "recovered": len(backs)}
+
+# --- transmit power advice (advisory only: it never suggests raising power and never changes anything)
+SF_FLOOR = {7: -7.5, 8: -10.0, 9: -12.5, 10: -15.0, 11: -17.5, 12: -20.0}      # standard LoRa demodulator SNR limits, dB
+RADIO_RX = re.compile(r"(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d{1,2})\s*,\s*(\d)")
+TX_LABEL = "Advisory, test with tryset only after hardware validation."
+
+def radio_sf(text):
+    """The spreading factor in a 'frequency,bandwidth,SF,CR' text, or None."""
+    m = RADIO_RX.search(str(text or "")); return int(m.group(3)) if m else None
+
+def tx_advice(sf, neigh, headroom, tx=None):
+    """neigh: [(name, SNR dB or None)], the signal between this repeater and each active neighbour. Suggests lowering only when the margin over the
+    SF's demodulation limit exceeds `headroom` for every one of at least two neighbours. Unknown SF or a missing reading gives no advice."""
+    out = {"status": "none", "sf": sf, "floor": SF_FLOOR.get(sf), "headroom": headroom, "min_margin": None, "weakest": None, "drop": 0, "label": TX_LABEL}
+    if sf not in SF_FLOOR: out["status"] = "skip"; out["text"] = "Spreading factor unknown or outside SF7 to SF12: no advice."; return out
+    if len(neigh) < 2: out["status"] = "skip"; out["text"] = "Needs at least two active neighbours with a measured signal (has %d): no advice." % len(neigh); return out
+    if any(s is None for _, s in neigh): out["status"] = "skip"; out["text"] = "A neighbour has no signal reading yet: no advice."; return out
+    name, snr = min(neigh, key=lambda x: x[1]); margin = snr - SF_FLOOR[sf]
+    out.update(min_margin=round(margin, 1), weakest=name)
+    drop = min(6, int(margin - headroom)) if margin - headroom >= 1 else 0
+    if drop < 1:
+        out["text"] = "Weakest neighbour %s is %.1f dB above the SF%d limit (%.1f dB), not more than the %g dB headroom: no change suggested." % (name, margin, sf, SF_FLOOR[sf], headroom); return out
+    out["status"] = "advice"; out["drop"] = drop
+    to = (" (to about %g dBm)" % (tx - drop)) if tx is not None else ""
+    out["text"] = "Every active neighbour is at least %.1f dB above the SF%d limit (%.1f dB; weakest: %s), more than the %g dB headroom. Transmit power could be lowered by up to %d dB%s. %s" % (margin, sf, SF_FLOOR[sf], name, headroom, drop, to, TX_LABEL)
+    return out
+
+def tx_view(now=None, hours=48):
+    now = int(now or time.time())
+    with LOCK: rows = DB.execute("SELECT a, b, snr FROM links WHERE last>?", (now - hours * 3600,)).fetchall()
+    out = []
+    for d in sorted(DEV.values(), key=lambda x: (x["name"] or x["id"]).lower()):
+        r = d["id"]; seen = {}                                  # neighbour -> the readings of its signal with this repeater
+        for a, b, snr in rows:
+            if a == r and b != r: seen.setdefault(b, []).append(snr)                 # this repeater hears b
+            elif b == r and a in DEV and a != r: seen.setdefault(a, []).append(snr)  # own repeater a hears this one: the direction our power affects
+        neigh = [(_name_of(k), (min(x for x in v if x is not None) if any(x is not None for x in v) else None)) for k, v in seen.items()]
+        radio = (SETTINGS.get(r) or {}).get("values", {}).get("radio") or d.get("radio")
+        tx = setting_int(r, "tx"); a = tx_advice(radio_sf(radio), neigh, CONF["tx_headroom_db"], tx)
+        a.update(id=r, name=d["name"] or r[:8], neighbours=len(neigh), tx=tx, radio=str(radio or ""), assumed=any(k not in DEV for k in seen)); out.append(a)
+    return out
+
+def watchtower_view(now=None):
+    now = int(now or time.time()); C = CONF
+    return {"now": now, "snr": {"rows": snr_view(now)[:40], "thr": C["snr_worse_db"], "min_samples": C["snr_min_samples"], "alerts": bool(C["alerts"].get("snr_worse"))},
+            "drift": {"rows": drift_view(now)[:60], "thr": C["drift_seconds"], "alerts": bool(C["alerts"].get("clock_drift"))},
+            "hops": hop_advice_view(now), "tx": tx_view(now), "tx_label": TX_LABEL}
 
 # ----------------------------------------------------------------------------- alerts
 ALERT_STATE = {}
@@ -2257,6 +2608,11 @@ def alert_loop():
                 st["slow"] = now; airtime_alerts(now)
                 if a.get("route_silent"): route_alerts(now)
                 if now - st.get("coll", 0) > 300: st["coll"] = now; collision_alerts(now)
+            if now - st.get("watch", 0) > 600:
+                st["watch"] = now
+                for fn in (snr_alerts, drift_alerts):
+                    try: fn(now)
+                    except Exception as e: sys.stderr.write("%s: %s\n" % (fn.__name__, e))
         except Exception as e:
             sys.stderr.write("alerts: %s\n" % e)
         time.sleep(30)
@@ -2561,6 +2917,8 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/service":
                 r = admin_call(op="service", name=str(body.get("name", "")), action="restart"); audit(who, "service restart", str(body.get("name")), r.get("error") or "ok", bool(r.get("ok")))
                 return self.send(200, json.dumps(r))
+            if p == "/api/mappublish":
+                return self.send(200, json.dumps(map_publish(who, body.get("device"), body.get("confirm") is True)))
             if p == "/api/alerts/test":
                 err = send_alert("Test alert", "If you can read this, alerts work.", "ok", "test"); return self.send(200, json.dumps({"ok": not err, "error": err}))
             return self.send(404, '{"error":"not found"}')
@@ -2582,6 +2940,7 @@ class H(BaseHTTPRequestHandler):
                 if not key: return self.send(200, json.dumps({"nodes": node_choices()}))
                 if not re.match(r"^[0-9A-F]{64}$", key): return self.send(400, '{"error":"id is the node\'s 64 character key"}')
                 return self.send(200, json.dumps(node_analytics(key, q.get("days", ["7"])[0])))
+            if u.path == "/api/watchtower": return self.send(200, json.dumps(watchtower_view()))
             if u.path == "/api/routes": return self.send(200, json.dumps(route_view()))
             if u.path == "/api/battery":
                 try: return self.send(200, json.dumps(battery_view(int(float(q.get("hours", ["24"])[0])))))
@@ -2598,6 +2957,9 @@ class H(BaseHTTPRequestHandler):
                 rows = DB.execute("SELECT ts,who,action,target,detail,ok FROM audit WHERE ts>=? ORDER BY ts DESC LIMIT 500", (int(time.time()) - secs,)).fetchall()
                 return self.send(200, json.dumps([dict(zip(("ts", "who", "action", "target", "detail", "ok"), r)) for r in rows]))
             who = (self.headers.get("X-UMC-User") or "admin").strip() or "admin"; role = role_of(who)
+            if u.path == "/api/mappublish":
+                if role != "admin": return self.send(403, '{"error":"only the administrator can see this"}')
+                return self.send(200, json.dumps(map_status()))
             if u.path.startswith("/api/export/") and role != "admin": return self.send(403, '{"error":"only the administrator can export"}')
             if u.path == "/api/export/events.csv":
                 rows = DB.execute("SELECT datetime(ts,'unixepoch'),kind,client,user,ip,text FROM events ORDER BY ts DESC LIMIT 20000").fetchall()
