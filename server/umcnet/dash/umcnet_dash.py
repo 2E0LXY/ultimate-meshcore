@@ -3153,6 +3153,14 @@ def clock_status():
     CLOCK["v"] = v
     return v
 
+def quiet_mesh_nodes(now):
+    """Previously heard repeaters and room servers outside the managed repeater set."""
+    own = set(DEV)
+    return [{"name": n["name"] or k[:8], "last": n["last"]}
+            for k, n in list(NODES.items())
+            if k not in own and n["type"] in (2, 3) and n["last"] and 86400 < now - n["last"] < 30 * 86400]
+
+
 def diagnostics(sysinfo, accs, cert):
     out = []; now = time.time(); C = CONF
     def add(level, title, detail): out.append({"level": level, "title": title, "detail": detail})
@@ -3202,9 +3210,11 @@ def diagnostics(sysinfo, accs, cert):
     # Our own repeaters are checked one by one (and they are not "stale" while they report). Other nodes heard
     # across the mesh are summarised in one line, so the list stays readable.
     own = {d["id"] for d in list(DEV.values()) if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60}
-    quiet = [(n["name"] or k[:8]) for k, n in list(NODES.items()) if k not in own and n["type"] in (2, 3) and n["last"] and 86400 < now - n["last"] < 30 * 86400]
+    quiet = quiet_mesh_nodes(now)
     if quiet:
-        add("warn", "%d mesh node%s quiet for over a day" % (len(quiet), "" if len(quiet) == 1 else "s"), ", ".join(sorted(quiet, key=str.lower)[:15]) + (" …" if len(quiet) > 15 else ""))
+        names = sorted((n["name"] for n in quiet), key=str.lower)
+        add("warn", "%d mesh node%s quiet for over a day" % (len(quiet), "" if len(quiet) == 1 else "s"), ", ".join(names[:15]) + (" …" if len(names) > 15 else ""))
+        out[-1]["kind"] = "quiet_nodes"
     for d in list(DEV.values()):
         sv = (SETTINGS.get(d["id"]) or {}).get("values", {})          # the position the repeater reports for itself (read over the control link)
         def _set(v): return str(v).strip(" >") not in ("", "0", "0.0", "(not set)")
@@ -3245,6 +3255,7 @@ def overview():
         devs = []
         for d in list(DEV.values()):
             x = dict(d); x["types"] = dict(d["types"]); x["topics"] = dict(d["topics"]); x["pm"] = round(rate_per_min("pkt:" + d["id"], 300), 2); x["has_key"] = d["id"] in KEYS; x["label"] = CONF["labels"].get(d["id"], {}); x["last_cmd"] = CTL["last"].get(d["id"]); x["age"] = round(now - d["last"], 1) if d["last"] else 10 ** 9
+            x["silent_minutes"] = silent_minutes(d["id"])
             cached = SETTINGS.get(d["id"], {}); x["settings"] = dict(cached.get("values", {})); x["settings_updated"] = cached.get("updated", 0); x["settings_loading"] = bool(cached.get("loading")); x["settings_error"] = cached.get("error", ""); devs.append(x)
         devs.sort(key=lambda d: -d["last"])
         clients = []
@@ -3522,6 +3533,9 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, json.dumps({"audit": scope_audit(24), "names": scope_names()}))
             if u.path == "/metrics":
                 return self.send(200, prometheus_text(), ctype="text/plain; version=0.0.4")
+            if u.path == "/api/quiet-nodes":
+                nodes = sorted(quiet_mesh_nodes(time.time()), key=lambda n: (n["last"], n["name"].lower()), reverse=True)
+                return self.send(200, json.dumps({"nodes": nodes}))
             if u.path == "/api/overview":
                 return self.send(200, json.dumps(overview_for(role == "admin", who), default=str))
             if u.path == "/api/airtime":

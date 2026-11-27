@@ -47,7 +47,7 @@ body{margin:0;background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-
 @media(max-width:1000px){.dash2 .s8,.dash2 .s7,.dash2 .s6,.dash2 .s5,.dash2 .s4{grid-column:span 12}}
 .dash2 .pn h3{margin:0 0 12px;font-size:15px;font-weight:600;display:flex;align-items:center;gap:10px}.dash2 .pn h3 em{font-style:normal;color:var(--muted);font-weight:400;font-size:12px;margin-left:auto;text-align:right}
 .dash2 .pn h3:before{content:"";flex:none;width:26px;height:26px;border-radius:var(--radius-sm);background:radial-gradient(circle,var(--link) 0 3px,transparent 3.5px),color-mix(in srgb,var(--accent) 16%,transparent)}
-.dash2 .chart{position:relative}.dash2 .chart svg{width:100%;height:auto;display:block}
+.dash2 .chart{position:relative}.dash2 .chart>svg{width:100%;height:auto;display:block}
 .dash2 .gl{stroke:var(--border);stroke-width:1}.dash2 .ax{fill:var(--muted);font-size:10px}
 .dash2 .empty{padding:36px 10px;text-align:center;color:var(--muted);font-size:13px}
 .dash2 .tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 9px;font-size:12px;white-space:nowrap;z-index:5;display:none;box-shadow:0 6px 18px var(--shade)}
@@ -168,18 +168,32 @@ body{margin:0;background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-
 @media (prefers-reduced-motion:reduce){.nc-rain,.nc-msg.fresh .nc-bubble{animation:none}}
 @media (max-width:700px){.nc-msg{max-width:92%}#msgFeed{height:58vh}}
 .hop{background:var(--chip);border:1px solid var(--border);border-radius:6px;padding:1px 6px;font-size:12px}
-</style></head>
+.dash2 .nav-count[hidden]{display:none}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.dash2 .flow-mobile{display:none}
+.dash2 .flow-rows,.dash2 .quiet-nodes{margin:0;padding:0;list-style:none}
+.dash2 .flow-rows li,.dash2 .quiet-nodes li{display:grid;gap:3px;padding:8px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
+.dash2 .flow-rows span,.dash2 .quiet-nodes time{color:var(--muted)}
+.dash2 .overview-checks .check{display:grid;gap:4px;padding:8px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
+.dash2 .overview-checks summary{cursor:pointer;min-height:44px;display:list-item;padding-block:10px}
+.dash2 .quiet-nodes{max-height:20rem;overflow:auto}
+.dash2 .chart-line{display:inline-block;width:26px;height:12px;margin-right:5px;vertical-align:-1px}
+.dash2 .chart-inspect{display:grid;gap:4px;margin-top:8px;color:var(--muted)}
+.dash2 .chart-inspect input{width:100%;margin:0;min-height:44px}
+@media(max-width:900px){.dash2 .flow-desktop{display:none}.dash2 .flow-mobile{display:block}}
+</style>
+</head>
 <body><div class="wrap"><div class="dash2">
 <svg width="0" height="0" style="position:absolute"><defs><filter id="dglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
 <marker id="dar-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--s1)"/></marker><marker id="dar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--s3)"/></marker><marker id="dar-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--s2)"/></marker></defs></svg>
 <div class="hd"><div><h1><span>UMC Net</span> Dashboard</h1><p id="sub"></p></div><div class="sp"></div>
 <div class="rng" id="rng"><button data-r="3600" class="on">1 h</button> <button data-r="21600">6 h</button> <button data-r="86400">24 h</button> <button data-r="604800">7 d</button></div>
-<span class="pl" id="live"><i class="dot"></i> loading</span><div class="themesw" role="group" aria-label="Theme"><button type="button" data-theme-set="overview" aria-pressed="true">Overview</button><button type="button" data-theme-set="analytics" aria-pressed="false">Analytics</button></div><button class="tool" id="refresh">Refresh</button></div>
-<div class="tabs" id="tabs"></div><div id="enrolBar"></div><div id="body"></div></div></div>
+<span class="pl" id="live"><i class="dot"></i> Loading</span><span class="sr-only" id="liveAnnouncement" role="status"></span><div class="themesw" role="group" aria-label="Theme"><button type="button" data-theme-set="overview" aria-pressed="true">Overview</button><button type="button" data-theme-set="analytics" aria-pressed="false">Analytics</button></div><button class="tool" id="refresh">Refresh</button></div>
+<nav class="tabs" id="tabs" aria-label="Dashboard views"></nav><div id="enrolBar"></div><div id="body"></div></div></div>
 <script>
 const D = {uid: 0};
 const $ = s => document.querySelector(s), esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-const S = {o: null, hist: {}, range: 3600, tab: "overview", ev: [], evKind: "", logq: "", pq: "", t: 0, err: "", sel: "", vals: {}, log: [], audit: [], setup: "", created: null, msg: "", busy: false};
+const S = {o: null, hist: {}, range: 3600, tab: "overview", ev: [], evKind: "", logq: "", pq: "", t: 0, err: "", lastFetched: 0, sel: "", vals: {}, log: [], audit: [], setup: "", created: null, msg: "", busy: false};
 const TABS = [["overview", "Overview"], ["network", "Network"], ["messages", "Messages"], ["repeaters", "Repeaters"], ["sensors", "Sensors"], ["control", "Control"], ["clients", "Clients"], ["accounts", "Accounts"], ["traffic", "Traffic"], ["diagnostics", "Diagnostics"], ["broker", "Broker"], ["system", "System"], ["log", "Log"], ["users", "Users"], ["settings", "Settings"]];
 const NAV_GROUP = {overview: "Monitor", control: "Operate", diagnostics: "Server"};
 const bytes = n => n == null ? "—" : n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? (n / 1e3).toFixed(1) + " kB" : Math.round(n) + " B";
@@ -213,11 +227,16 @@ D.area = (series, o = {}) => {
   let g = ""; for (let i = 0; i <= 4; i++) { const v = ym * i / 4, y = Y(v); g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" class="gl"/><text x="${L - 6}" y="${y + 3}" class="ax" text-anchor="end">${f(v)}</text>`; }
   for (let i = 0; i <= 4; i++) { const t = x0 + (x1 - x0) * i / 4; g += `<text x="${X(t)}" y="${H - 7}" class="ax" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${D.hm(t)}</text>`; }
   const defs = series.map((s, i) => `<linearGradient id="${id}${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".42"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient>`).join("");
+  const patterns = ["none", "8 4", "2 4", "10 4 2 4", "5 3 1 3", "14 4"];
   const body = series.map((s, i) => { if (!s.data.length) return ""; const d = s.data.map((p, j) => (j ? "L" : "M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1)).join(" "), last = s.data[s.data.length - 1];
-    return `<path d="${d} L${X(last[0]).toFixed(1)} ${Y(0)} L${X(s.data[0][0]).toFixed(1)} ${Y(0)}Z" fill="url(#${id}${i})"/><path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" class="ln" style="color:${s.color}"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="3.6" fill="${s.color}"/>`; }).join("");
-  const meta = esc(JSON.stringify({x0, x1, L, R, W, f: o.unit || "", s: series.map(s => ({n: s.name, c: s.color, d: s.data}))}));
-  return `<div class="chart" data-m="${meta}"><svg viewBox="0 0 ${W} ${H}"><defs>${defs}</defs>${g}${body}</svg><div class="tip"></div></div>
-    <div class="lgd">${series.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>`;
+    return `<path d="${d} L${X(last[0]).toFixed(1)} ${Y(0)} L${X(s.data[0][0]).toFixed(1)} ${Y(0)}Z" fill="url(#${id}${i})"/><path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-dasharray="${patterns[i % patterns.length]}" class="ln" style="color:${s.color}"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="3.6" fill="${s.color}"/>`; }).join("");
+  const times = [...new Set(pts.map(([t]) => t))].sort((a, b) => a - b);
+  const meta = {x0, x1, L, R, W, times, f: o.unit || "", s: series.map(s => ({n: s.name, d: s.data}))};
+  const samples = id + "-samples", reading = id + "-reading";
+  return `<div class="chart" data-m="${esc(JSON.stringify(meta))}"><svg viewBox="0 0 ${W} ${H}" aria-hidden="true"><defs>${defs}</defs>${g}${body}</svg>
+    <div class="lgd">${series.map((s, i) => `<span><svg class="chart-line" viewBox="0 0 26 12" aria-hidden="true"><line x1="0" y1="6" x2="26" y2="6" stroke="${s.color}" stroke-width="2" stroke-dasharray="${patterns[i % patterns.length]}"/></svg>${esc(s.name)}</span>`).join("")}</div>
+    <div class="chart-inspect"><label for="${samples}">Inspect chart values</label><input id="${samples}" type="range" min="0" max="${times.length - 1}" value="${times.length - 1}" aria-describedby="${reading}" aria-valuetext="${esc(chartReading(meta, times.at(-1), false))}"><output id="${reading}" for="${samples}" aria-live="off">${chartReading(meta, times.at(-1))}</output></div></div>`;
+
 };
 D.bars = (rx, tx, o = {}) => {
   const W = 640, H = o.h || 230, L = 38, R = 12, T = 12, B = 26, map = new Map();
@@ -289,7 +308,7 @@ const HELP = {
   broker: {what: "The MQTT broker: the hub every repeater and app connects through.", steps: ["**Summary** shows how many clients are connected and the broker's health.", "**Broker log** lists recent connections and disconnections, newest first. Use its filter box to search.", "Restarting the broker disconnects every repeater for about a minute, so do it only when needed; the button is on **System**."], why: "If the broker is down, nothing reaches the mesh, so this is the first place to look.", see: "System (restart it), Diagnostics (broker checks), Log (history)."},
   system: {what: "The server this dashboard runs on: its health, services and certificate.", steps: ["**Services** lists the parts that run the dashboard; use the buttons under it to restart one.", "**Certificate** shows when the secure certificate expires. Renew it before the warning turns red.", "**Processor, memory and disk** show whether the server is coping."], why: "If the server runs out of memory or disk, everything becomes slow or stops.", see: "Diagnostics (warnings), Log (what happened)."},
   log: {what: "A record of what happened on the broker, and copies you can save.", steps: ["Type in the filter box to search the log.", "**Downloads** saves the event and audit logs as spreadsheet files.", "The **Audit log** under this tab (and in **Settings**) records everything done from this dashboard."], why: "The log is how you find out what happened when something went wrong.", see: "Clients (who connected), Accounts (who is allowed)."},
-  flow: {what: "Packets moving between repeaters, the broker and the dashboards, right now.", steps: ["Each arrow is a link; the thicker it looks, the more traffic it carries.", "The numbers under each repeater show packets per minute it hears and passes on.", "This is live; to change what is shown, use **Network** and **Traffic**."], why: "You can see at a glance whether packets flow both ways between repeaters.", see: "Network (the map), Traffic (the packets)."},
+  flow: {what: "Repeater telemetry and recent radio activity.", steps: ["Check the repeater status and last radio packet time.", "Radio RX shows packets heard by the repeater. Bridge TX shows packets passed from the broker to its radio.", "On wider screens a moving pulse marks traffic observed in the last 20 seconds. Static lines show the topology. Open **Repeater link details** for the same readings as the phone view."], why: "A repeater can keep reporting while the radio channel is quiet.", see: "Repeaters (all devices), Traffic (individual packets)."},
   events: {what: "The things that happened recently: connections, refusals and warnings.", steps: ["Each line is one event with its time and kind.", "A run of refused logins can mean someone is guessing a password; **Refused logins by address** shows which addresses.", "Download the full list with **Events (CSV)** on the **Log** tab."], why: "It is the first place to look after an unexpected change.", see: "Log (the broker history), Diagnostics (the problems)."},
   journeys: {what: "The route each recent packet took, from sender to receiver.", steps: ["Read each line from left to right: the sender, then each repeater on the way, then the receiver.", "Names come from each repeater's own advert; a short code means its name is not known yet.", "For a table of the same routes with how many repeaters heard each packet, use **Traffic**."], why: "It shows the path a message really took, which helps pick the best place for repeaters.", see: "Traffic (the table), Network (the map)."},
   control: {what: "Manage one repeater: its settings, firmware and console, over the internet.", steps: ["Choose the repeater at the top of the page. Its settings load in a few seconds.", "**Quick actions** sends an advert, reads the version or stats, or restarts it.", "**Neighbours** shows which repeaters it hears; **Firmware** checks for and installs updates.", "**Console** gives the full command line; type a command and press **Run**.", "Changes are saved on the repeater; a red button asks you to confirm first."], why: "You can look after every repeater from one screen without visiting it.", see: "Accounts (approve it first), Repeaters (the list), Diagnostics (if it is down)."},
@@ -352,7 +371,7 @@ function slowFresh(key, htmlKey, boxId) {
 }
 function slowBusy(key, tag = 1) { S.B = S.B || {}; if (S.B[key] === tag) return true; S.B[key] = tag; return false; }
 function slowDone(key, ok) { S.B = S.B || {}; S.T = S.T || {}; S.E = S.E || {}; S.B[key] = 0; S.E[key] = ok ? 0 : 1; S.T[key] = ok ? Date.now() : Date.now() - SLOW_MS + 10000; }      // a failure is tried again in 10 s, not every tick
-async function jget(u) { const r = await fetch(u, {cache: "no-store"}); if (!r.ok) throw new Error(u + " " + r.status); return r.json(); }
+async function jget(u) { const r = await fetch(u, {cache: "no-store", signal: AbortSignal.timeout(12000)}); if (!r.ok) throw new Error(u + " " + r.status); return r.json(); }
 const panel = (title, note, inner, hk = "", cls = "s12") => `<div class="pn ${cls}"><h3>${esc(title)}${hk ? q(hk) : ""} <em>${esc(note || "")}</em></h3>${inner}</div>`;
 const table = (heads, rows, empty = "Nothing yet.") => `<div style="overflow-x:auto"><table><thead><tr>${heads.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="${heads.length}" class="tr">${esc(empty)}</td></tr>`}</tbody></table></div>`;
 const kpi = (ic, label, value, note, nc = "") => `<div class="k"><div class="ic">${ic}</div><div><small>${esc(label)}</small><b>${value}</b><span class="tr ${nc}">${note || ""}</span></div></div>`;
@@ -375,28 +394,70 @@ const level = (v, good, warn, hib = false) => v == null ? "var(--muted)" : (hib 
 
 // Repeaters in a fixed order (name, then id): the server sends them newest-first, which made the order and the colours jump on every refresh.
 const stableDevs = o => o.devices.slice().sort((a, b) => String(a.name || "").toLowerCase().localeCompare(String(b.name || "").toLowerCase()) || String(a.id).localeCompare(String(b.id))).slice(0, 6);
-const perMin = v => !v ? "0" : v >= 1 ? v.toFixed(1) + "/min" : Math.max(1, Math.round(v * 60)) + "/h";
+const perMin = v => v > 0 && v < 1 ? v.toFixed(2) : (v || 0).toFixed(1);
 function flowNet(o) {
   const devs = stableDevs(o), W = 820, H = 92 + Math.max(devs.length, 3) * 56, cy = (H - 22) / 2;
   const edge = (x1, y1, x2, y2, cls, rate, on) => D.flowEdge(x1, y1, x2, y2, cls, rate, on);
-  let e = "", nodes = "";
-  const box = (x, y, w, h, t, sub, cls = "") => `<g class="fn ${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11"/><text x="${x + w / 2}" y="${y + h / 2 - 1}" text-anchor="middle">${esc(t.length > 20 ? t.slice(0, 19) + "…" : t)}</text><text x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle" class="sb">${esc(sub.length > 26 ? sub.slice(0, 25) + "…" : sub)}</text></g>`;
-  devs.forEach((d, i) => {
-    const y = 40 + i * ((H - 102) / Math.max(1, devs.length - 1 || 1)) + (devs.length === 1 ? (H - 102) / 2 : 0), on = d.age < 300, br = d.bridge || {}, hear = d.pm || 0, send = br.passed_pm || 0;
-    const pulse = t => t && o.now - t < 20;                          // animate only for a packet that really arrived in the last 20 s
-    e += edge(190, y - 9, 330, cy - 7, "rx", hear + 1, on && pulse(d.last_pkt)) + edge(330, cy + 7, 190, y + 9, "tx", send + 1, on && pulse(d.last_tx));
-    nodes += box(10, y - 26, 180, 52, d.name || d.id.slice(0, 8), `in ${perMin(hear)} · out ${perMin(send)} · ${d.age < 86400 ? dur(d.age) + " ago" : "quiet"}`, on ? "" : "off");
+  const recent = t => Boolean(t && o.now - t < 20);
+  const up = o.mqtt.state === "connected";
+  const links = devs.map(d => {
+    const stale = d.age >= (d.silent_minutes || o.config?.stale_minutes || 15) * 60;
+    const reporting = up && !stale && d.status !== "offline";
+    const rx = reporting && recent(d.last_pkt), tx = reporting && recent(d.last_tx);
+    const state = !up ? "Broker feed unavailable" : d.status === "offline" ? "Reported offline" :
+      stale ? "Telemetry stale" : rx ? "Receiving packets" : tx ? "Transmitting via bridge" : "Reporting · no recent packets";
+    return {name: d.name || d.id.slice(0, 8), hear: d.pm || 0, send: d.bridge?.passed_pm || 0, rx, tx, reporting, state, last: d.last_pkt};
   });
-  e += `<text x="10" y="${H - 8}" fill="var(--muted)" font-size="11">green: heard by radio, sent to the broker · amber: from the broker, sent by radio (bridge)</text>`;
-  const msgs = o.rates.messages, cl = num(o, "$SYS/broker/clients/connected"), up = o.mqtt.state === "connected";
-  e += edge(450, cy, 520, cy, "net", msgs + 1, devs.some(d => d.last_pkt && o.now - d.last_pkt < 20));
+  let e = "", nodes = "";
+  const box = (x, y, w, h, t, sub, cls = "") => `<g class="fn ${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11"/><text x="${x + w / 2}" y="${y + h / 2 - 1}" text-anchor="middle">${esc(t.length > 24 ? t.slice(0, 23) + "…" : t)}</text><text x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle" class="sb">${esc(sub)}</text></g>`;
+  links.forEach((link, i) => {
+    const y = 40 + (H - 102) * (links.length === 1 ? 0.5 : i / Math.max(1, links.length - 1));
+    e += edge(190, y - 9, 330, cy - 7, "rx", link.hear, link.rx);
+    e += edge(330, cy + 7, 190, y + 9, "tx", link.send, link.tx);
+    nodes += box(10, y - 26, 180, 52, link.name, link.state, link.reporting ? "" : "off");
+  });
+  const msgs = o.rates.messages, cl = num(o, "$SYS/broker/clients/connected");
   const subs = o.clients.filter(c => c.state === "connected" && c.user !== "dash");
-  e += edge(650, cy - 30, 700, cy - 52, "tx", 1, up) + edge(650, cy + 30, 700, cy + 52, "net", subs.length, subs.length > 0);
-  nodes += box(330, cy - 36, 120, 72, "Caddy", o.cert && o.cert.days != null ? "TLS " + Math.round(o.cert.days) + " d left" : "TLS ?", "") +
-    box(520, cy - 44, 130, 88, "Mosquitto", cl + " clients · " + msgs.toFixed(0) + "/min", "hub") +
+  e += edge(450, cy, 520, cy, "net", msgs, links.some(link => link.rx));
+  e += edge(650, cy - 30, 700, cy - 52, "net", msgs, false) + edge(650, cy + 30, 700, cy + 52, "net", msgs, false);
+  nodes += box(330, cy - 36, 120, 72, "Caddy", o.cert?.days != null ? "TLS " + Math.round(o.cert.days) + " d left" : "TLS ?") +
+    box(520, cy - 44, 130, 88, "Mosquitto", up ? cl + " clients" : "Feed unavailable", "hub") +
     box(700, cy - 76, 112, 48, "This dashboard", up ? "monitoring" : "disconnected", up ? "" : "off") +
     box(700, cy + 28, 112, 48, "Other listeners", subs.length + " connected", subs.length ? "" : "off");
-  return `<div class="flow"><svg viewBox="0 0 ${W} ${H}">${e}${nodes}</svg></div>`;
+  const summary = `<p>Broker feed: ${up ? "connected" : "unavailable"} · ${subs.length} other listeners</p>`;
+  const rows = links.length ? `<ul class="flow-rows">${links.map(link => `<li><b>${esc(link.name)}</b><span>${link.state}</span><span>Radio RX ${perMin(link.hear)}/min · Bridge TX ${perMin(link.send)}/min</span><span>Last radio packet: ${clock(link.last)}</span></li>`).join("")}</ul>` : D.empty("No repeater telemetry received yet.");
+  const limit = o.devices.length > devs.length ? `<p>Showing ${devs.length} of ${o.devices.length} repeaters. <button type="button" class="tool" data-t="repeaters">View all repeaters</button></p>` : "";
+  return `<div class="flow flow-desktop"><svg viewBox="0 0 ${W} ${H}" aria-hidden="true">${e}${nodes}</svg><p class="tr">Green pulse: radio RX · Amber pulse: bridge TX · Static lines: link topology</p><details><summary>Repeater link details</summary>${summary}${rows}</details></div><div class="flow-mobile">${summary}${rows}</div>${limit}`;
+}
+
+function overviewChecks(o) {
+  const quiet = o.diagnostics.find(d => d.kind === "quiet_nodes");
+  const checks = o.diagnostics.filter(d => d.level !== "ok" && d.kind !== "quiet_nodes")
+    .sort((a, b) => (a.level === "bad" ? 0 : 1) - (b.level === "bad" ? 0 : 1));
+  const rows = checks.slice(0, 8).map(d => `<div class="check"><b>${dot(d.level)} ${d.level === "bad" ? "Fault" : "Warning"} · ${esc(d.title)}</b><span class="tr">${esc(d.detail)}</span></div>`).join("");
+  return `<div class="overview-checks">${rows || '<p>No other checks need attention.</p>'}
+    ${checks.length > 8 ? '<button type="button" class="tool" data-t="diagnostics">View all checks</button>' : ""}
+    ${quiet ? `<details data-quiet><summary>${esc(quiet.title)} · View quiet nodes</summary><div data-quiet-content></div></details>` : ""}</div>`;
+}
+
+document.addEventListener("toggle", e => {
+  const details = e.target;
+  if (details.matches?.("details[data-quiet]") && details.open) loadQuietNodes(details);
+}, true);
+async function loadQuietNodes(details) {
+  const content = details.querySelector("[data-quiet-content]");
+  if (content.dataset.loaded || content.dataset.loading) return;
+  content.dataset.loading = "1";
+  content.textContent = "Loading quiet nodes…";
+  try {
+    const {nodes} = await jget("/api/quiet-nodes");
+    content.innerHTML = nodes.length ? `<ul class="quiet-nodes">${nodes.map(n => `<li><b>${esc(n.name)}</b><time datetime="${new Date(n.last * 1000).toISOString()}">Last heard ${clock(n.last)}</time></li>`).join("")}</ul>` : "<p>No quiet nodes now.</p>";
+    content.dataset.loaded = "1";
+  } catch {
+    content.textContent = "Quiet nodes could not be loaded. Close and reopen to retry.";
+  } finally {
+    delete content.dataset.loading;
+  }
 }
 
 function vOverview(o) {
@@ -417,15 +478,14 @@ function vOverview(o) {
     D.gauge(cert.days, 0, 90, "Certificate", cert.days != null ? Math.round(cert.days) : "—", "days left", level(cert.days, 30, 14, true)),
     D.gauge(num(o, "$SYS/broker/load/connections/1min"), 0, 60, "Logins / min", num(o, "$SYS/broker/load/connections/1min").toFixed(1), "broker 1 min avg", level(num(o, "$SYS/broker/load/connections/1min"), 5, 15))].join("");
   const top = stableDevs(o), colors = [D.sc(0), D.sc(1), D.sc(2), D.sc(4), D.sc(3), D.sc(6)];
-  const dg = o.diagnostics.filter(d => d.level !== "ok").slice(0, 8), okn = o.diagnostics.filter(d => d.level === "ok").length;
-  const diag = `<div class="conn">${dg.map(d => `<div>${dot(d.level)}<b>${esc(d.title)}</b><span>${esc(d.detail)}</span></div>`).join("") || `<div>${dot("ok")}<b>Everything checked is fine</b><span>${okn} checks</span></div>`}</div>`;
+  const okn = o.diagnostics.filter(d => d.level === "ok").length;
   const evs = o.events.filter(e => e.kind !== "start").slice(0, 8);
   return `<div class="kpis">${kpis}</div><div class="panels">
     ${panel("Packets and messages", "per minute, " + rangeLabel(), D.area([series("pkts_pm", D.sc(0), "Packets heard"), series("unique_pm", D.sc(1), "Distinct packets"), series("msgs_pm", D.sc(2), "Broker messages")], {unit: "/min", w: 700}), "", "s7")}
     ${panel("Clients and repeaters", "online now and before", D.area([series("clients", D.sc(1), "Clients connected"), series("repeaters", D.sc(0), "Repeaters sending")], {unit: "", w: 460, min: 2}), "", "s5")}
     ${panel("Dials", "the server, live", `<div class="dials">${dials}</div>`, "system")}
-    ${panel("Data flow", "who talks to whom, right now", flowNet(o), "flow", "s7")}
-    ${panel("Checks", `${bad} red · ${warn} amber · ${okn} fine`, diag, "diag", "s5")}
+    ${panel("Data flow", "Repeater links and recent packets", flowNet(o), "flow", "s7")}
+    ${panel("Checks", `${bad} faults · ${warn} warnings · ${okn} passed`, overviewChecks(o), "diag", "s5")}
     ${panel("Each repeater", "packets per minute", D.area(top.map((d, i) => series("dev:" + d.id.slice(0, 16), colors[i], d.name || d.id.slice(0, 8))), {unit: "/min", w: 700}), "repeaters", "s7")}
     ${panel("Bandwidth", "bytes per minute through the broker", D.area([series("bytes_rx_1m", D.sc(0), "Received"), series("bytes_tx_1m", D.sc(2), "Sent")], {w: 460, fmt: v => v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? (v / 1e3).toFixed(0) + "k" : Math.round(v)}), "", "s5")}
     ${panel("Latest events", "connections, refusals, warnings", table(["When", "Kind", "Who", "What"], evs.map(e => `<tr><td>${clock(e.t)}</td><td><span class="tag ${e.kind === "auth_fail" || e.kind === "warn" ? "tx" : ""}">${esc(e.kind)}</span></td><td>${esc(e.user || e.client || "")}${e.ip ? ` <span class="tr">${esc(e.ip)}</span>` : ""}</td><td>${esc(e.text)}</td></tr>`)), "events")}
@@ -1341,37 +1401,106 @@ document.addEventListener("click", async e => {
 document.addEventListener("click", e => { if (e.target.closest('[data-act="fit"]') && S.net && S.map) { const p = S.net.nodes.filter(x => x.lat != null); if (p.length) S.map.fitBounds(p.map(x => [x.lat, x.lon]), {padding: [40, 40], maxZoom: 12}); } });
 
 const VIEWS = {users: vUsers, network: vNetwork, messages: vMessages, overview: (o) => pendBanner(o) + vOverview(o), repeaters: vRepeaters, control: vControl, clients: vClients, accounts: vAccounts, settings: vSettings, traffic: vTraffic, sensors: vSensors, diagnostics: vDiag, broker: vBroker, system: vSystem, log: vLog};
+function renderConnection() {
+  const o = S.o, bad = o?.diagnostics.filter(d => d.level === "bad").length || 0;
+  const warn = o?.diagnostics.filter(d => d.level === "warn").length || 0;
+  const connection = S.err ? (S.lastFetched ? "stale" : "unavailable") : S.lastFetched ? "live" : "loading";
+  const message = connection === "stale" ? "Stale readings" : connection === "unavailable" ? "Dashboard unavailable" :
+    connection === "loading" ? "Loading" : bad ? bad + " fault(s)" : warn ? warn + " warning(s)" : "All checks passed";
+  const status = S.err || bad ? "bad" : warn ? "warn" : "ok";
+  const live = $("#live");
+  live.className = "pl " + status;
+  live.innerHTML = `${dot(status)} ${message}${S.lastFetched ? " · last updated " + new Date(S.lastFetched).toLocaleTimeString() : ""}`;
+  if (connection !== S.connection) {
+    if (S.connection || S.err) $("#liveAnnouncement").textContent = connection === "live" ? "Dashboard connection restored" : message;
+    S.connection = connection;
+  }
+  if (!o && S.err) $("#body").innerHTML = D.empty("The dashboard could not load. Use Refresh to retry.");
+}
+function updateOverview(o) {
+  const body = $("#body"), template = document.createElement("template");
+  template.innerHTML = VIEWS.overview(o);
+  const next = template.content;
+  const kpis = body.querySelector(".kpis"), nextKpis = next.querySelector(".kpis");
+  // The optional approval banner precedes the KPI grid.
+  const banner = kpis.previousElementSibling, nextBanner = nextKpis.previousElementSibling;
+  if (banner?.outerHTML !== nextBanner?.outerHTML && !banner?.contains(document.activeElement)) {
+    if (banner) banner.remove();
+    if (nextBanner) kpis.before(nextBanner);
+  }
+  kpis.replaceWith(nextKpis);
+  const panels = [...body.querySelector(".panels").children];
+  [...next.querySelector(".panels").children].forEach((panel, index) => {
+    const old = panels[index];
+    if (old.contains(document.activeElement) || old.querySelector("details[open]") ||
+        (pop && [...old.querySelectorAll("[data-hk]")].some(b => b.dataset.hk === pop.dataset.k))) return;
+    old.replaceWith(panel);
+  });
+}
 function draw() {
   const o = S.o; if (!o) return;
   const active = document.activeElement && document.activeElement.id;
-  const nEnrol = o.enrol && o.enrol.pending ? o.enrol.pending.length : 0;
-  const isAdmin = !o.me || o.me.role === "admin", hideTabs = isAdmin ? [] : ["accounts", "users"]; if (hideTabs.includes(S.tab)) S.tab = "overview";
-  const newMsgs = Math.max(0, (o.msg_last || 0) - (S.msgSeen || 0)); if (S.tab === "messages") S.msgSeen = o.msg_last || 0; else if (S.msgSeen == null) S.msgSeen = o.msg_last || 0;
-  $("#tabs").innerHTML = `<div class="navbrand"><i>&#9678;</i>UMC Net</div>` + TABS.filter(([k]) => !hideTabs.includes(k)).map(([k, l]) => (NAV_GROUP[k] ? `<div class="navlbl">${NAV_GROUP[k]}</div>` : "") + `<button data-t="${k}" class="${S.tab === k ? "on" : ""}">${l}${k === "messages" && newMsgs && S.tab !== "messages" ? ` <span class="tag" style="background:var(--accent);color:var(--accent-ink)">${newMsgs}</span>` : ""}${k === "accounts" && nEnrol ? ` <span class="tag" style="background:var(--ok-bg);color:var(--ok)">${nEnrol}</span>` : ""}</button>`).join("");
+  const nEnrol = o.enrol?.pending?.length || 0;
+  const isAdmin = !o.me || o.me.role === "admin", hideTabs = isAdmin ? [] : ["accounts", "users"];
+  if (hideTabs.includes(S.tab)) S.tab = "overview";
+  const newMsgs = Math.max(0, (o.msg_last || 0) - (S.msgSeen || 0));
+  if (S.tab === "messages" || S.msgSeen == null) S.msgSeen = o.msg_last || 0;
+  const nav = $("#tabs");
+  if (nav.dataset.admin !== String(isAdmin)) {
+    nav.dataset.admin = String(isAdmin);
+    nav.innerHTML = `<div class="navbrand"><i>&#9678;</i>UMC Net</div>` + TABS.filter(([k]) => !hideTabs.includes(k)).map(([k, label]) =>
+      (NAV_GROUP[k] ? `<div class="navlbl">${NAV_GROUP[k]}</div>` : "") +
+      `<button type="button" data-t="${k}">${label} <span class="tag nav-count" hidden></span></button>`).join("");
+  }
+  for (const button of nav.querySelectorAll("button")) {
+    const key = button.dataset.t, current = key === S.tab;
+    button.classList.toggle("on", current);
+    if (current) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
+    const count = key === "messages" && !current ? newMsgs : key === "accounts" ? nEnrol : 0;
+    const badge = button.querySelector(".nav-count");
+    badge.hidden = !count;
+    if (badge.textContent !== String(count)) badge.textContent = count;
+  }
   D.syncTheme();
-  $("#enrolBar").innerHTML = nEnrol ? `<div class="enrolbar"><span style="font-size:20px">🔔</span><div><b>${nEnrol} repeater${nEnrol > 1 ? "s" : ""} asking to join</b><div class="tr">${o.enrol.pending.slice(0, 3).map(p => esc(p.name || "unnamed") + " (" + esc(p.id.slice(0, 8)) + "…)").join(", ")}${nEnrol > 3 ? " and more" : ""}</div></div><span class="sp"></span><button class="tool" data-t="accounts">Review and approve</button></div>` : "";
+  const enrolHtml = nEnrol ? `<div class="enrolbar"><span style="font-size:20px">🔔</span><div><b>${nEnrol} repeater${nEnrol > 1 ? "s" : ""} asking to join</b><div class="tr">${o.enrol.pending.slice(0, 3).map(p => esc(p.name || "unnamed") + " (" + esc(p.id.slice(0, 8)) + "…)").join(", ")}${nEnrol > 3 ? " and more" : ""}</div></div><span class="sp"></span><button class="tool" data-t="accounts">Review and approve</button></div>` : "";
+  if (S.enrolHtml !== enrolHtml) { $("#enrolBar").innerHTML = enrolHtml; S.enrolHtml = enrolHtml; }
   document.title = (o.config && o.config.title || "UMC Net") + " dashboard"; $("#sub").textContent = `${o.host} · broker ${o.sys["$SYS/broker/version"] || ""} · dashboard ${o.version}${o.me ? " · signed in as " + o.me.name + (o.me.role === "admin" ? " (administrator)" : o.me.role === "owner" ? " (controls " + ((o.me.devices || []).length) + " repeater" + ((o.me.devices || []).length === 1 ? "" : "s") + ")" : " (view only)") : ""}`;
-  const bad = o.diagnostics.filter(d => d.level === "bad").length, warn = o.diagnostics.filter(d => d.level === "warn").length;
-  $("#live").className = "pl " + (S.err ? "bad" : bad ? "bad" : warn ? "warn" : "ok"); $("#live").innerHTML = `${dot(S.err ? "bad" : bad ? "bad" : warn ? "warn" : "ok")} ${S.err ? "not answering" : bad ? bad + " problem(s)" : warn ? warn + " to look at" : "all fine"} · ${new Date().toLocaleTimeString()}`;
   if (S.tab === "messages" && S.msgUp && $("#msgFeed")) { msgUpdate(); }
   else if (S.tab === "network" && S.netUp && $("#netmap")) { netUpdate(); }
-  else { $("#body").innerHTML = (VIEWS[S.tab] || vOverview)(o); if (S.tab === "network") netUpdate(); if (S.tab === "messages") { msgLoad(); } }
+  else if (S.tab === "overview" && $("#body").dataset.view === "overview") { updateOverview(o); }
+  else { $("#body").innerHTML = (VIEWS[S.tab] || vOverview)(o); if (S.tab === "network") netUpdate(); if (S.tab === "messages") msgLoad(); }
+  $("#body").dataset.view = S.tab;
   if (active && $("#" + active)) { const el = $("#" + active); el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch {} }
 }
 async function loadHist() {
-  const keys = ["pkts_pm", "unique_pm", "msgs_pm", "clients", "repeaters", "bytes_rx_1m", "bytes_tx_1m", "pub_rx_1m", "pub_tx_1m", "dropped_1m", "cpu", "mem_pct", "disk_pct"].concat((S.o ? S.o.devices.slice(0, 6) : []).map(d => "dev:" + d.id.slice(0, 16)));
+  const keys = ["pkts_pm", "unique_pm", "msgs_pm", "clients", "repeaters", "bytes_rx_1m", "bytes_tx_1m", "pub_rx_1m", "pub_tx_1m", "dropped_1m", "cpu", "mem_pct", "disk_pct"].concat((S.o ? stableDevs(S.o) : []).map(d => "dev:" + d.id.slice(0, 16)));
   try { S.hist = await jget("/api/history?range=" + S.range + "&k=" + keys.join(",")); } catch {}
 }
 const isAdm = o => !(o && o.me) || o.me.role === "admin";
 async function loadEv() { try { S.ev = await jget("/api/events?range=" + (S.evRange || 86400) + (S.evKind ? "&kind=" + S.evKind : "")); } catch {} }
 async function tick(first) {
-  try { S.o = await jget("/api/overview"); S.err = ""; } catch (e) { S.err = e.message; }
-  if (S.tab === "network") { try { S.net = await jget("/api/network?hours=" + S.nf.hours); } catch {} }
-  if (S.tab === "messages") await msgLoad();
-  if (S.tab === "control") ctlAuto();
-  if (first || Date.now() - S.t > 30000) { S.t = Date.now(); await loadHist(); if (S.tab === "diagnostics" || first) await loadEv(); }
-  if (!hold()) draw();
+  if (S.polling) return;
+  S.polling = true;
+  try {
+    try { S.o = await jget("/api/overview"); S.lastFetched = Date.now(); S.err = ""; }
+    catch (e) { S.err = e.message; renderConnection(); return; }
+    renderConnection();
+    if (S.tab === "network") { try { S.net = await jget("/api/network?hours=" + S.nf.hours); } catch {} }
+    if (S.tab === "messages") await msgLoad();
+    if (S.tab === "control") ctlAuto();
+    const deviceKeys = stableDevs(S.o).map(d => d.id).join(",");
+    if (first || Date.now() - S.t > 30000 || deviceKeys !== S.historyDevices) {
+      S.t = Date.now();
+      S.historyDevices = deviceKeys;
+      await loadHist();
+      if (S.tab === "diagnostics" || first) await loadEv();
+    }
+    if (S.tab === "overview" || !hold()) draw();
+  } finally {
+    S.polling = false;
+  }
 }
+
 document.addEventListener("click", async e => {
   const t = e.target.closest("[data-t]"); if (t) { S.tab = t.dataset.t; location.hash = S.tab; S.netUp = false; if (S.tab === "network") { try { S.net = await jget("/api/network"); } catch {} } if (S.tab === "diagnostics") await loadEv(); if (S.tab === "diagnostics" || S.tab === "control") await loadAudit(); draw(); return; }
   const r = e.target.closest("#rng button"); if (r) { S.range = +r.dataset.r; document.querySelectorAll("#rng button").forEach(b => b.classList.toggle("on", b === r)); await loadHist(); draw(); return; }
@@ -1379,13 +1508,37 @@ document.addEventListener("click", async e => {
   if (e.target.closest("#refresh")) { S.t = 0; tick(); }
 });
 document.addEventListener("input", e => { if (e.target.id === "pq") { S.pq = e.target.value; draw(); } else if (e.target.id === "bq") { S.bq = e.target.value; draw(); } else if (e.target.id === "lq") { S.logq = e.target.value; draw(); } });
-document.addEventListener("mousemove", e => {
-  const c = e.target.closest(".chart"), tip = c && c.querySelector(".tip"); document.querySelectorAll(".tip").forEach(t => { if (t !== tip) t.style.display = "none"; }); if (!c) return;
-  const m = JSON.parse(c.dataset.m), svg = c.querySelector("svg"), rc = svg.getBoundingClientRect(), x = (e.clientX - rc.left) / rc.width * m.W, t = m.x0 + (x - m.L) / ((m.W - m.L - m.R) || 1) * (m.x1 - m.x0);
-  if (t < m.x0 - 60 || t > m.x1 + 60) { tip.style.display = "none"; return; }
-  const rows = m.s.map(s => { const p = s.d.reduce((b, q) => Math.abs(q[0] - t) < Math.abs(b[0] - t) ? q : b, s.d[0] || [0, 0]); return `<span style="color:${s.c}">●</span> ${esc(s.n)}: <b>${D.fmt(p[1])}${esc(m.f)}</b>`; }).join("<br>");
-  tip.innerHTML = `${D.hm(t)}<br>${rows}`; tip.style.display = "block"; tip.style.left = Math.min(e.clientX - c.getBoundingClientRect().left + 14, c.clientWidth - 170) + "px"; tip.style.top = "8px";
+function chartReading(meta, time, html = true) {
+  const text = html ? esc : String;
+  return `${text(clock(time))} · ` + meta.s.map(s => {
+    const point = s.d.find(([t]) => t === time);
+    return `${text(s.n)}: ${point ? D.fmt(point[1]) + text(meta.f) : "No sample"}`;
+  }).join(" · ");
+}
+function readChartAt(chart, index) {
+  const meta = JSON.parse(chart.dataset.m), time = meta.times[index], slider = chart.querySelector("input");
+  slider.value = index;
+  const output = chart.querySelector("output");
+  output.innerHTML = chartReading(meta, time);
+  slider.setAttribute("aria-valuetext", output.textContent);
+}
+document.addEventListener("input", e => {
+  const slider = e.target.closest(".chart-inspect input");
+  if (slider) readChartAt(slider.closest(".chart"), +slider.value);
 });
+function inspectChartPointer(e) {
+  const svg = e.target.closest(".chart > svg");
+  if (!svg) return;
+  const chart = svg.closest(".chart"), m = JSON.parse(chart.dataset.m), rect = svg.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width * m.W;
+  const time = m.x0 + (x - m.L) / (m.W - m.L - m.R) * (m.x1 - m.x0);
+  const index = m.times.reduce((best, t, i) => Math.abs(time - t) < Math.abs(time - m.times[best]) ? i : best, 0);
+  if (+chart.querySelector("input").value !== index) readChartAt(chart, index);
+  if (e.type === "click") chart.querySelector("input").focus({preventScroll: true});
+}
+document.addEventListener("mousemove", inspectChartPointer);
+document.addEventListener("click", inspectChartPointer);
+
 S.tab = (location.hash || "#overview").slice(1); if (!VIEWS[S.tab]) S.tab = "overview";
 D.syncTheme();
 tick(true); setInterval(() => tick(), 5000);
