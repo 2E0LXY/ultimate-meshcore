@@ -21,7 +21,7 @@ net.2e0lxy.uk {
 	}
 	@admin_entry path /admin
 	handle @admin_entry {
-		redir /admin/ 308
+		redir * /admin/ 308
 	}
 	@admin path /admin/*
 	handle @admin {

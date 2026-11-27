@@ -227,7 +227,7 @@ class PublicObservatory(unittest.TestCase):
         caddy = open(os.path.join(HERE, "..", "umcnet.caddy"), encoding="utf-8").read()
         self.assertEqual(2, caddy.count("basic_auth {"))
         for required in ("@landing path / /index.html", "rewrite * /public/",
-                         "@public path /public /public/*", "@admin path /admin/*",
+                         "@public path /public /public/*", "@admin path /admin/*", "redir * /admin/ 308",
                          "uri strip_prefix /admin", "@protected path /api /api/* /metrics",
                          "header_up X-UMC-User {http.auth.user.id}", "header_up -X-UMC-User"):
             self.assertIn(required, caddy)
