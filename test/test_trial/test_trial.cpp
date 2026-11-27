@@ -128,6 +128,24 @@ TEST(Snapshot, SaveWhileOnTrialWritesOriginals) {
   EXPECT_EQ(3, p.flood_max);
 }
 
+TEST(Snapshot, ReadBackDetectsAnyFieldMismatch) {
+  // a restore that did not take (one field differs) must be reported, not assumed good
+  FakePrefs p;
+  Snapshot orig;
+  capture(p, orig);
+  FakePrefs bad = p;
+  bad.multi_acks = 0;
+  Snapshot b1;
+  capture(bad, b1);
+  EXPECT_FALSE(same(b1, orig));
+  bad = p; bad.rx_delay_base = 1.0001f;
+  capture(bad, b1);
+  EXPECT_FALSE(same(b1, orig));
+  bad = p; bad.flood_max_advert = 9;
+  capture(bad, b1);
+  EXPECT_FALSE(same(b1, orig));
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
