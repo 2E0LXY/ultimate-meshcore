@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+. Tile packs are large and re-importable, and the secure store is bound to this phone's keystore,
+     so neither goes anywhere. Geofences are location data: kept out of cloud backup (the app has its own
+     Backup screen) but allowed on a direct phone-to-phone transfer. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="maps" />
+        <exclude domain="file" path="umc_geofences.json" />
+        <exclude domain="file" path="umc_geofences.json.bak" />
+        <exclude domain="file" path="umc_geofences.json.corrupt" />
+        <exclude domain="sharedpref" path="umcnet_secure.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="maps" />
+        <exclude domain="sharedpref" path="umcnet_secure.xml" />
+    </device-transfer>
+</data-extraction-rules>

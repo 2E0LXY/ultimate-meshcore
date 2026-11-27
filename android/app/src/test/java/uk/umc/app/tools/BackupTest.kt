@@ -105,4 +105,33 @@ class BackupTest {
         val lines = Backup.eventsCsv(data(events = listOf(e))).trimEnd().split("\r\n")
         assertEquals("2023-11-14T22:13:20Z,Home,'=Evil,enter,53.7,-1.5,13", lines[1])
     }
+
+    @Test fun nonFiniteSnrIsBlankInCsvAndNullInJson() {
+        val m = ChatMessage(1, "c:abcdef", false, "x", "Bob", 1_700_000_100L, hops = 1, snr = Double.NaN, status = "sent")
+        val d = data(radio = listOf(m))
+        assertTrue(Backup.messagesCsv(d).trimEnd().endsWith(",1,,sent"))
+        val j = Backup.json(d)
+        assertFalse(j.contains("NaN")); assertNotNull(MiniJson.parseObject(j))
+    }
+
+    @Test fun restorePlanCountsNewAndOverwriting() {
+        val a = Geofence("a", "A", 51.0, -1.0, 100.0); val b = Geofence("b", "B", 52.0, -1.0, 100.0)
+        val ev = FenceHit("a", "A", KEY, "N", FenceEvent.ENTER, 5L, 51.0, -1.0, 3.0)
+        val r = Restored(listOf(a.copy(name = "A2"), b), listOf(ev, ev.copy(atMs = 6L)), listOf("uk", "new-region"),
+            mapOf("Public" to "uk", "Other" to "yorkshire", "Same" to "uk"))
+        val p = Backup.plan(r, listOf(a), listOf(ev), listOf("uk"), mapOf("Public" to "yorkshire", "Same" to "uk"))
+        assertEquals(1, p.fencesNew); assertEquals(1, p.fencesOverwritten); assertEquals(0, p.fencesSkipped)
+        assertEquals(1, p.eventsNew)
+        assertEquals(1, p.regionsNew); assertEquals(1, p.regionsExisting)
+        assertEquals(1, p.scopesNew); assertEquals(1, p.scopesChanged); assertEquals(1, p.scopesSame)
+        assertFalse(p.nothingToDo)
+        assertTrue(Backup.plan(Restored(emptyList(), emptyList(), listOf("uk"), emptyMap()), emptyList(), emptyList(), listOf("uk"), emptyMap()).nothingToDo)
+    }
+
+    @Test fun restorePlanReportsFencesPastTheCap() {
+        val have = (1..49).map { Geofence("o$it", "O", 51.0, -1.0, 100.0) }
+        val inc = (1..4).map { Geofence("n$it", "N", 51.0, -1.0, 100.0) }
+        val p = Backup.plan(Restored(inc, emptyList(), emptyList(), emptyMap()), have, emptyList(), emptyList(), emptyMap())
+        assertEquals(1, p.fencesNew); assertEquals(3, p.fencesSkipped)
+    }
 }

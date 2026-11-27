@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older (full backup). Same decisions as data_extraction_rules.xml; this format cannot tell
+     cloud backup from device transfer, so geofences are excluded from both. -->
+<full-backup-content>
+    <exclude domain="file" path="maps" />
+    <exclude domain="file" path="umc_geofences.json" />
+    <exclude domain="file" path="umc_geofences.json.bak" />
+    <exclude domain="file" path="umc_geofences.json.corrupt" />
+    <exclude domain="sharedpref" path="umcnet_secure.xml" />
+</full-backup-content>

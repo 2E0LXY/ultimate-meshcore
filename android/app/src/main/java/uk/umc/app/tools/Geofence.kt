@@ -41,6 +41,19 @@ object Fences {
     const val MIN_RADIUS_M = 10.0
     const val MAX_RADIUS_M = 500_000.0
 
+    const val MAX_ID = 128
+
+    /** A decimal number as typed on a phone: accepts a comma as the decimal separator ("53,7"). Null if not a finite number. */
+    fun parseNumber(text: String): Double? {
+        val t = text.trim()
+        val n = when {
+            t.count { it == ',' } == 1 && '.' !in t -> t.replace(',', '.')
+            ',' in t -> return null            // "1,234.5": ambiguous, ask the user to retype
+            else -> t
+        }
+        return n.toDoubleOrNull()?.takeIf { it.isFinite() }
+    }
+
     /** An error in plain words, or null if the fence is usable. */
     fun validate(f: Geofence): String? = when {
         f.name.isBlank() -> "give the fence a name"
@@ -80,7 +93,8 @@ class GeofenceEngine(private val hysteresis: Double = 0.10, private val minInter
                 !st.inside && d < f.radiusM * (1 - hysteresis) -> FenceEvent.ENTER
                 else -> null
             } ?: continue
-            if (st.lastEventMs != Long.MIN_VALUE && nowMs - st.lastEventMs < minIntervalMs) continue
+            // a negative gap (the phone's clock went back) counts as time elapsed, so it cannot silence a fence
+            if (st.lastEventMs != Long.MIN_VALUE && nowMs - st.lastEventMs in 0 until minIntervalMs) continue
             st.inside = event == FenceEvent.ENTER
             st.lastEventMs = nowMs
             hits.add(FenceHit(f.id, f.name, node, nodeName, event, nowMs, lat, lon, d))
@@ -96,9 +110,26 @@ object GeoStore {
     const val MAX_EVENTS = 500
     private const val VERSION = 1L
 
-    /** Fences from a backup replace those with the same id; the rest stay. */
-    fun mergeFences(old: List<Geofence>, incoming: List<Geofence>): List<Geofence> =
-        (old.filter { o -> incoming.none { it.id == o.id } } + incoming).take(Fences.MAX_FENCES)
+    /** The outcome of merging fences: [added] are new, [replaced] had the same id, [skipped] were invalid or did not fit under the cap. */
+    data class FenceMerge(val fences: List<Geofence>, val added: Int, val replaced: Int, val skipped: Int)
+
+    /**
+     * Fences from a backup replace those with the same id; the rest stay. New ones are added while there is room
+     * under [Fences.MAX_FENCES]; the rest are counted as skipped rather than lost silently.
+     */
+    fun mergeFencesReport(old: List<Geofence>, incoming: List<Geofence>): FenceMerge {
+        val inc = incoming.distinctBy { it.id }
+        val oldIds = old.mapTo(HashSet()) { it.id }
+        var added = 0; var replaced = 0; var skipped = 0
+        val usable = inc.filter { (Fences.validate(it) == null && it.id.isNotEmpty() && it.id.length <= Fences.MAX_ID).also { ok -> if (!ok) skipped++ } }
+        val result = old.filter { o -> usable.none { it.id == o.id } }.toMutableList()      // an invalid replacement never deletes the fence it names
+        // replacements first: they take the slot of the fence they replace, so they must never be crowded out by new ones
+        for (f in usable) if (f.id in oldIds) { result.add(f); replaced++ }
+        for (f in usable) if (f.id !in oldIds) { if (result.size < Fences.MAX_FENCES) { result.add(f); added++ } else skipped++ }
+        return FenceMerge(result, added, replaced, skipped)
+    }
+
+    fun mergeFences(old: List<Geofence>, incoming: List<Geofence>): List<Geofence> = mergeFencesReport(old, incoming).fences
 
     fun mergeEvents(old: List<FenceHit>, incoming: List<FenceHit>): List<FenceHit> =
         (old + incoming).distinctBy { listOf(it.fenceId, it.node, it.event, it.atMs) }.sortedBy { it.atMs }.takeLast(MAX_EVENTS)
@@ -117,10 +148,30 @@ object GeoStore {
     fun encode(fences: List<Geofence>, events: List<FenceHit>): String =
         "{\"v\":$VERSION,\"fences\":${fencesJson(fences)},\"events\":${eventsJson(events)}}"
 
-    fun decode(text: String): Pair<List<Geofence>, List<FenceHit>> {
-        val root = MiniJson.parseObject(text) ?: return Pair(emptyList(), emptyList())
+    fun decode(text: String): Pair<List<Geofence>, List<FenceHit>> = decodeOrNull(text) ?: Pair(emptyList(), emptyList())
+
+    /** Null if the text is not a readable store at all (damaged file), as opposed to a readable one with nothing in it. */
+    fun decodeOrNull(text: String): Pair<List<Geofence>, List<FenceHit>>? {
+        val root = MiniJson.parseObject(text) ?: return null
         return Pair(parseFences(root["fences"]), parseEvents(root["events"]))
     }
+
+    /** Which copy [load] used. */
+    enum class Source { MAIN, BACKUP, NONE }
+    data class Loaded(val fences: List<Geofence>, val events: List<FenceHit>, val source: Source)
+
+    /** The main file if it is readable, else the last good copy, else nothing. A damaged file never hides a good backup copy. */
+    fun load(main: String?, backup: String?): Loaded {
+        main?.let { m -> decodeOrNull(m)?.let { return Loaded(it.first, it.second, Source.MAIN) } }
+        backup?.let { b -> decodeOrNull(b)?.let { return Loaded(it.first, it.second, Source.BACKUP) } }
+        return Loaded(emptyList(), emptyList(), Source.NONE)
+    }
+
+    private const val MAX_TEXT = 64
+    private const val MIN_AT_MS = 0L
+    private const val MAX_AT_MS = 32_503_680_000_000L      // year 3000
+
+    private fun finite(n: Any?): Double? = (n as? Number)?.toDouble()?.takeIf { it.isFinite() }
 
     /** Skips anything damaged or invalid, and anything past the limits. */
     fun parseFences(v: Any?): List<Geofence> =
@@ -128,15 +179,23 @@ object GeoStore {
             val o = e as? Map<*, *> ?: return@mapNotNull null
             runCatching {
                 Geofence(o["id"] as String, o["n"] as String, (o["lat"] as Number).toDouble(), (o["lon"] as Number).toDouble(), (o["r"] as Number).toDouble())
-            }.getOrNull()?.takeIf { it.id.isNotEmpty() && Fences.validate(it) == null }
+            }.getOrNull()?.takeIf { it.id.isNotEmpty() && it.id.length <= Fences.MAX_ID && Fences.validate(it) == null }
         }.distinctBy { it.id }.take(Fences.MAX_FENCES)
 
+    /** Skips entries that are damaged, non-finite, out of range or oversized; names are cut to a sane length. */
     fun parseEvents(v: Any?): List<FenceHit> =
         (v as? List<*> ?: emptyList<Any?>()).mapNotNull { e ->
             val o = e as? Map<*, *> ?: return@mapNotNull null
             runCatching {
-                FenceHit(o["f"] as String, o["fn"] as String, o["k"] as String, o["kn"] as String, FenceEvent.valueOf(o["e"] as String),
-                    (o["at"] as Number).toLong(), (o["lat"] as Number).toDouble(), (o["lon"] as Number).toDouble(), (o["d"] as Number).toDouble())
+                val at = finite(o["at"]) ?: return@runCatching null
+                val lat = finite(o["lat"]) ?: return@runCatching null
+                val lon = finite(o["lon"]) ?: return@runCatching null
+                val d = finite(o["d"]) ?: return@runCatching null
+                val fid = o["f"] as String; val node = o["k"] as String
+                if (at < MIN_AT_MS || at > MAX_AT_MS || lat !in -90.0..90.0 || lon !in -180.0..180.0 || d < 0.0 || d > 40_100_000.0) return@runCatching null
+                if (fid.isEmpty() || fid.length > Fences.MAX_ID || node.isEmpty() || node.length > Fences.MAX_ID) return@runCatching null
+                FenceHit(fid, (o["fn"] as String).take(MAX_TEXT), node, (o["kn"] as String).take(MAX_TEXT),
+                    FenceEvent.valueOf(o["e"] as String), at.toLong(), lat, lon, d)
             }.getOrNull()
         }.takeLast(MAX_EVENTS)
 }

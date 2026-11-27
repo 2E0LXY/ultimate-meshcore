@@ -59,6 +59,7 @@ progress{width:100%;height:10px}
     <button class="btn sec" id="cp">Copy private key</button>
     <button class="btn sec" id="cpc">Copy as console command</button>
     <button class="btn" id="dl">Download as file</button>
+    <button class="btn sec" id="clr">Clear result</button>
   </div>
   <div class="help" id="chk"></div>
   <div class="help">To use it: on the node's web page open Identity, then Private key, paste it and reboot. Or in the console run <code>set prv.key &lt;key&gt;</code>, then reboot. Check the new public key afterwards.</div>
@@ -69,7 +70,7 @@ progress{width:100%;height:10px}
 <script type="module">
 import { checkPrefix, validatePrv, pubFromPrv, fromHex, toHex } from './keygen-core.js';
 const $ = (i) => document.getElementById(i);
-let workers = [], t0 = 0, tried = 0, timer = 0, result = null;
+let workers = [], t0 = 0, tried = 0, timer = 0, result = null, running = false, runId = 0, runPrefix = '';
 const fmt = (n) => n >= 1e9 ? (n / 1e9).toFixed(2) + 'G' : n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(Math.round(n));
 const dur = (s) => !isFinite(s) ? '-' : s < 1 ? '<1 s' : s < 90 ? Math.round(s) + ' s' : s < 5400 ? Math.round(s / 60) + ' min' : s < 172800 ? (s / 3600).toFixed(1) + ' h' : (s / 86400).toFixed(1) + ' days';
 const cleanPrefix = () => $('prefix').value.trim().toLowerCase();
@@ -82,6 +83,7 @@ $('prefix').addEventListener('input', () => {
 });
 
 function finish(msg, cls) {
+  running = false; runId++;      // late messages from workers being stopped are ignored
   workers.forEach((w) => { try { w.postMessage({ type: 'stop' }); } catch (e) {} setTimeout(() => w.terminate(), 300); });
   workers = []; clearInterval(timer);
   $('go').disabled = false; $('stop').disabled = true; $('prefix').disabled = false;
@@ -89,7 +91,7 @@ function finish(msg, cls) {
 }
 
 function show(r) {
-  const prv = r.privKey.toLowerCase(), pub = r.pubKey.toLowerCase(), p = cleanPrefix();
+  const prv = r.privKey.toLowerCase(), pub = r.pubKey.toLowerCase(), p = runPrefix;
   // Re-derive on the main thread and re-check everything before showing it.
   const again = toHex(pubFromPrv(fromHex(prv))), bad = validatePrv(prv);
   if (again !== pub || !pub.startsWith(p) || bad) { finish('Internal check failed: ' + (bad || 'public key mismatch') + '. Discarded; please retry.', 'err'); return; }
@@ -105,7 +107,7 @@ $('go').onclick = () => {
   if (e) { $('msg').textContent = e; $('msg').className = 'help err'; return; }
   if (typeof Worker === 'undefined' || typeof BigInt === 'undefined') { $('msg').textContent = 'This browser lacks Web Workers or BigInt; use a current Chrome, Edge, Firefox or Safari.'; $('msg').className = 'help err'; return; }
   if (p.length > 5 && !confirm(`A ${p.length}-character prefix can take hours to days. Continue?`)) return;
-  $('res').hidden = true; result = null; tried = 0; t0 = performance.now();
+  clearResult(); tried = 0; t0 = performance.now(); runPrefix = p; running = true; const myRun = ++runId;
   const n = Math.max(1, navigator.hardwareConcurrency || 4), expected = Math.pow(16, p.length);
   $('run').hidden = false; $('nw').textContent = n; $('exp').textContent = fmt(expected);
   $('go').disabled = true; $('stop').disabled = false; $('prefix').disabled = true; $('msg').textContent = 'Running...'; $('msg').className = 'help';
@@ -113,12 +115,13 @@ $('go').onclick = () => {
     for (let i = 0; i < n; i++) {
       const w = new Worker('keygen-worker.js', { type: 'module' });
       w.onmessage = (ev) => {
+        if (!running || myRun !== runId) return;      // stopped, finished or superseded: ignore stragglers
         const d = ev.data;
         if (d.type === 'progress') tried += d.attempts;
         else if (d.type === 'match') { tried += d.attempts; show(d); }
         else if (d.type === 'error') finish('Worker error: ' + d.message, 'err');
       };
-      w.onerror = (ev) => finish('Worker failed to start (' + (ev.message || 'module workers unsupported, or page opened from file://') + '). Serve this page over http(s).', 'err');
+      w.onerror = (ev) => running && myRun === runId && finish('Worker failed to start (' + (ev.message || 'module workers unsupported, or page opened from file://') + '). Serve this page over http(s).', 'err');
       w.postMessage({ type: 'start', prefix: p, progressInterval: 250 });
       workers.push(w);
     }
@@ -131,11 +134,18 @@ $('go').onclick = () => {
   }, 500);
 };
 $('stop').onclick = () => finish('Stopped.');
+function clearResult() {
+  result = null; $('prv').value = ''; $('pub').textContent = ''; $('chk').textContent = ''; $('res').hidden = true;
+}
+$('clr').onclick = () => { clearResult(); $('msg').textContent = 'Result cleared.'; $('msg').className = 'help'; };
+// Do not leave a private key in a page that goes into the back/forward cache or a restored tab.
+addEventListener('pagehide', () => { if (running) finish(''); clearResult(); });
 const flash = (id, t) => { const b = $(id), o = b.textContent; b.textContent = t; setTimeout(() => b.textContent = o, 1500); };
 const copy = async (text, id) => { try { await navigator.clipboard.writeText(text); flash(id, 'Copied'); } catch (e) { $('prv').select(); flash(id, 'Press Ctrl+C'); } };
-$('cp').onclick = () => copy(result.prv, 'cp');
-$('cpc').onclick = () => copy('set prv.key ' + result.prv, 'cpc');
+$('cp').onclick = () => result && copy(result.prv, 'cp');
+$('cpc').onclick = () => result && copy('set prv.key ' + result.prv, 'cpc');
 $('dl').onclick = () => {
+  if (!result) return;
   const a = document.createElement('a'), u = URL.createObjectURL(new Blob([result.prv + '\n'], { type: 'text/plain' }));
   a.href = u; a.download = `meshcore-${result.pub.slice(0, 8)}-prv.key.txt`; a.click(); setTimeout(() => URL.revokeObjectURL(u), 2000);
 };

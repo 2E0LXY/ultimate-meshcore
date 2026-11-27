@@ -57,13 +57,37 @@ def split_env(env):
     return name, "repeater"
 
 
+def check_local_refs(site):
+    """Fail the build if a page or module refers to a local file that was not published."""
+    missing = []
+    html_ref = re.compile(r"""(?:href|src)=["']([^"'#?:]+)["']""")
+    js_ref = re.compile(r"""(?:from\s+|import\s*\(\s*|new\s+Worker\(\s*)["'](\.{0,2}/?[^"':]+\.m?js)["']""")
+    for name in sorted(os.listdir(site)):
+        if not name.endswith((".html", ".js", ".mjs")):
+            continue
+        with open(os.path.join(site, name), encoding="utf-8") as f:
+            text = f.read()
+        for ref in (html_ref if name.endswith(".html") else js_ref).findall(text) + (js_ref.findall(text) if name.endswith(".html") else []):
+            ref = ref.strip()
+            if ref.startswith(("http", "//", "data:")) or ref in ("", "./", "."):
+                continue
+            if not os.path.exists(os.path.join(site, ref)):
+                missing.append(f"{name} -> {ref}")
+    if missing:
+        raise SystemExit("flasher site is missing files that pages refer to:\n  " + "\n  ".join(missing))
+
+
 def main(artifacts, site):
     version = umc_version()
     commit = os.environ.get("GITHUB_SHA") or git("rev-parse", "HEAD")
     repo = os.environ.get("GITHUB_SERVER_URL", "https://github.com") + "/" + os.environ.get("GITHUB_REPOSITORY", "")
     os.makedirs(site, exist_ok=True)
-    for name in ("index.html", "provision.mjs", "regions-gb.json", "maps.html"):
-        shutil.copy(os.path.join(ROOT, "flasher", name), os.path.join(site, name))
+    # Every file in flasher/ is published, so a new page or script can never be forgotten here.
+    fdir = os.path.join(ROOT, "flasher")
+    for name in sorted(os.listdir(fdir)):
+        if os.path.isfile(os.path.join(fdir, name)):
+            shutil.copy(os.path.join(fdir, name), os.path.join(site, name))
+    check_local_refs(site)
 
     builds = []
     for env in sorted(os.listdir(artifacts)):

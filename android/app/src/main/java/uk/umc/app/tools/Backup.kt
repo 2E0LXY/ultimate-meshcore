@@ -26,6 +26,10 @@ data class Restored(val fences: List<Geofence>, val events: List<FenceHit>, val 
  * only (never a contact's raw record or path, a channel key, the UMC Net login, its identity seed,
  * a broker password or a radio control key), and [FORBIDDEN_WORDS] lets tests prove nothing like that slipped in.
  *
+ * Caveat: a hashtag channel's key is derived from its name, so its name (in message exports, in the channel
+ * scopes of a backup, in the conversation column) is effectively the key. Treat an export that names hashtag
+ * channels as sensitive as the channels themselves. Public and private channels are not affected.
+ *
  * Restore covers geofences, their history, regions and channel region scopes. Contacts live on the radio
  * and message history is not something to inject into the live session, so those are export-only.
  */
@@ -99,6 +103,28 @@ object Backup {
     }
 
     // ---------------------------------------------------------------- restore
+
+    /** What applying a restore would do, for the confirmation dialog. Nothing is changed by computing it. */
+    data class RestorePlan(
+        val fencesNew: Int, val fencesOverwritten: Int, val fencesSkipped: Int,
+        val eventsNew: Int,
+        val regionsNew: Int, val regionsExisting: Int,
+        val scopesNew: Int, val scopesChanged: Int, val scopesSame: Int,
+    ) {
+        val nothingToDo get() = fencesNew + fencesOverwritten + eventsNew + regionsNew + scopesNew + scopesChanged == 0
+    }
+
+    fun plan(r: Restored, fences: List<Geofence>, events: List<FenceHit>, regions: List<String>, scopes: Map<String, String>): RestorePlan {
+        val m = GeoStore.mergeFencesReport(fences, r.fences)
+        fun key(h: FenceHit) = listOf(h.fenceId, h.node, h.event, h.atMs)
+        val have = events.mapTo(HashSet()) { key(it) }
+        val evNew = r.events.distinctBy { key(it) }.count { key(it) !in have }
+        val regNew = r.regions.count { it !in regions }
+        val scNew = r.scopes.count { (k, _) -> k !in scopes }
+        val scChanged = r.scopes.count { (k, v) -> k in scopes && scopes[k] != v }
+        return RestorePlan(m.added, m.replaced, m.skipped, evNew, regNew, r.regions.size - regNew,
+            scNew, scChanged, r.scopes.size - scNew - scChanged)
+    }
 
     fun validRegion(name: String) =
         name.isNotEmpty() && name.length <= 29 && name.all { it in 'a'..'z' || it in '0'..'9' || it == '-' }

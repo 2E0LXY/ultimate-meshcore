@@ -10,7 +10,10 @@ object MiniJson {
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun parseObject(text: String): Map<String, Any?>? = try { parse(text) as? Map<String, Any?> } catch (e: Exception) { null }
+    fun parseObject(text: String): Map<String, Any?>? = try { parse(text) as? Map<String, Any?> } catch (e: Exception) { null } catch (e: StackOverflowError) { null }
+
+    /** How deeply arrays and objects may nest. Real data here is 3 or 4 levels; this stops a hostile file blowing the stack. */
+    const val MAX_DEPTH = 32
 
     fun quote(s: String): String {
         val sb = StringBuilder("\"")
@@ -25,30 +28,37 @@ object MiniJson {
 
     /** Compact object of string keys to String / Number / Boolean / null values, in the order given. */
     fun obj(vararg pairs: Pair<String, Any?>): String = pairs.joinToString(",", "{", "}") { (k, v) ->
-        quote(k) + ":" + when (v) { null -> "null"; is String -> quote(v); is Number, is Boolean -> v.toString(); else -> quote(v.toString()) }
+        quote(k) + ":" + when (v) { null -> "null"; is String -> quote(v); is Boolean -> v.toString()
+            is Number -> if (v.toDouble().isFinite()) v.toString() else "null"       // NaN and Infinity are not valid JSON
+            else -> quote(v.toString()) }
     }
 
     private class Parser(val s: String) {
         var i = 0
+        var depth = 0
+        fun enter() { if (++depth > MAX_DEPTH) throw IllegalArgumentException("nested too deeply (more than $MAX_DEPTH levels)") }
         fun ws() { while (i < s.length && s[i].isWhitespace()) i++ }
         fun value(): Any? {
             ws(); if (i >= s.length) throw IllegalArgumentException("unexpected end")
             return when (val c = s[i]) {
-                '{' -> { i++; val m = LinkedHashMap<String, Any?>(); ws()
-                    if (s[i] == '}') { i++; return m }
+                '{' -> { enter(); i++; val m = LinkedHashMap<String, Any?>(); ws()
+                    if (i < s.length && s[i] == '}') { i++; depth--; return m }
                     while (true) { ws(); val k = str(); ws(); expect(':'); m[k] = value(); ws()
-                        if (s[i] == ',') { i++; continue }; expect('}'); return m } ; @Suppress("UNREACHABLE_CODE") m }
-                '[' -> { i++; val l = ArrayList<Any?>(); ws()
-                    if (s[i] == ']') { i++; return l }
-                    while (true) { l.add(value()); ws(); if (s[i] == ',') { i++; continue }; expect(']'); return l }; @Suppress("UNREACHABLE_CODE") l }
+                        if (i < s.length && s[i] == ',') { i++; continue }; expect('}'); depth--; return m } ; @Suppress("UNREACHABLE_CODE") m }
+                '[' -> { enter(); i++; val l = ArrayList<Any?>(); ws()
+                    if (i < s.length && s[i] == ']') { i++; depth--; return l }
+                    while (true) { l.add(value()); ws(); if (i < s.length && s[i] == ',') { i++; continue }; expect(']'); depth--; return l }; @Suppress("UNREACHABLE_CODE") l }
                 '"' -> str()
                 't' -> lit("true", true); 'f' -> lit("false", false); 'n' -> lit("null", null)
+                // tolerated on read only: an older build could write these bare tokens, and one bad number must not lose the file
+                'I' -> lit("Infinity", Double.POSITIVE_INFINITY); 'N' -> lit("NaN", Double.NaN)
                 else -> if (c == '-' || c.isDigit()) num() else throw IllegalArgumentException("bad character at $i")
             }
         }
         fun expect(c: Char) { if (i >= s.length || s[i] != c) throw IllegalArgumentException("expected $c at $i"); i++ }
         fun lit(w: String, v: Any?): Any? { if (!s.startsWith(w, i)) throw IllegalArgumentException("bad literal at $i"); i += w.length; return v }
         fun num(): Any {
+            if (s.startsWith("-Infinity", i)) { i += 9; return Double.NEGATIVE_INFINITY }
             val st = i; i++
             while (i < s.length && (s[i].isDigit() || s[i] in ".eE+-")) i++
             val t = s.substring(st, i)

@@ -5,9 +5,18 @@ import android.net.Uri
 
 /** Reads and writes the file the user picked through the system file picker (no storage permission needed). */
 object Saf {
-    fun write(context: Context, uri: Uri, text: String): Result<Unit> = runCatching {
+    /**
+     * Writes [text] in one go. The bytes are built in memory first, so encoding cannot fail halfway; the file is
+     * opened with truncation ("wt", as some providers do not truncate with plain "w") and written once.
+     * If the write itself fails the destination may be left empty or incomplete, and the message says so.
+     */
+    fun write(context: Context, uri: Uri, text: String): Result<Unit> = try {
+        val bytes = text.toByteArray(Charsets.UTF_8)
         val out = context.contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("could not open the file")
-        out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+        out.use { it.write(bytes); it.flush() }
+        Result.success(Unit)
+    } catch (e: Throwable) {
+        Result.failure(java.io.IOException("${e.message ?: "write failed"} (the file you chose may be empty or incomplete)", e))
     }
 
     /** At most [maxBytes] of text; a bigger file is an error rather than a memory problem. */

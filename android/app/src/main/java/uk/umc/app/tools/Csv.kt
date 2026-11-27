@@ -3,7 +3,10 @@ package uk.umc.app.tools
 /**
  * CSV for spreadsheets (RFC 4180, CRLF line ends). Text cells that a spreadsheet could read as a
  * formula (first character = + - @, tab or CR) get a leading apostrophe so they stay text.
- * Numbers are written as they are, so a negative longitude is still a number.
+ * Numbers are written as they are, so a negative longitude is still a number; NaN and Infinity become blank cells.
+ *
+ * The apostrophe is literal: when the file is imported as CSV (or read by a script) a guarded cell keeps its
+ * leading apostrophe. Excel and Sheets hide it only in some import paths. Strip it if you load the file programmatically.
  */
 object Csv {
     const val BOM = "﻿"      // so Excel reads the file as UTF-8
@@ -13,6 +16,8 @@ object Csv {
     /** One cell. Null is empty; Number and Boolean are written raw; anything else is text. */
     fun cell(v: Any?): String = when (v) {
         null -> ""
+        is Double -> if (v.isFinite()) v.toString() else ""        // NaN and Infinity mean "no value"
+        is Float -> if (v.isFinite()) v.toString() else ""
         is Number, is Boolean -> v.toString()
         else -> text(v.toString())
     }

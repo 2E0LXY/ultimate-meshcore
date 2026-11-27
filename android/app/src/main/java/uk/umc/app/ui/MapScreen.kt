@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -44,27 +46,32 @@ fun MapScreen() {
     val self by s.self.collectAsState()
     val pack by OfflineMaps.pack.collectAsState()
     var dialog by remember { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
+    val version by OfflineMaps.version.collectAsState()
+    val progress by OfflineMaps.importing.collectAsState()
+    val busy = progress != null
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            busy = true
+        if (uri != null && OfflineMaps.importing.value == null) {
+            // the dialog stays open and the copy shows in it (and on the map if it is closed)
             uk.umc.app.AppState.scope.launch(Dispatchers.IO) {
                 val err = OfflineMaps.importPack(context.applicationContext, uri)
-                busy = false
                 uk.umc.app.AppState.say(err?.let { "Tile pack not used: $it" } ?: "Offline map ready")
             }
         }
     }
 
     Box(Modifier.fillMaxSize()) {
-        key(pack) { AndroidView(
+        key(pack, version) { AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 Configuration.getInstance().load(ctx, PreferenceManager.getDefaultSharedPreferences(ctx))
                 Configuration.getInstance().userAgentValue = "UltimateMeshCoreApp"
                 MapView(ctx).apply {
                     val file = OfflineMaps.file(ctx)
-                    if (file == null || !OfflineMaps.useOn(this, file)) setTileSource(TileSourceFactory.MAPNIK)
+                    if (file == null) setTileSource(TileSourceFactory.MAPNIK)
+                    else if (!OfflineMaps.useOn(this, file)) {
+                        setTileSource(TileSourceFactory.MAPNIK)
+                        uk.umc.app.AppState.say("Could not read the tile pack, showing the online map instead. Choose a different pack or tap Use online map.")
+                    }
                     setMultiTouchControls(true)
                     controller.setZoom(6.0)
                     controller.setCenter(GeoPoint(54.0, -2.0))   // until a node with a location is known
@@ -103,6 +110,7 @@ fun MapScreen() {
                 map.invalidate()
             },
         ) }
+        progress?.let { p -> ImportProgress(p, Modifier.align(Alignment.BottomCenter).padding(12.dp)) }
         ShButton(
             onClick = { dialog = true }, variant = ShVariant.Secondary,
             modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
@@ -121,16 +129,31 @@ fun MapScreen() {
                             "(.zip, .sqlite, .mbtiles or .gemf, up to 2 GB) that you made or downloaded. The app does not bulk download tiles: " +
                             "openstreetmap.org's tile servers do not allow it.",
                     )
-                    if (busy) Text("Copying the pack...")
+                    progress?.let { ImportProgress(it, Modifier.padding(top = 8.dp)) }
                 }
             },
             confirmButton = {
-                ShButton(enabled = !busy, onClick = { pick.launch(arrayOf("*/*")); dialog = false }) { Text("Choose pack") }
+                ShButton(enabled = !busy, onClick = { pick.launch(arrayOf("*/*")) }) { Text("Choose pack") }
             },
             dismissButton = {
-                if (pack != null) ShButton(variant = ShVariant.Outline, onClick = { OfflineMaps.remove(context.applicationContext); dialog = false }) { Text("Use online map") }
+                if (pack != null) ShButton(variant = ShVariant.Outline, enabled = !busy, onClick = {
+                    if (!OfflineMaps.remove(context.applicationContext)) uk.umc.app.AppState.say("A tile pack is being copied: wait for it to finish")
+                    dialog = false
+                }) { Text("Use online map") }
                 else ShButton(variant = ShVariant.Ghost, onClick = { dialog = false }) { Text("Close") }
             },
         )
+    }
+}
+
+@Composable
+private fun ImportProgress(p: OfflineMaps.Progress, modifier: Modifier = Modifier) {
+    GlassCard(modifier.fillMaxWidth()) {
+        Column {
+            val mb = p.copied / 1_048_576
+            Text(if (p.total > 0) "Copying tile pack: $mb of ${p.total / 1_048_576} MB" else "Copying tile pack: $mb MB")
+            if (p.total > 0) LinearProgressIndicator(progress = { (p.copied.toFloat() / p.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            else LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+        }
     }
 }

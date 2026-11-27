@@ -17,7 +17,12 @@ import uk.umc.app.net.UmcNet
 import uk.umc.app.tools.Backup
 import uk.umc.app.tools.ExportData
 import uk.umc.app.tools.GeoAlerts
+import uk.umc.app.tools.Restored
 import uk.umc.app.tools.Saf
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 
 /** Export contacts and messages to CSV, back the app's own settings up to JSON, and restore them. Files go where the user picks. */
 @Composable
@@ -51,17 +56,47 @@ fun BackupScreen() {
     val messagesOut = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { save(it, "Messages", Backup::messagesCsv) }
     val eventsOut = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { save(it, "Geofence events", Backup::eventsCsv) }
     val backupOut = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { save(it, "Backup", Backup::json) }
+    // a backup that has been read and checked, waiting for the user to confirm what it would change
+    var pending by remember { mutableStateOf<Restored?>(null) }
+    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val backupIn = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) AppState.scope.launch(Dispatchers.IO) {
             Saf.read(context, uri, Backup.MAX_RESTORE_BYTES).mapCatching { Backup.parse(it).getOrThrow() }
-                .onSuccess { r ->
-                    GeoAlerts.restore(r)
-                    r.regions.forEach { AppState.addRegion(it) }
-                    r.scopes.forEach { (ch, region) -> AppState.setChannelScope(ch, region) }
-                    AppState.say("Restored ${r.fences.size} geofences, ${r.regions.size} regions, ${r.scopes.size} channel scopes")
-                }
+                .onSuccess { r -> pending = r }
                 .onFailure { AppState.say("Could not restore: ${it.message}") }
         }
+    }
+
+    pending?.let { r ->
+        val plan = Backup.plan(r, GeoAlerts.fences.value, GeoAlerts.events.value, AppState.regions.value, AppState.scopes.value)
+        AlertDialog(
+            onDismissRequest = { pending = null },
+            title = { Text("Restore this backup?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Geofences: ${plan.fencesNew} new, ${plan.fencesOverwritten} replacing a fence with the same id" +
+                        (if (plan.fencesSkipped > 0) ", ${plan.fencesSkipped} left out (limit of 50 or invalid)" else ""))
+                    Text("Crossing history: ${plan.eventsNew} new entries")
+                    Text("Regions: ${plan.regionsNew} new, ${plan.regionsExisting} already here")
+                    Text("Channel scopes: ${plan.scopesNew} new, ${plan.scopesChanged} changing an existing scope, ${plan.scopesSame} unchanged")
+                    if (plan.nothingToDo) Text("Nothing in this file would change anything.")
+                    else Text("Nothing is deleted. Fences and scopes with the same id or channel are overwritten.")
+                }
+            },
+            confirmButton = {
+                ShButton(enabled = !plan.nothingToDo, onClick = {
+                    pending = null
+                    val m = GeoAlerts.restore(r)
+                    r.regions.forEach { AppState.addRegion(it) }
+                    r.scopes.forEach { (ch, region) -> AppState.setChannelScope(ch, region) }
+                    AppState.say("Restored: geofences ${m.added} added, ${m.replaced} replaced, ${m.skipped} left out; ${r.regions.size} regions; ${r.scopes.size} channel scopes")
+                    if (m.added + m.replaced > 0 && Build.VERSION.SDK_INT >= 33 &&
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    ) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }) { Text("Restore") }
+            },
+            dismissButton = { ShButton(variant = ShVariant.Ghost, onClick = { pending = null }) { Text("Cancel") } },
+        )
     }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -71,7 +106,9 @@ fun BackupScreen() {
                     Text("Export to CSV", style = MaterialTheme.typography.titleMedium)
                     Text(
                         "Opens a spreadsheet-ready file. You choose where it is saved; the app needs no storage permission. " +
-                            "Cells that start with = + - or @ get a leading apostrophe so a spreadsheet cannot run them as formulas.",
+                            "Cells that start with = + - or @ get a leading apostrophe so a spreadsheet cannot run them as formulas; " +
+                            "that apostrophe is real text, so it stays if you import the file as CSV into another tool. " +
+                            "Hashtag channel names in an export are effectively that channel's key: keep exports private if you use hashtag channels.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
                     )
                     ShButton(onClick = { contactsOut.launch("umc-contacts-$today.csv") }) { Text("Contacts and nodes") }

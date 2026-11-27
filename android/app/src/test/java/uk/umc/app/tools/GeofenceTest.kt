@@ -154,4 +154,88 @@ class GeofenceTest {
         val ev = GeoStore.mergeEvents((1..3).map { hit(it) }, (2..5).map { hit(it) })
         assertEquals(listOf(1L, 2L, 3L, 4L, 5L), ev.map { it.atMs })
     }
+
+    // ---- review fixes
+
+    private fun evJson(at: String = "1700000000000", lat: String = "53.7", lon: String = "-1.5", d: String = "12.5", f: String = "f1", k: String = "k1", kn: String = "N") =
+        "{\"f\":\"$f\",\"fn\":\"Home\",\"k\":\"$k\",\"kn\":\"$kn\",\"e\":\"ENTER\",\"at\":$at,\"lat\":$lat,\"lon\":$lon,\"d\":$d}"
+    private fun storeWith(vararg ev: String) = "{\"v\":1,\"fences\":[{\"id\":\"a\",\"n\":\"A\",\"lat\":51.0,\"lon\":-1.0,\"r\":100.0}],\"events\":[${ev.joinToString(",")}]}"
+
+    @Test fun nonFiniteEventsAreDroppedNotFatal() {
+        val text = storeWith(evJson(), evJson(lat = "1e999"), evJson(d = "1e999"), evJson(at = "1e999"), evJson(lon = "-1e999"), evJson(at = "-5"), evJson(lat = "91"), evJson(d = "-1"))
+        val (f, ev) = GeoStore.decode(text)
+        assertEquals(1, f.size); assertEquals(1, ev.size)
+    }
+
+    @Test fun bareInfinityTokensFromAnOlderBuildStillLoad() {
+        val text = storeWith(evJson(), evJson(d = "Infinity"), evJson(lat = "NaN"), evJson(lon = "-Infinity"))
+        val (f, ev) = GeoStore.decode(text)
+        assertEquals(1, f.size); assertEquals(1, ev.size)
+    }
+
+    @Test fun nonFiniteNeverWrittenAsInvalidJson() {
+        val bad = FenceHit("f1", "Home", "k1", "N", FenceEvent.ENTER, 5L, 53.7, -1.5, Double.POSITIVE_INFINITY)
+        val text = GeoStore.encode(listOf(fence), listOf(bad, hit(2)))
+        assertFalse(text.contains("Infinity") || text.contains("NaN"))
+        assertNotNull(uk.umc.app.net.MiniJson.parseObject(text))
+        val (f, ev) = GeoStore.decode(text)
+        assertEquals(listOf(fence), f); assertEquals(1, ev.size)       // the bad event is dropped, the fences survive
+    }
+
+    @Test fun eventTextIsCapped() {
+        val ev = GeoStore.decode(storeWith(evJson(kn = "n".repeat(500)), evJson(k = "k".repeat(500)), evJson(f = "")))
+        assertEquals(1, ev.second.size)
+        assertEquals(64, ev.second[0].nodeName.length)
+    }
+
+    @Test fun damagedMainFileFallsBackToLastGoodCopy() {
+        val good = GeoStore.encode(listOf(fence), listOf(hit(1)))
+        val l1 = GeoStore.load("{\"v\":1,\"fences\":[{\"id\":", good)
+        assertEquals(GeoStore.Source.BACKUP, l1.source); assertEquals(listOf(fence), l1.fences)
+        assertEquals(GeoStore.Source.MAIN, GeoStore.load(good, "junk").source)
+        assertEquals(GeoStore.Source.NONE, GeoStore.load("junk", "junk2").source)
+        assertEquals(GeoStore.Source.NONE, GeoStore.load(null, null).source)
+        // a readable file with a bad entry keeps its good fences
+        val l2 = GeoStore.load("{\"fences\":[{\"id\":\"a\",\"n\":\"A\",\"lat\":51.0,\"lon\":-1.0,\"r\":100.0},{\"id\":5}]}", good)
+        assertEquals(GeoStore.Source.MAIN, l2.source); assertEquals(1, l2.fences.size)
+    }
+
+    @Test fun mergeReportsKeptAndSkipped() {
+        val old = (1..45).map { Geofence("o$it", "O$it", 51.0, -1.0, 100.0) }
+        val inc = (1..10).map { Geofence("n$it", "N$it", 52.0, -1.0, 100.0) } + old[0].copy(name = "changed")
+        val m = GeoStore.mergeFencesReport(old, inc)
+        assertEquals(5, m.added); assertEquals(1, m.replaced); assertEquals(5, m.skipped)
+        assertEquals(Fences.MAX_FENCES, m.fences.size)
+        assertEquals("changed", m.fences.first { it.id == "o1" }.name)
+        assertEquals("n5", m.fences.last().id)
+    }
+
+    @Test fun mergeSkipsInvalidAndDuplicateIncoming() {
+        val m = GeoStore.mergeFencesReport(emptyList(), listOf(fence, fence, fence.copy(id = "x", radiusM = Double.NaN), fence.copy(id = "i".repeat(200))))
+        assertEquals(1, m.added); assertEquals(2, m.skipped); assertEquals(0, m.replaced)
+    }
+
+    @Test fun clockGoingBackwardsDoesNotSilenceAFence() {
+        val e = eng()
+        e.at(100.0, 1_000_000)
+        assertEquals(FenceEvent.EXIT, e.at(1500.0, 1_100_000).single().event)
+        // the phone's clock jumps back an hour: the next crossing must still alert
+        assertEquals(FenceEvent.ENTER, e.at(500.0, 100_000).single().event)
+        // within the interval going forward is still held back
+        assertTrue(e.at(1500.0, 110_000).isEmpty())
+    }
+
+    @Test fun commaDecimalsAreAccepted() {
+        assertEquals(53.7, Fences.parseNumber("53,7")!!, 0.0)
+        assertEquals(-1.5, Fences.parseNumber(" -1.5 ")!!, 0.0)
+        assertEquals(500.0, Fences.parseNumber("500")!!, 0.0)
+        assertNull(Fences.parseNumber("1,234.5"))
+        assertNull(Fences.parseNumber("1,2,3"))
+        assertNull(Fences.parseNumber("abc")); assertNull(Fences.parseNumber("")); assertNull(Fences.parseNumber("1e999")); assertNull(Fences.parseNumber("NaN"))
+    }
+
+    @Test fun invalidReplacementKeepsTheExistingFence() {
+        val m = GeoStore.mergeFencesReport(listOf(fence), listOf(fence.copy(name = "", radiusM = 1.0)))
+        assertEquals(listOf(fence), m.fences); assertEquals(1, m.skipped)
+    }
 }

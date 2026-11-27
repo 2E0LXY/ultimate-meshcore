@@ -30,4 +30,10 @@ class CsvTest {
         val d = Csv.document(listOf("a", "b"), listOf(listOf("x", 1L), listOf("y,z", null)))
         assertEquals("﻿a,b\r\nx,1\r\n\"y,z\",\r\n", d)
     }
+
+    @Test fun nonFiniteNumbersAreBlank() {
+        assertEquals("", Csv.cell(Double.NaN)); assertEquals("", Csv.cell(Double.POSITIVE_INFINITY)); assertEquals("", Csv.cell(Float.NEGATIVE_INFINITY))
+        assertEquals("5.5", Csv.cell(5.5)); assertEquals("-1.5", Csv.cell(-1.5)); assertEquals("3", Csv.cell(3))
+        assertEquals("a,,b", Csv.row("a", Double.NaN, "b"))
+    }
 }

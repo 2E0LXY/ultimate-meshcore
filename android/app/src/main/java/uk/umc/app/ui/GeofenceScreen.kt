@@ -18,6 +18,10 @@ import androidx.compose.ui.unit.dp
 import uk.umc.app.AppState
 import uk.umc.app.tools.GeoAlerts
 import uk.umc.app.tools.Geo
+import uk.umc.app.tools.Fences
+import android.content.pm.PackageManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 
 /**
  * Circles that alert you when a contact's reported position crosses them. Positions come from the
@@ -38,6 +42,13 @@ fun GeofenceScreen() {
 
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val number = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+    // ask once when the screen opens, so alerts are not silently dropped for want of the permission
+    val ctx = LocalContext.current
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -57,7 +68,7 @@ fun GeofenceScreen() {
                     OutlinedTextField(radius, { radius = it }, Modifier.fillMaxWidth(), label = { Text("Radius (metres)") }, singleLine = true, keyboardOptions = number)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ShButton(onClick = {
-                            val la = lat.trim().toDoubleOrNull(); val lo = lon.trim().toDoubleOrNull(); val r = radius.trim().toDoubleOrNull()
+                            val la = Fences.parseNumber(lat); val lo = Fences.parseNumber(lon); val r = Fences.parseNumber(radius)
                             if (la == null || lo == null || r == null) AppState.say("Latitude, longitude and radius must be numbers")
                             else {
                                 val err = GeoAlerts.add(name, la, lo, r)
