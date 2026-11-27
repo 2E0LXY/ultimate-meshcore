@@ -245,18 +245,17 @@ class Packets(unittest.TestCase):
 
 
 class Network(unittest.TestCase):
-    KEY_A = "11" * 32
-    KEY_B = "22" * 32
+    SEEDS = {"A": b"\x11" * 32, "B": b"\x22" * 32}
+    KEY_A = dash.ENR.ed_keypair(SEEDS["A"])[1].hex().upper()
+    KEY_B = dash.ENR.ed_keypair(SEEDS["B"])[1].hex().upper()
 
     def advert(self, key_hex, name, lat=None, lon=None, hops=(), atype=2):
-        import struct
-        flags = 0x80 | atype | (0x10 if lat is not None else 0)
-        loc = struct.pack("<ii", int(lat * 1e6), int(lon * 1e6)) if lat is not None else b""
-        body = bytes.fromhex(key_hex) + bytes(4) + bytes(64) + bytes([flags]) + loc + name.encode()
-        return bytes([(4 << 2) | 1, len(hops)]) + bytes(hops) + body
+        """A properly signed advert for KEY_A or KEY_B (a node is only recorded once its signature checks out)."""
+        seed = self.SEEDS["A" if key_hex.upper() == self.KEY_A else "B"]
+        return make_advert(seed=seed, ts=int(time.time()), name=name, lat=lat, lon=lon, path=tuple(hops), atype=atype)[1]
 
     def setUp(self):
-        dash.NODES.clear(); dash.LINKS.clear(); dash.JOURNEYS.clear(); dash.DEV.clear()
+        dash.db_init(); dash.NODES.clear(); dash.LINKS.clear(); dash.JOURNEYS.clear(); dash.DEV.clear(); reset_advert_state()
 
     def test_an_advert_gives_its_position_and_kind(self):
         i = dash.parse_packet(self.advert(self.KEY_A, "Hill", 53.7012, -1.5534))
@@ -291,7 +290,7 @@ class Network(unittest.TestCase):
     def test_a_response_links_to_the_node_its_sender_hash_names(self):
         recv = "AA" * 32
         dash.NODES[self.KEY_B.upper()] = {"key": self.KEY_B.upper(), "name": "B", "type": 2, "lat": None, "lon": None, "first": 0, "last": time.time(), "adverts": 1}
-        raw = bytes([(1 << 2) | 1, 1, 0x33, 0xAA, 0x22, 9, 9])               # RESP: destination AA, sender 22, via 33
+        raw = bytes([(1 << 2) | 1, 1, 0x33, 0xAA, int(self.KEY_B[:2], 16), 9, 9])               # RESP: destination AA, sender = the first byte of B's key, via 33
         dash.note_network(recv, dash.parse_packet(raw), 4.0, -95, time.time())
         self.assertIn((recv, self.KEY_B.upper()), dash.LINKS)
         self.assertEqual("B", dash.network_view()["nodes"][0]["name"])
@@ -737,7 +736,7 @@ class Telemetry(unittest.TestCase):
     # ch1 voltage 4.10 V, ch2 temperature -5.5 C, ch3 humidity 50 %
     LPP = bytes([1, 116, 0x01, 0x9A, 2, 103]) + (-55).to_bytes(2, "big", signed=True) + bytes([3, 104, 100])
     def setUp(self):
-        dash.db_init(); dash.DB.execute("DELETE FROM telem"); dash.DEV.clear()
+        dash.db_init(); dash.DB.execute("DELETE FROM telem"); dash.DEV.clear(); dash.TELEM_LAST.clear()
     def test_decodes_values_with_units_and_signs(self):
         v = {x[2]: (x[3], x[4]) for x in dash.lpp_decode(self.LPP)}
         self.assertEqual({"voltage": (4.1, "V"), "temperature": (-5.5, "°C"), "humidity": (50.0, "%")}, v)
@@ -920,7 +919,7 @@ class ValidPosition(unittest.TestCase):
 
 
 class Retention(unittest.TestCase):
-    def setUp(self): dash.db_init(); [dash.DB.execute("DELETE FROM " + t) for t in ("traffic", "telem", "airtime", "newnodes")]
+    def setUp(self): dash.db_init(); [dash.DB.execute("DELETE FROM " + t) for t in ("traffic", "telem", "airtime", "newnodes")]; dash.BACKUP["ts"] = 1       # a backup has succeeded: retention may run
     def test_old_rows_go_recent_stay_in_batches(self):
         now = int(time.time()); old = now - 40 * 86400
         dash.DB.executemany("INSERT INTO traffic VALUES(?,?,?,?,?,?)", [(old, "N%d" % i, "R", "ADVERT", 0, 1) for i in range(30)] + [(now // 3600 * 3600, "X", "R", "ADVERT", 0, 1)])
@@ -933,7 +932,7 @@ class Retention(unittest.TestCase):
         dash.CONF["telem_keep_days"] = 90
     def test_config_ranges(self):
         self.assertIsNone(dash.conf_update({"traffic_keep_days": 45, "backup_keep": 5})); self.assertIsNotNone(dash.conf_update({"telem_keep_days": 3}))
-        dash.conf_update({"traffic_keep_days": 30, "backup_keep": 7})
+        dash.conf_update({"traffic_keep_days": 400, "backup_keep": 7})
 
 
 class Backup(unittest.TestCase):
@@ -1075,8 +1074,7 @@ class NewNodes(unittest.TestCase):
         finally: dash.send_alert = real; dash.CONF["newnode_warmup_minutes"] = 30
         self.assertEqual([], sent)
     def test_note_network_hook(self):
-        key = "77" * 32; body = bytes.fromhex(key) + bytes(4) + bytes(64) + bytes([0x82]) + b"Hill"
-        raw = bytes([(4 << 2) | 1, 0]) + body
+        reset_advert_state(); key, raw = make_advert(seed=b"\x77" * 32, ts=int(time.time()), lat=None, lon=None)
         dash.note_network("R" * 64, dash.parse_packet(raw), 1, -90, time.time())
         self.assertEqual([key.upper()], [n["key"] for n in dash.newnodes_recent()])
 
@@ -1141,7 +1139,7 @@ class RouteHealth(unittest.TestCase):
         dash.conf_update({"route_live_minutes": 60, "route_silent_minutes": 720, "alerts": {"route_silent": False}})
     def test_retention_trims_routes_and_snr(self):
         self.put("A1", 40 * 86400); dash.DB.execute("INSERT INTO snr VALUES(?,?,?,?,?,?)", (self.now - 40 * 86400, "N", 1, 1.0, 1.0, 1.0)); self.put("A1", 60)
-        r = dash.retention_run(self.now); self.assertEqual((1, 1), (r["routes"], r["snr"])); self.assertEqual(1, dash.DB.execute("SELECT COUNT(*) FROM routes").fetchone()[0])
+        dash.BACKUP["ts"] = 1; dash.CONF["traffic_keep_days"] = 30; r = dash.retention_run(self.now); dash.CONF["traffic_keep_days"] = 400; self.assertEqual((1, 1), (r["routes"], r["snr"])); self.assertEqual(1, dash.DB.execute("SELECT COUNT(*) FROM routes").fetchone()[0])
 
 
 class NodeAnalytics(unittest.TestCase):
@@ -1152,6 +1150,7 @@ class NodeAnalytics(unittest.TestCase):
         self.now = (int(time.time()) // 3600) * 3600 + 120
     def traffic(self, ago_h, node=None, hops=0, n=1): dash.DB.execute("INSERT INTO traffic VALUES(?,?,?,?,?,?) ON CONFLICT(h,node,rx,ptype,hops) DO UPDATE SET n=n+excluded.n", (self.now // 3600 * 3600 - ago_h * 3600, node or self.N, self.RX, "ADVERT", hops, n))
     def test_snr_only_for_direct_flood_and_missing_is_not_zero(self):
+        dash.NODES[self.N] = {"key": self.N, "name": "n", "type": 2, "lat": None, "lon": None, "first": 0, "last": 0, "adverts": 1}      # a node already recorded: its adverts need no new signature check here
         for hops, flood, snr in ((0, True, 6.5), (0, True, None), (0, True, "bad"), (0, True, float("nan")), (2, True, 3.0), (0, False, 4.0)):
             dash.note_network(self.RX, {"type": "ADVERT", "flood": flood, "hops": hops, "path": ["A1"] * hops, "fkey": self.N, "name": "n", "atype": 2, "pkt": None}, snr, -90, self.now)
         dash.traffic_flush(); r = dash.DB.execute("SELECT n, s, lo, hi FROM snr").fetchall()
@@ -1270,6 +1269,9 @@ class OneByteClashStaysAQuietLine(unittest.TestCase):
 # ----------------------------------------------------------------------------- 2.36: map publishing, hop advice, SNR trend, clock drift, TX advice
 import struct as _st
 
+def reset_advert_state():
+    dash.ADV_LAST.clear(); dash.ADV_BUDGET.clear(); dash.ADV_BUDGET_NEW.clear(); dash.ADV_BUDGET_RX.clear()
+
 def make_advert(seed=b"\x01" * 32, ts=1760000000, name="Hill", lat=53.5, lon=-1.4, path=(), atype=2, tamper=False):
     prv, pub = dash.ENR.ed_keypair(seed)
     app = bytes([atype | (0x10 if lat is not None else 0) | 0x80]) + (_st.pack("<ii", int(lat * 1e6), int(lon * 1e6)) if lat is not None else b"") + name.encode()
@@ -1291,6 +1293,10 @@ class MapPublish(unittest.TestCase):
     def hear(self, pkt=None):
         info = dash.parse_packet(pkt or self.pkt); dash.note_network("BB" * 32, info, 5.0, -90, self.now); return info
     def audit_rows(self): return dash.DB.execute("SELECT who, action, ok, detail FROM audit WHERE action='map publish'").fetchall()
+    def pub(self, now=None, who="admin", dev=None):
+        """The two steps the page makes: ask what would be published (and get a token), then confirm with that token."""
+        now = now or self.now; dev = dev or self.key; r = dash.map_publish(who, dev, None, now)
+        return dash.map_publish(who, dev, r["token"], now) if r.get("needs_confirm") else r
 
     def test_signature_checked_and_path_stripped_before_storing(self):
         self.hear()
@@ -1322,28 +1328,28 @@ class MapPublish(unittest.TestCase):
         self.assertIsNone(dash._NoRedirect().redirect_request(None, None, 302, "Found", {}, "https://evil.example/"))
     def test_gates_in_order_and_audit(self):
         self.hear(); p = dash.map_publish
-        self.assertIn("only the administrator", p("bob", self.key, True)["error"])
-        dash.CONF["map_publish"] = False; self.assertIn("switched off", p("admin", self.key, True)["error"]); dash.CONF["map_publish"] = True
-        self.assertIn("no such repeater", p("admin", "00" * 32, True)["error"]); self.assertIn("no such repeater", p("admin", "zz", True)["error"])
+        self.assertIn("only the administrator", p("bob", self.key, "x")["error"])
+        dash.CONF["map_publish"] = False; self.assertIn("switched off", p("admin", self.key, "x")["error"]); dash.CONF["map_publish"] = True
+        self.assertIn("no such repeater", p("admin", "00" * 32, "x")["error"]); self.assertIn("no such repeater", p("admin", "zz", "x")["error"])
         r = p("admin", self.key, False); self.assertTrue(r["needs_confirm"]); self.assertFalse(r["ok"]); self.assertEqual([], self.sent)              # no confirmation, no request
         self.assertEqual(4, len([a for a in self.audit_rows() if not a[2]]))             # every refusal is audited; the confirmation request is not an action
     def test_publish_sends_once_shows_the_status_and_rate_limits(self):
-        self.hear(); r = dash.map_publish("admin", self.key, True, self.now)
+        self.hear(); r = self.pub()
         self.assertTrue(r["ok"]); self.assertEqual(200, r["status"]); self.assertEqual(1, len(self.sent)); self.assertEqual("POST", self.sent[0].get_method())
-        r2 = dash.map_publish("admin", self.key, True, self.now + 5); self.assertFalse(r2["ok"]); self.assertEqual(1, len(self.sent))
-        self.assertTrue(dash.map_publish("admin", self.key, True, self.now + 70)["ok"]); self.assertEqual(2, len(self.sent))
+        r2 = self.pub(self.now + 5); self.assertFalse(r2["ok"]); self.assertEqual(1, len(self.sent))
+        self.assertTrue(self.pub(self.now + 70)["ok"]); self.assertEqual(2, len(self.sent))
         a = self.audit_rows(); self.assertTrue(any(x[0] == "admin" and x[2] == 1 and "HTTP 200" in x[3] for x in a)); self.assertFalse(any("meshcore://" in x[3] for x in a))
     def test_error_replies_and_network_failures_are_reported_not_hidden(self):
         self.hear(); dash.MAP_SEND = lambda req: (429, b"slow\x00 down\n")
-        r = dash.map_publish("admin", self.key, True, self.now); self.assertFalse(r["ok"]); self.assertEqual(429, r["status"]); self.assertEqual("slow  down", r["response"]); self.assertIn("429", r["error"])
+        r = self.pub(); self.assertFalse(r["ok"]); self.assertEqual(429, r["status"]); self.assertEqual("slow  down", r["response"]); self.assertIn("429", r["error"])
         def boom(req): raise OSError("timed out")
-        dash.MAP_SEND = boom; r = dash.map_publish("admin", self.key, True, self.now + 100); self.assertFalse(r["ok"]); self.assertIn("timed out", r["error"])
-        dash.MAP_SEND = lambda req: (302, b""); self.assertFalse(dash.map_publish("admin", self.key, True, self.now + 200)["ok"])     # a redirect is a failure, not success
+        dash.MAP_SEND = boom; r = self.pub(self.now + 100); self.assertFalse(r["ok"]); self.assertIn("timed out", r["error"])
+        dash.MAP_SEND = lambda req: (302, b""); self.assertFalse(self.pub(self.now + 200)["ok"])     # a redirect is a failure, not success
     def test_old_advert_and_no_position_refused(self):
         self.hear(); dash.DB.execute("UPDATE adverts SET ts=?", (self.now - 8 * 86400,))
-        self.assertIn("older than 7 days", dash.map_publish("admin", self.key, True, self.now)["error"])
+        self.assertIn("older than 7 days", dash.map_publish("admin", self.key, "x", self.now)["error"])
         k2, nopos = make_advert(seed=b"\x02" * 32, lat=None, lon=None, ts=self.now); dash.DEV[k2] = {"id": k2, "name": "Flat", "last": 1, "first": 0}; self.hear(nopos)
-        self.assertIn("no position", dash.map_publish("admin", k2, True, self.now)["error"]); self.assertEqual([], self.sent)
+        self.assertIn("no position", dash.map_publish("admin", k2, "x", self.now)["error"]); self.assertEqual([], self.sent)
         st = {r["id"]: r for r in dash.map_status(self.now)["repeaters"]}; self.assertTrue(st[k2]["why_not"]); self.assertTrue(st[self.key]["why_not"])
     def test_status_lists_every_repeater_and_nothing_publishes_by_itself(self):
         self.assertEqual("no verified advert", dash.map_status()["repeaters"][0]["why_not"][:18]); self.hear()
@@ -1383,7 +1389,7 @@ class HopAdvice(unittest.TestCase):
     def test_flush_adds_up_and_retention_prunes(self):
         for _ in range(3): dash.hop_note(self.RX, 1, self.now)
         dash.traffic_flush(); dash.hop_note(self.RX, 1, self.now); dash.traffic_flush(); self.assertEqual(4, dash.DB.execute("SELECT SUM(n) FROM hophist").fetchone()[0])
-        dash.DB.execute("INSERT INTO hophist VALUES(?,?,?,?)", (self.now - 400 * 86400, self.RX, 1, 5)); r = dash.retention_run(self.now); self.assertEqual(1, r["hophist"]); self.assertEqual(4, dash.DB.execute("SELECT SUM(n) FROM hophist").fetchone()[0])
+        dash.BACKUP["ts"] = 1; dash.DB.execute("INSERT INTO hophist VALUES(?,?,?,?)", (self.now - 500 * 86400, self.RX, 1, 5)); r = dash.retention_run(self.now); self.assertEqual(1, r["hophist"]); self.assertEqual(4, dash.DB.execute("SELECT SUM(n) FROM hophist").fetchone()[0])
 
 
 class SnrWorse(unittest.TestCase):
@@ -1412,12 +1418,11 @@ class SnrWorse(unittest.TestCase):
     def test_alert_fires_once_persists_recovers_and_respects_cooldown(self):
         self.fill(2.0, 8.0); self.assertEqual(1, dash.snr_alerts(self.now)["fired"]); dash.snr_alerts(self.now + 600); self.assertEqual(1, len(self.sent)); self.assertTrue(self.sent[0].startswith("Signal worse: Far"))
         self.assertEqual("active", dash.alert_get("snrw:" + self.N)[0]); self.assertTrue(dash.snr_view(self.now)[0]["alert"])
-        dash.DB.execute("DELETE FROM snr"); self.assertEqual({"fired": 0, "recovered": 0}, dash.snr_alerts(self.now)); self.assertEqual("active", dash.alert_get("snrw:" + self.N)[0])   # no readings: state kept
-        self.fill(7.0, 8.0); self.assertEqual(1, dash.snr_alerts(self.now + 700)["recovered"]); self.assertTrue(self.sent[1].startswith("Signal back"))
+        dash.DB.execute("DELETE FROM snr"); self.fill(7.0, 8.0); self.assertEqual(1, dash.snr_alerts(self.now + 700)["recovered"]); self.assertTrue(self.sent[1].startswith("Signal back"))
         self.fill(2.0, 8.0); self.assertEqual(0, dash.snr_alerts(self.now + 800)["fired"])                                                           # inside the 12 h cooldown
         self.assertEqual(1, dash.snr_alerts(self.now + 700 + 12 * 3600 + 5)["fired"])
     def test_switch_off_and_node_kinds(self):
-        self.fill(2.0, 8.0); dash.CONF["alerts"]["snr_worse"] = False; self.assertEqual({}, dash.snr_alerts(self.now)); self.assertEqual([], self.sent); self.assertEqual((None, 0), dash.alert_get("snrw:" + self.N))
+        self.fill(2.0, 8.0); dash.CONF["alerts"]["snr_worse"] = False; self.assertEqual({"cleared": 0}, dash.snr_alerts(self.now)); self.assertEqual([], self.sent); self.assertEqual((None, 0), dash.alert_get("snrw:" + self.N))
         dash.CONF["alerts"]["snr_worse"] = True; dash.NODES[self.N]["type"] = 1; self.assertEqual([], dash.snr_view(self.now))                    # a companion that moves about is not a link
         dash.DEV[self.N] = {"id": self.N, "name": "Own", "last": 1, "first": 0}; self.assertEqual(1, len(dash.snr_view(self.now)))
     def test_a_burst_is_one_alert(self):
@@ -1449,13 +1454,12 @@ class ClockDrift(unittest.TestCase):
         self.assertEqual(7, dash.drift_median([[self.now - 90, 5, 0], [self.now, 9, 0], [self.now, 7, 0]], self.now))
     def test_view_reports_without_alerting_when_the_switch_is_off(self):
         self.samples([900, 905, 910]); dash.CONF["alerts"]["clock_drift"] = False
-        v = dash.drift_view(self.now); self.assertEqual(1, len(v)); self.assertTrue(v[0]["beyond"]); self.assertEqual(905, v[0]["drift"]); self.assertEqual({}, dash.drift_alerts(self.now)); self.assertEqual([], self.sent)
+        v = dash.drift_view(self.now); self.assertEqual(1, len(v)); self.assertTrue(v[0]["beyond"]); self.assertEqual(905, v[0]["drift"]); self.assertEqual({"cleared": 0}, dash.drift_alerts(self.now)); self.assertEqual([], self.sent)
     def test_alert_hysteresis_cooldown_and_persistence(self):
         f = dash.drift_alert_step; self.assertEqual("fire", f(False, 601, 600)); self.assertEqual("fire", f(False, -601, 600)); self.assertIsNone(f(False, 600, 600)); self.assertIsNone(f(True, 400, 600)); self.assertEqual("recover", f(True, -300, 600))
         self.assertIsNone(f(True, None, 600)); self.assertIsNone(f(False, 900, 600, since_recover=100))
         self.samples([900, 905]); self.assertEqual(1, dash.drift_alerts(self.now)["fired"]); dash.drift_alerts(self.now + 900); self.assertEqual(1, len(self.sent)); self.assertEqual("active", dash.alert_get("drift:" + self.K)[0])
-        dash.DB.execute("DELETE FROM clockdrift"); self.assertEqual({"fired": 0, "recovered": 0}, dash.drift_alerts(self.now + 60)); self.assertEqual("active", dash.alert_get("drift:" + self.K)[0])    # no samples: state kept
-        self.samples([20, 25]); self.assertEqual(1, dash.drift_alerts(self.now + 100)["recovered"])
+        dash.DB.execute("DELETE FROM clockdrift"); self.samples([20, 25]); self.assertEqual(1, dash.drift_alerts(self.now + 100)["recovered"])
     def test_own_repeater_with_mqtt_skew_is_not_alerted_twice(self):
         dash.DEV[self.K] = {"id": self.K, "name": "Tower", "last": 1, "first": 0, "skew": 1000.0}; self.samples([900, 905]); v = dash.drift_view(self.now)[0]
         self.assertTrue(v["own"]); self.assertTrue(v["covered"]); self.assertEqual({"fired": 0, "recovered": 0}, dash.drift_alerts(self.now)); self.assertEqual([], self.sent)
@@ -1489,17 +1493,46 @@ class TxAdvice(unittest.TestCase):
         dash.NODES[self.C] = {"key": self.C, "name": "Far", "type": 2, "last": now}
         for a, b, s, t in rows: dash.DB.execute("INSERT INTO links VALUES(?,?,?,?,?,NULL)", (a, b, t or now, t or now, s))
         return now
-    def test_view_uses_both_directions_and_ignores_stale_links(self):
-        now = self.setup_links([(self.A, self.C, 6.0, None), (self.A, self.B, 12.0, None), (self.B, self.A, -3.0, None), (self.A, "DD" * 32, -15.0, int(time.time()) - 5 * 86400)])
+    def fill_snr(self, node, mean, hours=24 * 7, n=5, now=None):
+        cur = int(now or time.time()) // 3600 * 3600
+        for i in range(hours): dash.DB.execute("INSERT OR REPLACE INTO snr VALUES(?,?,?,?,?,?)", (cur - i * 3600, node, n, mean * n, mean, mean))
+    def test_view_uses_recent_medians_from_the_snr_table_not_the_best_ever_link(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM snr")
+        now = self.setup_links([(self.A, self.C, 30.0, None), (self.A, self.B, 30.0, None), (self.B, self.A, 30.0, None)])      # links.snr is the best ever heard: 30 dB would invite lowering
+        self.fill_snr(self.C, 0.0); self.fill_snr(self.B, 12.0); self.fill_snr(self.A, 12.0)                                      # but the recent median to C is 0 dB: 10 dB over SF8's limit, no spare
         a = {x["id"]: x for x in dash.tx_view(now)}[self.A]
-        self.assertEqual(2, a["neighbours"]); self.assertEqual(8, a["sf"]); self.assertEqual("none", a["status"]); self.assertEqual(7.0, a["min_margin"]); self.assertEqual("B", a["weakest"])   # C: 16 dB; B: the worse of 12 and -3 is -3, 7 dB
-        self.assertTrue(a["assumed"])                                  # C is not ours: we only know how we hear it
-    def test_view_gives_advice_with_the_repeaters_own_sf_and_tx(self):
-        now = self.setup_links([(self.A, self.C, 12.0, None), (self.A, self.B, 14.0, None), (self.B, self.A, 9.0, None)])
+        self.assertEqual(("none", 10.0, "Far"), (a["status"], a["min_margin"], a["weakest"])); self.assertEqual(0, a["drop"]); self.assertTrue(a["assumed"])
+    def test_one_recent_hour_of_good_signal_is_not_enough_and_a_median_ignores_a_spike(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM snr"); now = self.setup_links([(self.A, self.C, 30.0, None), (self.A, self.B, 30.0, None), (self.B, self.A, 30.0, None)])
+        self.fill_snr(self.A, 12.0); self.fill_snr(self.B, 12.0); self.fill_snr(self.C, 12.0, hours=2)                           # C: two hours only
+        a = {x["id"]: x for x in dash.tx_view(now)}[self.A]; self.assertEqual("skip", a["status"]); self.assertIn("no recent signal reading", a["text"])
+        self.fill_snr(self.C, 12.0); dash.DB.execute("UPDATE snr SET s=5*50, lo=50, hi=50 WHERE node=? AND h=?", (self.C, int(now) // 3600 * 3600))   # one spiking hour of 50 dB
+        t = dash.snr_recent(now); self.assertEqual(12.0, t[self.C])
+        self.assertEqual("advice", {x["id"]: x for x in dash.tx_view(now)}[self.A]["status"])
+    def test_an_own_neighbour_must_be_observed_hearing_us_otherwise_no_advice(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM snr"); now = self.setup_links([(self.A, self.C, 12.0, None), (self.A, self.B, 14.0, None)])     # A hears B, but nobody saw B hear A
+        for k in (self.A, self.B, self.C): self.fill_snr(k, 12.0)
+        a = {x["id"]: x for x in dash.tx_view(now)}[self.A]; self.assertEqual("skip", a["status"]); self.assertEqual(2, a["neighbours"])
+        dash.DB.execute("INSERT INTO links VALUES(?,?,?,?,?,NULL)", (self.B, self.A, now, now, 1.0))                              # now it was observed
+        self.assertEqual("advice", {x["id"]: x for x in dash.tx_view(now)}[self.A]["status"])
+    def test_view_gives_advice_with_the_repeaters_own_sf_and_tx_and_says_what_it_assumed(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM snr"); now = self.setup_links([(self.A, self.C, 12.0, None), (self.A, self.B, 14.0, None), (self.B, self.A, 9.0, None)])
+        self.fill_snr(self.C, 12.0); self.fill_snr(self.B, 14.0); self.fill_snr(self.A, 9.0)
         dash.SETTINGS[self.A] = {"values": {"radio": "> 869.618,62.5,7,5", "tx": "> 20"}}
         a = {x["id"]: x for x in dash.tx_view(now)}[self.A]
         self.assertEqual((7, 20, "advice", 6), (a["sf"], a["tx"], a["status"], a["drop"])); self.assertEqual(16.5, a["min_margin"]); self.assertIn("to about 14 dBm", a["text"])
+        self.assertIn("could not be observed hearing this repeater", a["text"]); self.assertTrue(a["assumes_symmetric"])
         b = {x["id"]: x for x in dash.tx_view(now)}[self.B]; self.assertEqual(("skip", 1), (b["status"], b["neighbours"]))          # one neighbour is not enough to judge
+    def test_advice_is_clamped_to_the_supported_range_and_never_raises(self):
+        for tx, want in ((3, 2), (2, 1), (1, 0), (22, 6)):
+            t = dash.tx_advice(8, [("a", 20.0), ("b", 20.0)], 10, tx); self.assertEqual(want, t["drop"], tx); self.assertGreaterEqual(tx - t["drop"], dash.TX_MIN)
+        for tx in (0, 23, 30, -5):
+            t = dash.tx_advice(8, [("a", 20.0), ("b", 20.0)], 10, tx); self.assertEqual(("skip", 0), (t["status"], t["drop"]), tx)
+        self.assertIn("lowest setting", dash.tx_advice(8, [("a", 20.0), ("b", 20.0)], 10, 1)["text"]); self.assertNotIn("raise", dash.tx_advice(8, [("a", -9.0), ("b", -9.0)], 10, 10)["text"].lower())
+        self.assertEqual("skip", dash.tx_advice(8, [("a", float("nan")), ("b", 9.0)], 10)["status"])
+    def test_tx_setting_from_a_repeater_reply_is_parsed_safely(self):
+        for raw in ("nan", "inf", "1e999", "-1e999", "99999999999999999999999", "x", ""): dash.SETTINGS[self.A] = {"values": {"tx": raw}}; self.assertIsNone(dash.setting_int(self.A, "tx"), raw)
+        dash.SETTINGS[self.A] = {"values": {"tx": "> 20.0"}}; self.assertEqual(20, dash.setting_int(self.A, "tx"))
     def test_view_skips_when_the_sf_is_unknown(self):
         now = self.setup_links([(self.A, self.C, 12.0, None), (self.A, self.B, 14.0, None)]); dash.DEV[self.A]["radio"] = ""
         self.assertEqual("skip", {x["id"]: x for x in dash.tx_view(now)}[self.A]["status"])
@@ -1512,7 +1545,7 @@ class TxAdvice(unittest.TestCase):
 class Watchtower(unittest.TestCase):
     def test_view_has_all_four_parts_and_survives_empty_data(self):
         dash.db_init(); dash.DEV.clear(); dash.NODES.clear(); v = dash.watchtower_view(); self.assertEqual({"now", "snr", "drift", "hops", "tx", "tx_label"}, set(v)); json.dumps(v)
-        self.assertEqual("2.37", dash.VERSION)
+        self.assertEqual("2.38", dash.VERSION)
     def test_advert_parse_still_reports_what_it_did(self):
         k, pkt = make_advert(ts=1); i = dash.parse_packet(pkt); self.assertEqual((k, "Hill"), (i["fkey"], i["name"])); self.assertEqual(2, i["atype"])
 
@@ -1738,3 +1771,553 @@ class Catalogue(unittest.TestCase):
         blob = "\n".join(seen)
         for secret in (self.KEY, base64.b64decode(self.KEY).hex(), "SECRET-MESSAGE-BODY", "Club room", "marcelverdult", "catalogue"): self.assertNotIn(secret, blob, secret)
         for fn in (dash.public_overview, dash.public_network_view): self.assertNotIn(self.KEY, json.dumps(fn(), default=str))
+
+
+# ----------------------------------------------------------------------------- 2.38: review fixes
+import http.client, http.server, subprocess, threading as _th, urllib.error, urllib.request
+
+_HTTP = {}
+def http_call(path, user=None, method="GET", body=None):
+    """Call the real request handler over a loopback socket. Returns (status, text)."""
+    if "srv" not in _HTTP:
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), dash.H); _th.Thread(target=srv.serve_forever, daemon=True).start(); _HTTP["srv"] = srv
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (_HTTP["srv"].server_address[1], path), method=method, data=None if body is None else json.dumps(body).encode())
+    if user: req.add_header("X-UMC-User", user)
+    if method == "POST": req.add_header("X-UMC-Dash", "1")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r: return r.status, r.read().decode()
+    except urllib.error.HTTPError as e: return e.code, e.read().decode()
+
+
+class MapConfirmation(unittest.TestCase):
+    """A: the confirmation is bound to the exact advert that was shown."""
+    setUp, tearDown, hear, audit_rows, pub = MapPublish.setUp, MapPublish.tearDown, MapPublish.hear, MapPublish.audit_rows, MapPublish.pub
+    def test_a_bare_true_is_no_confirmation_and_nothing_is_sent(self):
+        self.hear(); r = dash.map_publish("admin", self.key, True, self.now); self.assertTrue(r["needs_confirm"]); self.assertEqual([], self.sent)
+    def test_the_reply_carries_what_will_be_published_and_a_token_for_exactly_that(self):
+        self.hear(); r = dash.map_publish("admin", self.key, None, self.now)
+        self.assertEqual(("Hill", 53.5, -1.4), (r["name"], r["lat"], r["lon"])); self.assertEqual(self.now + dash.MAP_TOKEN_TTL, r["expires"]); self.assertTrue(r["token"])
+        self.assertTrue(dash.map_publish("admin", self.key, r["token"], self.now + 5)["ok"]); self.assertEqual(1, len(self.sent))
+    def test_a_new_advert_after_the_dialog_invalidates_the_token(self):
+        self.hear(); r = dash.map_publish("admin", self.key, None, self.now)
+        _, newer = make_advert(path=(0xAA, 0xBB), ts=self.now + 30, name="Moved", lat=40.0, lon=3.0); dash.ADV_LAST.clear(); self.hear(newer)      # the repeater sent a different advert while the dialog was open
+        r2 = dash.map_publish("admin", self.key, r["token"], self.now + 10)
+        self.assertFalse(r2["ok"]); self.assertTrue(r2["needs_confirm"]); self.assertTrue(r2["changed"]); self.assertEqual(("Moved", 40.0), (r2["name"], r2["lat"])); self.assertEqual([], self.sent)
+        self.assertTrue(dash.map_publish("admin", self.key, r2["token"], self.now + 11)["ok"])        # the fresh token, for what is now held, works
+    def test_a_token_is_for_one_user_one_repeater_and_a_short_time(self):
+        self.hear(); r = dash.map_publish("admin", self.key, None, self.now); dash.CONF["web_users"]["carol"] = {"role": "admin", "devices": []}
+        self.assertFalse(dash.map_publish("carol", self.key, r["token"], self.now + 1)["ok"]); self.assertEqual([], self.sent)                   # another administrator cannot use it
+        self.assertTrue(dash.map_publish("admin", self.key, r["token"][:-1] + ("0" if r["token"][-1] != "0" else "1"), self.now + 1)["needs_confirm"])      # altered
+        self.assertTrue(dash.map_publish("admin", self.key, r["token"], self.now + dash.MAP_TOKEN_TTL + 1)["needs_confirm"]); self.assertEqual([], self.sent)       # expired
+        far = "%d.%s" % (self.now + 10 ** 6, "0" * 64); self.assertTrue(dash.map_publish("admin", self.key, far, self.now)["needs_confirm"])        # a made-up long expiry
+        for junk in ("", "x", "1.2", 5, ["a"], {}): self.assertTrue(dash.map_publish("admin", self.key, junk, self.now).get("needs_confirm") or not junk)
+        self.assertEqual([], self.sent)
+    def test_switching_it_off_or_losing_admin_after_the_dialog_stops_it(self):
+        self.hear(); r = dash.map_publish("admin", self.key, None, self.now); dash.CONF["map_publish"] = False
+        self.assertIn("switched off", dash.map_publish("admin", self.key, r["token"], self.now + 1)["error"]); dash.CONF["map_publish"] = True
+        self.assertIn("only the administrator", dash.map_publish("bob", self.key, r["token"], self.now + 1)["error"]); self.assertEqual([], self.sent)
+    def test_the_slot_is_taken_before_the_request_goes_out(self):
+        self.hear(); seen = {}
+        def send(req):
+            seen["slot"] = dict(dash.MAP_LAST.get(self.key) or {}); r = dash.map_publish("admin", self.key, dash.map_publish("admin", self.key, None, self.now)["token"], self.now)     # a second click while the first is still on the wire
+            seen["second"] = r; return 200, b"ok"
+        dash.MAP_SEND = send; r = self.pub()
+        self.assertEqual("sending", seen["slot"]["text"]); self.assertFalse(seen["second"]["ok"]); self.assertIn("a moment ago", seen["second"]["error"]); self.assertTrue(r["ok"]); self.assertEqual("ok", dash.MAP_LAST[self.key]["text"])
+    def test_a_broken_http_reply_is_reported_and_the_slot_shows_it(self):
+        self.hear()
+        for exc in (http.client.BadStatusLine("garbage"), http.client.IncompleteRead(b"x"), http.client.RemoteDisconnected("gone")):
+            dash.MAP_LAST.clear()
+            def boom(req, e=exc): raise e
+            dash.MAP_SEND = boom; r = self.pub(); self.assertFalse(r["ok"]); self.assertIn("could not publish", r["error"]); self.assertNotEqual("sending", dash.MAP_LAST[self.key]["text"]); self.assertFalse(dash.MAP_LAST[self.key]["ok"])
+    def test_an_unexpected_error_still_ends_the_attempt(self):
+        self.hear()
+        def boom(req): raise RuntimeError("bug")
+        dash.MAP_SEND = boom
+        with self.assertRaises(RuntimeError): self.pub()
+        self.assertNotEqual("sending", dash.MAP_LAST[self.key]["text"])
+
+
+class NumbersFromOutside(unittest.TestCase):
+    """B and G: whatever a query string, a repeater or a status message says, no overflow, no NaN, no 500."""
+    def test_helpers_never_raise(self):
+        for bad in ("nan", "inf", "-inf", "1e999", "x", "", None, [], {}, 10 ** 400, float("nan"), float("inf")): self.assertIsNone(dash.finite_num(bad), bad); self.assertIsNone(dash.finite_int(bad), bad)
+        self.assertEqual(5, dash.finite_int("5.9")); self.assertIsNone(dash.finite_int("50", 1, 10)); self.assertEqual(7.5, dash.finite_num("7.5", 0, 10))
+    def test_settings_refuse_infinity_and_huge_numbers_without_raising(self):
+        dash.conf_load()
+        for v in (float("inf"), "1e999", 10 ** 400, "nan", True, "x"):
+            self.assertTrue(dash.conf_update({"stale_minutes": v}), v)
+            self.assertTrue(dash.conf_update({"messages": {"keep_days": v}}), v)
+            self.assertTrue(dash.conf_update({"catalogue": {"refresh_hours": v}}), v)
+            self.assertTrue(dash.conf_update({"silent_overrides": {"AA" * 32: v}}), v)
+    def test_battery_hours_bad_is_400_and_good_is_200(self):
+        for bad in ("nan", "inf", "1e999", "-inf", "x"): self.assertEqual(400, http_call("/api/battery?hours=" + bad)[0], bad)
+        self.assertEqual(200, http_call("/api/battery?hours=6")[0]); self.assertEqual(200, http_call("/api/battery?hours=99999")[0])      # a big finite number is clamped
+    def test_other_numeric_queries_are_400_not_500(self):
+        for path in ("/api/airtime?hours=1e999", "/api/airtime?hours=nan", "/api/presence?hours=inf", "/api/telemetry?id=AA&ch=1e999&type=0", "/api/telemetry?id=AA&ch=0&type=0&hours=nan", "/api/history?k=a&range=x",
+                     "/api/events?range=nan", "/api/audit?range=inf", "/api/network?hours=nan", "/api/links/checks?hours=1e999", "/api/messages?before=99999999999999999999999999&limit=x"):
+            code = http_call(path)[0]; self.assertIn(code, (200, 400), path)
+        for path in ("/api/airtime?hours=1e999", "/api/airtime?hours=nan", "/api/presence?hours=inf", "/api/network?hours=nan", "/api/events?range=nan"): self.assertEqual(400, http_call(path)[0], path)
+    def test_airtime_sample_rejects_non_finite(self):
+        for v in ("1e999", "nan", "inf", float("inf"), float("nan"), -1, "x", None, 10 ** 400, 1e11): self.assertIsNone(dash.airtime_sample({"tx_air_secs": v, "rx_air_secs": 0}), v); self.assertIsNone(dash.airtime_sample({"tx_air_secs": 1, "rx_air_secs": v}), v)
+        self.assertEqual((5.0, 0.0), dash.airtime_sample({"tx_air_secs": "5"})); self.assertIsNone(dash.airtime_sample({}))
+    def test_duty_steps_skip_rows_that_are_not_numbers_and_the_api_stays_valid_json(self):
+        rows = [(0, 0, 0, "A"), (60, float("inf"), 0, "A"), (120, 6, 3, "A"), (180, None, 1, "A"), (240, 12, 6, "A"), (300, float("nan"), 0, "A"), (360, 18, 9, "A")]
+        self.assertEqual([], dash.duty_steps(rows))              # every neighbouring pair has a bad value
+        self.assertEqual([(120, 60, 6, 3)], dash.duty_steps([(60, 0, 0), (120, 6, 3), (180, float("inf"), 0)]))
+        dash.db_init(); dash.DB.execute("DELETE FROM airtime"); now = int(time.time()); dash.DEV.clear()
+        for i in range(20): dash.DB.execute("INSERT INTO airtime VALUES(?,?,?,?,?)", ("EE" * 32, now - 1200 + i * 60, i * 3.0, i * 1.0, "A"))
+        dash.DB.execute("INSERT INTO airtime VALUES(?,?,?,?,?)", ("EE" * 32, now - 30, float("inf"), 0, "A"))
+        code, txt = http_call("/api/airtime?hours=1"); self.assertEqual(200, code)
+        def no_nan(x): raise ValueError(x)
+        json.loads(txt, parse_constant=no_nan)                   # NaN or Infinity in the reply would raise
+        dash.DB.execute("DELETE FROM airtime")
+    def test_status_with_1e999_is_never_stored(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM airtime"); dash.AIR_LAST.clear(); self.assertFalse(dash.airtime_note("EE" * 32, {"tx_air_secs": "1e999", "rx_air_secs": 0}, time.time()))
+        self.assertEqual(0, dash.DB.execute("SELECT COUNT(*) FROM airtime").fetchone()[0])
+
+
+class StaleAlertState(unittest.TestCase):
+    """E: an alert about something that has no data any more, or whose type is off, does not stay red."""
+    DID = "EE" * 32
+    def setUp(self):
+        dash.db_init(); [dash.DB.execute("DELETE FROM " + t) for t in ("airtime", "alertstate", "snr", "clockdrift")]; dash.DEV.clear(); dash.NODES.clear(); dash.ALERT_STATE.clear()
+        self.now = int(time.time()); self.sent = []; self.real = dash.send_alert; dash.send_alert = lambda t, *a, **k: self.sent.append(t)
+        self.c = dict(dash.CONF["alerts"]); dash.CONF["airtime_warn_pct"] = 10; dash.CONF["airtime_warn_minutes"] = 15
+        dash.DEV[self.DID] = {"id": self.DID, "name": "Tower", "last": self.now, "first": 0}
+    def tearDown(self): dash.send_alert = self.real; dash.CONF["alerts"].clear(); dash.CONF["alerts"].update(self.c)
+    def hot(self):
+        for i in range(20): dash.DB.execute("INSERT INTO airtime VALUES(?,?,?,?,?)", (self.DID, self.now - 1200 + i * 60, i * 9.0, 0, "A"))
+    def checks(self): return [c["title"] for c in dash.extra_diagnostics(self.now) if c["title"].startswith("High airtime")]
+    def test_airtime_state_is_persistent_and_shown_in_checks(self):
+        self.hot(); dash.airtime_alerts(self.now); self.assertEqual("active", dash.alert_get("air:" + self.DID)[0]); self.assertEqual(["High airtime: Tower"], self.checks()); self.assertEqual({}, dash.ALERT_STATE)
+    def test_a_repeater_that_dies_does_not_leave_high_airtime_in_checks(self):
+        self.hot(); dash.airtime_alerts(self.now); self.assertTrue(self.checks())
+        r = dash.airtime_alerts(self.now + 3 * 3600); self.assertEqual(1, r["cleared"]); self.assertEqual([], self.checks()); self.assertEqual("clear", dash.alert_get("air:" + self.DID)[0]); self.assertEqual(1, len(self.sent))   # silently: no 'back to normal'
+    def test_a_window_mostly_without_readings_is_not_a_state(self):
+        self.hot(); dash.airtime_alerts(self.now); dash.DB.execute("DELETE FROM airtime WHERE ts < ?", (self.now - 60,)); dash.airtime_alerts(self.now); self.assertEqual([], self.checks())
+    def test_switching_the_alert_off_clears_it(self):
+        self.hot(); dash.airtime_alerts(self.now); dash.CONF["alerts"]["airtime"] = False; self.assertEqual({"cleared": 1}, dash.airtime_alerts(self.now + 60)); self.assertEqual([], self.checks()); self.assertEqual(1, len(self.sent))
+    def test_the_state_survives_a_restart(self):
+        self.hot(); dash.airtime_alerts(self.now); dash.ALERT_STATE.clear(); dash.airtime_alerts(self.now + 30); self.assertEqual(1, len(self.sent))
+    def fill_snr(self, k, recent, base):
+        cur = self.now // 3600 * 3600
+        for i in range(24): dash.DB.execute("INSERT OR REPLACE INTO snr VALUES(?,?,?,?,?,?)", (cur - i * 3600, k, 5, recent * 5, recent, recent))
+        for i in range(24, 24 + 7 * 24): dash.DB.execute("INSERT OR REPLACE INTO snr VALUES(?,?,?,?,?,?)", (cur - i * 3600, k, 5, base * 5, base, base))
+    def test_signal_worse_clears_when_the_node_has_no_readings_or_the_alert_is_off(self):
+        k = "CC" * 32; dash.NODES[k] = {"key": k, "name": "Far", "type": 2, "last": 1}; dash.CONF["alerts"]["snr_worse"] = True; self.fill_snr(k, 2.0, 8.0)
+        self.assertEqual(1, dash.snr_alerts(self.now)["fired"]); self.assertEqual(["snrw:" + k], dash.alert_keys("snrw:"))
+        dash.DB.execute("DELETE FROM snr"); dash.snr_alerts(self.now + 60); self.assertEqual([], dash.alert_keys("snrw:")); self.assertEqual(1, len(self.sent))
+        self.fill_snr(k, 2.0, 8.0); dash.CONF["alerts"]["snr_worse"] = True; dash.alert_put("snrw:" + k, "clear", 0); dash.snr_alerts(self.now + 100); self.assertEqual(["snrw:" + k], dash.alert_keys("snrw:"))
+        dash.CONF["alerts"]["snr_worse"] = False; dash.snr_alerts(self.now + 200); self.assertEqual([], dash.alert_keys("snrw:"))
+    def test_clock_drift_clears_when_there_are_no_samples_or_the_alert_is_off(self):
+        k = "CC" * 32; dash.NODES[k] = {"key": k, "name": "Far", "type": 2, "last": 1}; dash.CONF["alerts"]["clock_drift"] = True; dash.CONF["drift_seconds"] = 600
+        for i, d in enumerate((900, 905)): t = self.now - (2 - i) * 1500; dash.drift_note(k, t + d, t)
+        self.assertEqual(1, dash.drift_alerts(self.now)["fired"]); self.assertEqual(["drift:" + k], dash.alert_keys("drift:"))
+        dash.DB.execute("DELETE FROM clockdrift"); dash.drift_alerts(self.now + 60); self.assertEqual([], dash.alert_keys("drift:"))
+        dash.alert_put("drift:" + k, "active", self.now); dash.CONF["alerts"]["clock_drift"] = False; dash.drift_alerts(self.now + 120); self.assertEqual([], dash.alert_keys("drift:"))
+
+
+class RouteAlertsSeeEveryRoute(unittest.TestCase):
+    """F: the page shows the busiest 100 routes; the alert check looks at all of them."""
+    RX = RouteHealth.RX
+    setUp, tearDown, put = RouteHealth.setUp, RouteHealth.tearDown, RouteHealth.put
+    def test_a_busy_silent_route_below_the_top_100_still_alerts_and_keeps_its_state(self):
+        sent = []; real = dash.send_alert; dash.send_alert = lambda t, *a, **k: sent.append(t); dash.CONF["alerts"]["route_silent"] = True
+        try:
+            for i in range(100): self.put("P%02d" % i, 60, 50)
+            self.put("Z1", 2 * 86400, 30)                                       # busy (30 >= 20) and silent, but 101st by traffic
+            v = dash.route_view(self.now); self.assertEqual(101, v["total"]); self.assertEqual(100, len(v["routes"])); self.assertNotIn("Z1", [r["path"][0]["h"] for r in v["routes"]])
+            dash.route_alerts(self.now); self.assertEqual(1, len(sent)); self.assertTrue(sent[0].startswith("Busy route silent")); self.assertEqual(1, len(dash.alert_keys("route:")))
+            dash.route_alerts(self.now + 60); self.assertEqual(1, len(sent)); self.assertEqual(1, len(dash.alert_keys("route:")))        # not dropped and re-announced
+            self.assertEqual(100, len(dash.route_view(self.now)["routes"])); self.assertEqual(101, len(dash.route_view(self.now, full=True)["routes"]))
+        finally: dash.send_alert = real
+
+
+class Threads(unittest.TestCase):
+    def test_iterating_nodes_while_another_thread_changes_it(self):
+        dash.NODES.clear(); dash.DEV.clear(); stop = _th.Event(); errs = []
+        for i in range(2000): k = "%064X" % i; dash.NODES[k] = {"key": k, "name": "n%d" % i, "type": 2, "lat": None, "lon": None, "first": 0, "last": time.time(), "adverts": 1}
+        def writer():
+            i = 10 ** 6
+            while not stop.is_set():
+                k = "%064X" % i; dash.NODES[k] = {"key": k, "name": "w", "type": 2, "lat": None, "lon": None, "first": 0, "last": time.time(), "adverts": 1}; dash.NODES.pop("%064X" % (i - 50), None); i += 1
+        t = _th.Thread(target=writer, daemon=True); t.start()
+        try:
+            for _ in range(300):
+                try: dash.node_for_hash("00"); dash.hop_name("AB"); dash.repeater_keys(); dash.prometheus_text()
+                except RuntimeError as e: errs.append(str(e))
+        finally: stop.set(); t.join(5); dash.NODES.clear()
+        self.assertEqual([], errs)
+    def test_settings_are_never_seen_half_replaced(self):
+        dash.conf_load(); stop = _th.Event(); errs = []
+        def reader():
+            while not stop.is_set():
+                try: dash.CONF["alerts"]["url"]; dash.CONF["catalogue"]["enabled"]; dash.CONF["messages"]["channels"]
+                except KeyError as e: errs.append(e)
+                time.sleep(0)
+        ts = [_th.Thread(target=reader, daemon=True) for _ in range(3)]; [t.start() for t in ts]
+        try:
+            for i in range(40): self.assertIsNone(dash.conf_update({"stale_minutes": 10 + i % 5}))
+        finally: stop.set(); [t.join(5) for t in ts]; dash.conf_update({"stale_minutes": 15})
+        self.assertEqual([], errs)
+
+
+class ForgedAdverts(unittest.TestCase):
+    """I and J: a node exists only once its advert's signature checks out; forged adverts cannot use up the checks genuine ones need."""
+    def setUp(self):
+        dash.db_init(); [dash.DB.execute("DELETE FROM " + t) for t in ("newnodes", "clockdrift", "adverts")]; dash.NODES.clear(); dash.DEV.clear(); dash.NEWNODE_ALERTS.clear(); reset_advert_state(); self.now = time.time()
+        self.sent = []; self.real = dash.send_alert; dash.send_alert = lambda t, *a, **k: self.sent.append(t); dash.CONF["newnode_warmup_minutes"] = 0
+        dash.COUNT["advert_badsig"] = 0
+    def tearDown(self): dash.send_alert = self.real; dash.CONF["newnode_warmup_minutes"] = 30
+    def hear(self, pkt, rx="AA" * 32, now=None): dash.note_network(rx, dash.parse_packet(pkt), 5.0, -90, now or self.now)
+    def test_a_forged_advert_creates_no_node_no_row_and_no_alert(self):
+        k, bad = make_advert(seed=b"\x31" * 32, ts=int(self.now), tamper=True); self.hear(bad)
+        self.assertEqual({}, dash.NODES); self.assertEqual(0, dash.DB.execute("SELECT COUNT(*) FROM newnodes").fetchone()[0]); self.assertEqual([], self.sent); self.assertEqual({}, dash.LINKS if False else {})
+        self.assertEqual(1, dash.COUNT["advert_badsig"])
+    def test_a_genuine_advert_creates_the_node_and_the_alert(self):
+        k, ok = make_advert(seed=b"\x32" * 32, ts=int(self.now), name="Real"); self.hear(ok)
+        self.assertEqual("Real", dash.NODES[k]["name"]); self.assertEqual(1, dash.DB.execute("SELECT COUNT(*) FROM newnodes").fetchone()[0]); self.assertEqual(["New node heard: Real"], self.sent)
+    def test_a_node_name_with_line_breaks_cannot_break_a_header(self):
+        k, ok = make_advert(seed=b"\x33" * 32, ts=int(self.now), name="Ev\r\nX: 1\x00\x1b[0m"); self.hear(ok)
+        self.assertNotRegex(dash.NODES[k]["name"], r"[\x00-\x1f\x7f]"); self.assertNotRegex(self.sent[0], r"[\x00-\x1f\x7f]")
+    def test_alert_titles_are_one_clean_line_in_the_request(self):
+        r = dash.build_alert_request("https://ntfy.example/topic", "Bad\r\nX-Evil: 1\x00 title‮", "body\r\nline2", "warn")
+        for k, v in r.header_items(): self.assertNotRegex(v, r"[\x00-\x1f\x7f]", k)
+        self.assertEqual("Bad X-Evil: 1 title", r.get_header("Title"))
+        conn = http.client.HTTPConnection("127.0.0.1"); conn.putrequest("POST", "/"); [conn.putheader(k, v) for k, v in r.header_items()]            # http.client itself refuses a bad header value: it must not
+        self.assertEqual("one two", dash.clean_text("one\r\ntwo".replace("\r\n", " ")))
+    def test_send_alert_cleans_the_title_before_it_is_logged_and_sent(self):
+        dash.send_alert = self.real; seen = []; dash.CONF["alerts"].update(enabled=False, url=""); dash.event = (lambda real: lambda kind, text, *a, **k: (seen.append(text), real(kind, text, *a, **k)))(dash.event)
+        try: dash.send_alert("T\r\nitle", "text\x00", "warn", "x")
+        finally: dash.event = dash.event.__closure__[0].cell_contents if hasattr(dash.event, "__closure__") and dash.event.__closure__ else dash.event
+        self.assertTrue(seen and "\r" not in seen[0] and "\x00" not in seen[0] and seen[0].startswith("alert") is False)
+    def test_forged_new_keys_use_only_their_own_lane_and_a_known_node_still_verifies(self):
+        genuine_key, genuine = make_advert(seed=b"\x34" * 32, ts=int(self.now)); dash.NODES[genuine_key] = {"key": genuine_key, "name": "", "type": 2, "lat": None, "lon": None, "first": 0, "last": 0, "adverts": 1}
+        for i in range(200):                                                     # a flood of adverts, each with a made-up key
+            fake = bytes([0x11, 0]) + bytes([i, i >> 8]) * 16 + _st.pack("<I", int(self.now)) + bytes(64) + bytes([0x82]) + b"x"
+            self.hear(fake, rx="BB" * 32)
+        self.assertEqual({}, {k: v for k, v in dash.NODES.items() if k != genuine_key}); self.assertLessEqual(len(dash.ADV_BUDGET_NEW), dash.ADV_BUDGET_NEW.maxlen); self.assertEqual(0, len(dash.ADV_BUDGET))
+        info = dash.parse_packet(genuine); self.assertTrue(dash.advert_note(genuine_key, info, self.now + 1, rx="CC" * 32))      # the genuine one is still checked
+    def test_a_small_order_key_with_an_all_zero_signature_never_makes_a_node(self):
+        for pubhex in ("00" * 32, "01" + "00" * 31, "ec" + "ff" * 30 + "7f", "00" * 31 + "80", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"):       # zero, the identity, the sign-flipped point and an order 8 point
+            pub = bytes.fromhex(pubhex); app = bytes([0x82]) + b"x"; ts = 0
+            while ts < 400:                                                                    # the weakness: find a time for which the bare ed_verify says yes
+                t4 = _st.pack("<I", ts)
+                if dash.ENR.ed_verify(pub, pub + t4 + app, bytes(64)): break
+                ts += 1
+            if ts == 400: continue                                                              # (a key that is no point at all can never verify)
+            pkt = bytes([0x11, 0]) + pub + t4 + bytes(64) + app
+            self.assertIsNone(dash.advert_verified(pkt[2:])); self.hear(pkt)
+        self.assertEqual({}, dash.NODES); self.assertEqual(0, dash.DB.execute("SELECT COUNT(*) FROM newnodes").fetchone()[0]); self.assertTrue(dash.small_order_key(bytes(32))); self.assertFalse(dash.small_order_key(dash.ENR.ed_keypair(b"\x01" * 32)[1]))
+    def test_one_noisy_receiver_cannot_use_everyone_elses_checks(self):
+        for i in range(90):
+            k, pkt = make_advert(seed=bytes([i + 1]) * 32, ts=int(self.now)); self.hear(pkt, rx="BB" * 32, now=self.now + i * 0.01)
+        n = len(dash.NODES); self.assertLessEqual(n, dash.ADV_RX_PER_MIN)                  # that receiver is capped
+        k, pkt = make_advert(seed=b"\xee" * 32, ts=int(self.now)); self.hear(pkt, rx="CC" * 32); self.assertIn(k, dash.NODES) if len(dash.ADV_BUDGET_NEW) < dash.ADV_BUDGET_NEW.maxlen else None
+    def test_a_failed_key_is_not_re_checked_every_packet_but_is_after_the_short_gap(self):
+        k, bad = make_advert(seed=b"\x35" * 32, ts=int(self.now), tamper=True); info = dash.parse_packet(bad)
+        self.assertFalse(dash.advert_note(k, info, self.now, rx="AA" * 32, fresh=True)); n = len(dash.ADV_BUDGET_NEW)
+        for i in range(20): self.assertIsNone(dash.advert_note(k, info, self.now + i, rx="AA" * 32, fresh=True))
+        self.assertEqual(n, len(dash.ADV_BUDGET_NEW)); self.assertEqual(1, dash.COUNT["advert_badsig"])
+        _, good = make_advert(seed=b"\x35" * 32, ts=int(self.now)); self.assertTrue(dash.advert_note(k, dash.parse_packet(good), self.now + dash.ADV_FAIL_GAP + 1, rx="AA" * 32, fresh=True))      # a genuine advert is not locked out for 20 minutes
+    def test_drift_ignores_a_replayed_old_advert_but_keeps_a_real_clock_error(self):
+        now = int(self.now)
+        replay = [[now - 5000, -86400, 0], [now - 3000, -86400 - 2000, 0], [now - 100, -86400 - 4900, 0]]             # an old advert heard again and again: the offset grows by the time that passed
+        self.assertIsNone(dash.drift_median(replay, now))
+        mis = [[now - 5000, 905, 0], [now - 3000, 910, 0], [now - 100, 903, 0]]                                          # a clock that is really fast: the same offset every time
+        self.assertEqual(905, dash.drift_median(mis, now)); self.assertEqual(3, 3)
+        self.assertEqual(6, dash.drift_median([[now - 100, 5, 0], [now, 7, 0]], now))                                    # near our clock: believed at once
+        self.assertEqual(7, dash.drift_median([[now - 100, 5, 0], [now, 7, 0], [now - 50, 3000, 0], [now - 40, -7000, 0], [now - 30, 9, 0]], now))      # lone far samples are left out
+    def test_a_bad_samples_column_does_not_raise(self):
+        K = "9" * 64; dash.NODES[K] = {"key": K, "name": "x", "type": 2, "last": 1}
+        for raw in ('{"a": 1}', '[1, 2]', '[[1,2]]', 'null'): dash.DB.execute("INSERT OR REPLACE INTO clockdrift VALUES(?,?,?)", (K, 1, raw)); dash.drift_view(self.now); dash.drift_note(K, int(self.now) + 1, int(self.now))
+
+
+class RetentionAndGrowth(unittest.TestCase):
+    """D and K."""
+    def setUp(self):
+        dash.db_init(); [dash.DB.execute("DELETE FROM " + t) for t in ("traffic", "telem", "airtime", "newnodes", "routes", "snr", "hophist")]; self.keep = dict(dash.BACKUP); dash.COUNT["routes_dropped"] = 0
+    def tearDown(self): dash.BACKUP.update(self.keep); dash.CFG["backup"] = True
+    def test_traffic_default_is_400_days(self):
+        self.assertEqual(400, dash.DEFAULTS["traffic_keep_days"]); self.assertEqual(90, dash.DEFAULTS["telem_keep_days"])
+        now = int(time.time()); dash.BACKUP["ts"] = 1; dash.DB.executemany("INSERT INTO traffic VALUES(?,?,?,?,?,?)", [(now - 100 * 86400, "N", "R", "ADVERT", 0, 1), (now - 401 * 86400, "N", "R", "ADVERT", 0, 1)])
+        dash.retention_run(now); self.assertEqual(1, dash.DB.execute("SELECT COUNT(*) FROM traffic").fetchone()[0])
+    def test_the_30_days_2_37_saved_into_the_config_file_is_put_back_once(self):
+        keep = dict(dash.CONF)
+        try:
+            with open(dash.conf_path(), "w") as f: json.dump({"traffic_keep_days": 30, "title": "x"}, f)
+            dash.conf_load(); self.assertEqual((400, 2), (dash.CONF["traffic_keep_days"], dash.CONF["conf_rev"]))
+            self.assertIsNone(dash.conf_update({"traffic_keep_days": 30})); dash.conf_load(); self.assertEqual(30, dash.CONF["traffic_keep_days"])           # an operator's own choice afterwards is kept
+            with open(dash.conf_path(), "w") as f: json.dump({"traffic_keep_days": 90}, f)
+            dash.conf_load(); self.assertEqual(90, dash.CONF["traffic_keep_days"])
+        finally: os.remove(dash.conf_path()); dash.conf_load(); dash.CONF.update(keep)
+    def test_nothing_is_deleted_until_a_backup_has_succeeded(self):
+        now = int(time.time()); dash.CFG["backup"] = True; dash.BACKUP.update(ts=0, ok=None); dash.DB.execute("INSERT INTO traffic VALUES(?,?,?,?,?,?)", (now - 900 * 86400, "N", "R", "ADVERT", 0, 1))
+        r = dash.retention_run(now); self.assertIn("skipped", r); self.assertEqual(1, dash.DB.execute("SELECT COUNT(*) FROM traffic").fetchone()[0])
+        dash.BACKUP["ts"] = now; dash.retention_run(now); self.assertEqual(0, dash.DB.execute("SELECT COUNT(*) FROM traffic").fetchone()[0])
+        dash.DB.execute("INSERT INTO traffic VALUES(?,?,?,?,?,?)", (now - 900 * 86400, "N", "R", "ADVERT", 0, 1)); dash.BACKUP["ts"] = 0; dash.CFG["backup"] = False       # backups switched off: nothing to wait for
+        self.assertNotIn("skipped", dash.retention_run(now))
+    def test_a_repeater_cannot_fill_the_sensor_table_by_sending_often(self):
+        did = "AB" * 32; dash.TELEM_LAST.clear(); body = json.dumps({"lpp": "0174019A"}).encode()
+        for _ in range(50): dash.on_publish("meshcore/LBA/%s/telemetry" % did, body)
+        self.assertEqual(1, dash.DB.execute("SELECT COUNT(*) FROM telem WHERE did=?", (did,)).fetchone()[0]); dash.DB.execute("DELETE FROM telem"); dash.DEV.pop(did, None)
+    def test_new_route_rows_are_capped_per_hour_but_existing_ones_keep_counting(self):
+        real = dash.ROUTES_PER_HOUR; dash.ROUTES_PER_HOUR = 3; now = time.time()
+        try:
+            for i in range(10): dash.route_note(["%02X" % i], "AA" * 32, now)
+            dash.route_note(["00"], "AA" * 32, now); dash.traffic_flush()
+            self.assertEqual(3, dash.DB.execute("SELECT COUNT(*) FROM routes").fetchone()[0]); self.assertEqual(7, dash.COUNT["routes_dropped"]); self.assertGreaterEqual(dash.DB.execute("SELECT MAX(n) FROM routes").fetchone()[0], 2)
+            dash.route_note(["00"], "AA" * 32, now); dash.route_note(["FF"], "AA" * 32, now); dash.traffic_flush(); self.assertEqual(3, dash.DB.execute("SELECT COUNT(*) FROM routes").fetchone()[0])      # the busiest were kept, the new one refused
+        finally: dash.ROUTES_PER_HOUR = real
+    def test_the_busiest_paths_are_the_ones_kept(self):
+        real = dash.ROUTES_PER_HOUR; dash.ROUTES_PER_HOUR = 2; now = time.time()
+        try:
+            for i in range(5): dash.route_note(["%02X" % i], "AA" * 32, now)
+            for _ in range(4): dash.route_note(["03"], "AA" * 32, now)
+            for _ in range(2): dash.route_note(["04"], "AA" * 32, now)
+            dash.traffic_flush(); self.assertEqual({"03", "04"}, {r[0] for r in dash.DB.execute("SELECT path FROM routes")})
+        finally: dash.ROUTES_PER_HOUR = real
+    def test_an_absurd_path_is_not_recorded(self):
+        self.assertFalse(dash.route_note(["AA"] * 65, "AA" * 32, time.time())); self.assertFalse(dash.route_note([], "AA" * 32, time.time())); self.assertEqual({}, dash.ROUTE_BUF)
+    def test_total_rows_are_capped_oldest_first(self):
+        now = int(time.time()); dash.DB.executemany("INSERT INTO routes VALUES(?,?,?,?,?)", [(now - i * 3600, "P%d" % i, "R", 1, now) for i in range(50)])
+        self.assertEqual(40, dash.prune_excess("routes", "h", 10)); self.assertEqual(10, dash.DB.execute("SELECT COUNT(*) FROM routes").fetchone()[0]); self.assertEqual(now - 9 * 3600, dash.DB.execute("SELECT MIN(h) FROM routes").fetchone()[0])
+        self.assertEqual(0, dash.prune_excess("routes", "h", 10))
+    def test_retention_applies_the_row_caps(self):
+        real = dash.NEWNODES_MAX_ROWS; dash.NEWNODES_MAX_ROWS = 5; now = int(time.time()); dash.BACKUP["ts"] = 1
+        try:
+            dash.DB.executemany("INSERT INTO newnodes VALUES(?,?,?,?,?,?)", [("%064X" % i, now - i, "n", 2, "", "alert") for i in range(20)]); r = dash.retention_run(now)
+            self.assertEqual(15, r["newnodes_excess"]); self.assertEqual(5, dash.DB.execute("SELECT COUNT(*) FROM newnodes").fetchone()[0])
+        finally: dash.NEWNODES_MAX_ROWS = real
+
+
+class BackupSweep(unittest.TestCase):
+    def test_stale_temporary_copies_are_removed_and_other_files_are_not(self):
+        dash.db_init(); d = tempfile.mkdtemp(); dash.CFG["backup_dir"] = d
+        for n in (".tmp-dash-20200101-000000.sqlite", ".tmp-dash-20200102-000000.sqlite"): open(os.path.join(d, n), "w").write("half a copy")
+        for n in (".tmp-other.sqlite", "notes.txt", "dash-20200101-000000.sqlite.bak"): open(os.path.join(d, n), "w").close()
+        try: r = dash.backup_run(1700000000); self.assertTrue(r["ok"], r["error"])
+        finally: dash.CFG["backup_dir"] = ""
+        self.assertEqual({".tmp-other.sqlite", "notes.txt", "dash-20200101-000000.sqlite.bak", "dash-20231114-221320.sqlite"}, set(os.listdir(d)))
+
+
+class Disclosure(unittest.TestCase):
+    """L: who sees what."""
+    PSK = base64.b64encode(bytes([7]) * 16).decode()
+    def setUp(self):
+        dash.db_init(); dash.conf_load(); dash.CONF["web_users"] = {"vic": {"role": "viewer", "devices": []}, "olly": {"role": "owner", "devices": []}}
+        dash.CONF["messages"]["channels"].append({"name": "Club", "psk": self.PSK}); dash.CONF["alerts"]["url"] = "https://user:secret-pass@ntfy.example/topic"
+        self.keep = (dict(dash.BACKUP), dash.CFG["backup_dir"]); dash.CFG["backup_dir"] = "/srv/very-private-folder"; dash.BACKUP.update(ok=False, error="[Errno 13] Permission denied: '/srv/very-private-folder/x'", ts=0)
+        dash.DEV.clear(); d = dash.device("AA" * 32, "LBA"); d.update(name="Hill", last=time.time(), boot_id="1122334455667788", boot_changed=time.time() - 5, reboots=3, stats={"boot_id": "1122334455667788", "uptime_secs": 40, "battery_mv": 4000})
+    def tearDown(self): dash.BACKUP.update(self.keep[0]); dash.CFG["backup_dir"] = self.keep[1]; dash.conf_load(); dash.DEV.clear()
+    def test_non_admin_overview_carries_no_channel_key_and_no_backup_path(self):
+        for who in ("vic", "olly", "nobody-known"):
+            code, txt = http_call("/api/overview", who); self.assertEqual(200, code)
+            for secret in (self.PSK, "secret-pass", dash.MSG.PUBLIC_PSK, "very-private-folder", "Permission denied"): self.assertNotIn(secret, txt, (who, secret))
+            j = json.loads(txt); self.assertTrue(all("psk" not in c for c in j["config"]["messages"]["channels"])); self.assertNotIn("web_users", j); self.assertNotIn("dir", j["backup"])
+            self.assertNotIn("web_users", j["config"]); self.assertTrue(any(c.get("psk_set") for c in j["config"]["messages"]["channels"]))
+    def test_admin_still_gets_everything_it_needs_to_edit_settings(self):
+        code, txt = http_call("/api/overview", "admin"); j = json.loads(txt)
+        self.assertIn(self.PSK, txt); self.assertIn("very-private-folder", j["backup"]["dir"]); self.assertIn("vic", j["web_users"]); self.assertIn("secret-pass", j["config"]["alerts"]["url"])
+    def test_every_other_place_the_settings_are_returned_is_redacted_too(self):
+        for who in ("vic", "olly"):
+            code, txt = http_call("/api/export/config.json", who); self.assertEqual(403, code); self.assertNotIn(self.PSK, txt)
+            code, txt = http_call("/api/config", who, "POST", {"config": {"title": "x"}}); self.assertEqual(403, code); self.assertNotIn(self.PSK, txt)
+        code, txt = http_call("/api/export/config.json", "admin"); self.assertIn(self.PSK, txt)
+        self.assertNotIn(self.PSK, json.dumps(dash.overview())); self.assertNotIn(self.PSK, json.dumps(dash.conf_redacted(False)))
+        for k, v in dash.CONF.items(): pass
+        self.assertIn(self.PSK, json.dumps(dash.CONF))                       # the redaction works on a copy: the live settings keep their keys
+    def test_the_diagnostics_line_for_a_failed_backup_hides_the_path_from_non_admins(self):
+        j = json.loads(http_call("/api/overview", "vic")[1]); line = [d for d in j["diagnostics"] if d["title"].startswith("Database backup")]
+        self.assertTrue(line); self.assertNotIn("private", json.dumps(line)); self.assertIn("private", json.dumps([d for d in json.loads(http_call("/api/overview", "admin")[1])["diagnostics"] if d["title"].startswith("Database backup")]))
+    def test_public_pages_carry_no_boot_ids_reboot_counts_or_keys(self):
+        seen = []
+        for path in ("/public/api/overview", "/public/api/network", "/public/api/health", "/public/"): seen.append(http_call(path)[1])
+        blob = "\n".join(seen)
+        for word in ("boot_id", "boot_changed", "reboots", "1122334455667788", self.PSK, "very-private-folder", "secret-pass"): self.assertNotIn(word, blob, word)
+        j = json.loads(seen[0]); self.assertEqual(4000, j["devices"][0]["stats"]["battery_mv"])        # the useful stats are still there
+        self.assertNotIn("boot_id", json.dumps(dash.public_overview(), default=str))
+
+
+class ViewCache(unittest.TestCase):
+    """M, server side."""
+    def test_a_heavy_view_is_computed_once_per_interval_however_often_it_is_asked(self):
+        dash.VIEW_CACHE.clear(); n = []
+        def fn(): n.append(1); return {"v": len(n)}
+        for _ in range(20): self.assertEqual({"v": 1}, dash.cached_view("k", fn))
+        self.assertEqual(1, len(n)); self.assertEqual({"v": 2}, dash.cached_view("k", fn, ttl=0)); self.assertEqual(2, len(n))
+    def test_the_routes_airtime_and_watchtower_endpoints_use_it(self):
+        dash.VIEW_CACHE.clear(); real = (dash.route_view, dash.airtime_view, dash.watchtower_view); calls = {"r": 0, "a": 0, "w": 0}
+        def mk(name, fn):
+            def f(*a, **k): calls[name] += 1; return fn(*a, **k)
+            return f
+        dash.route_view = mk("r", real[0]); dash.airtime_view = mk("a", real[1]); dash.watchtower_view = mk("w", real[2]); dash.db_init()
+        try:
+            for _ in range(5):
+                for p in ("/api/routes", "/api/airtime?hours=24", "/api/watchtower"): self.assertEqual(200, http_call(p)[0], p)
+            self.assertEqual({"r": 1, "a": 1, "w": 1}, calls); http_call("/api/airtime?hours=6"); self.assertEqual(2, calls["a"])       # another range is another view
+        finally: dash.route_view, dash.airtime_view, dash.watchtower_view = real; dash.VIEW_CACHE.clear()
+    def test_the_cache_stays_small(self):
+        dash.VIEW_CACHE.clear()
+        for i in range(200): dash.cached_view(("k", i), lambda: 1)
+        self.assertLessEqual(len(dash.VIEW_CACHE), 65)
+
+
+HTML = open(os.path.join(HERE, "dash.html"), encoding="utf-8").read()
+def js_between(start, end):
+    i = HTML.index(start); return HTML[i:HTML.index(end, i)]
+def run_node(src):
+    p = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30)
+    if p.returncode: raise AssertionError(p.stderr[-2000:])
+    return json.loads(p.stdout)
+
+@unittest.skipUnless(subprocess.run(["which", "node"], capture_output=True).returncode == 0, "node is not installed")
+class PageScripts(unittest.TestCase):
+    """M and N, front end: the page's own functions, run under node with a fake document."""
+    PRE = """
+const pend = []; let fetches = 0, draws = 0; const els = {};
+const document = {getElementById: id => els[id] || null};
+const S = {naSel: "", naDays: 7};
+const esc = s => String(s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
+const kpi = (i, l, v, n) => n; const table = () => ""; const naSnr = () => ""; const naHeat = () => ""; const draw = () => { draws++; };
+const jget = u => new Promise((res, rej) => { fetches++; pend.push({u, res, rej}); });
+"""
+    HELPERS = js_between("const SLOW_MS", "async function jget(u)")
+    def js(self, body, extra=""):
+        return run_node(self.PRE + self.HELPERS + extra + "(async () => {" + body + "})().then(() => {}, e => { console.error(e); process.exit(1); });")
+    def test_script_parses(self):
+        i = HTML.index("<script>") + 8; open(os.path.join(tempfile.gettempdir(), "umc_dash_check.js"), "w").write(HTML[i:HTML.rindex("</script>")])
+        p = subprocess.run(["node", "--check", os.path.join(tempfile.gettempdir(), "umc_dash_check.js")], capture_output=True, text=True); self.assertEqual(0, p.returncode, p.stderr)
+    def test_a_stale_node_answer_is_thrown_away(self):
+        na = js_between("const naOptions", "function newNodesPanel")
+        out = self.js("""
+S.naList = [{id: "A", name: "a", n: 1}, {id: "B", name: "b", n: 1}]; S.T = {naList: Date.now()}; els.naBox = {innerHTML: ""};
+S.naSel = "A"; const p1 = naLoad();
+S.naSel = "B"; S.naHtml = ""; S.naTag = ""; const p2 = naLoad();
+const reply = (u, name) => pend.find(x => x.u.includes("id=" + u)).res({total: 1, name, days: 7, hops: [], heatmap: {days: []}, snr: null});
+reply("B", "answer-for-B"); await p2; reply("A", "answer-for-A"); await p1;
+console.log(JSON.stringify({html: S.naHtml, box: els.naBox.innerHTML, tag: S.naTag, fetches}));""", na)
+        self.assertIn("answer-for-B", out["html"]); self.assertNotIn("answer-for-A", out["html"] + out["box"]); self.assertEqual("B|7", out["tag"]); self.assertEqual(2, out["fetches"])
+    def test_node_answer_is_cached_between_draws_and_a_range_change_refetches(self):
+        na = js_between("const naOptions", "function newNodesPanel")
+        out = self.js("""
+S.naList = [{id: "A", name: "a", n: 1}]; S.T = {naList: Date.now()}; els.naBox = {innerHTML: ""}; S.naSel = "A";
+const ask = async () => { const p = naLoad(); await new Promise(r => setTimeout(r, 0)); while (pend.length) pend.shift().res({total: 1, name: "n", days: 7, hops: [], heatmap: {days: []}, snr: null}); await p; };
+await ask(); const f1 = fetches; for (let i = 0; i < 10; i++) await ask(); const f2 = fetches;
+S.naDays = 30; S.naHtml = ""; S.naTag = ""; await ask(); const f3 = fetches;
+S.T.na = Date.now() - 60000; await ask(); const f4 = fetches;
+console.log(JSON.stringify({f1, f2, f3, f4}));""", na)
+        self.assertEqual((1, 1, 2, 3), (out["f1"], out["f2"], out["f3"], out["f4"]))
+    def test_the_node_list_is_read_again_after_five_minutes(self):
+        na = js_between("const naOptions", "function newNodesPanel")
+        out = self.js("""
+S.naList = [{id: "A", name: "a", n: 1}]; S.T = {naList: Date.now() - 400000, na: Date.now()}; S.naSel = "A"; S.naHtml = "x"; S.naTag = "A|7"; els.naBox = {innerHTML: ""}; els.naSelect = {innerHTML: ""};
+const p = naLoad(); await new Promise(r => setTimeout(r, 0)); const first = pend[0].u; pend[0].res({nodes: [{id: "A", name: "a", n: 1}, {id: "N", name: "newnode", n: 9}]}); await p;
+console.log(JSON.stringify({first, list: S.naList.length, sel: els.naSelect.innerHTML}));""", na)
+        self.assertEqual("/api/node", out["first"]); self.assertEqual(2, out["list"]); self.assertIn("newnode", out["sel"])
+    def test_slow_panels_fetch_once_per_interval_and_never_twice_at_once(self):
+        loaders = js_between("async function airLoad()", "// Watchtower (2.36)").replace("S.airHtml", "S.airHtml")
+        out = self.js("""
+S.airH = 24; els.airBox = {innerHTML: ""};
+const a = airLoad(), b = airLoad(), c = airLoad(); await new Promise(r => setTimeout(r, 0)); const during = fetches;
+pend.shift().res({devices: [], warn_pct: 10, warn_minutes: 15}); await Promise.all([a, b, c]);
+for (let i = 0; i < 12; i++) await airLoad();                                  // twelve redraws (a minute of ticks)
+const after = fetches; S.T.air -= 60000; const p = airLoad(); await new Promise(r => setTimeout(r, 0)); pend.shift().res({devices: [], warn_pct: 10, warn_minutes: 15}); await p;
+S.airHtml = ""; const q = airLoad(); await new Promise(r => setTimeout(r, 0)); pend.shift().res({devices: [], warn_pct: 10, warn_minutes: 15}); await q;
+console.log(JSON.stringify({during, after, later: fetches, box: els.airBox.innerHTML.length > 0}));""", "const airChart = () => '';" + loaders)
+        self.assertEqual((1, 1, 3, True), (out["during"], out["after"], out["later"], out["box"]))
+    def test_a_failed_fetch_is_retried_in_ten_seconds_not_every_tick(self):
+        loaders = js_between("async function rhLoad()", "// Node analytics (D6)")
+        out = self.js("""
+els.rhBox = {innerHTML: ""}; const p = rhLoad(); await new Promise(r => setTimeout(r, 0)); pend.shift().rej(new Error("503")); await p;
+const f1 = fetches; await rhLoad(); const f2 = fetches; S.T.rh -= 11000; const q = rhLoad(); await new Promise(r => setTimeout(r, 0)); const f3 = fetches; pend.shift().rej(new Error("503")); await q;
+console.log(JSON.stringify({f1, f2, f3, box: els.rhBox.innerHTML}));""", "const RH_COL = {}; const ago = () => ''; " + loaders)
+        self.assertEqual((1, 1, 2), (out["f1"], out["f2"], out["f3"])); self.assertIn("could not load", out["box"])
+    def test_sensor_lines_are_fetched_once_a_minute_not_every_redraw(self):
+        fn = js_between("async function sensLines()", "// Packets by route")
+        out = self.js("""
+const mk = id => ({id, dataset: {i: "AA", c: "1", t: "116"}, innerHTML: ""}); const a = mk("sp_1"), b = mk("sp_2"); document.querySelectorAll = () => [a, b];
+const run = async () => { const p = sensLines(); for (let i = 0; i < 4; i++) { await new Promise(r => setTimeout(r, 0)); while (pend.length) pend.shift().res([[1, 1], [2, 2], [3, 3]]); } await p; };
+await run(); const f1 = fetches; for (let i = 0; i < 10; i++) await run(); const f2 = fetches; a.innerHTML = ""; await run();
+console.log(JSON.stringify({f1, f2, again: a.innerHTML.length > 0}));""", fn)
+        self.assertEqual((2, 2, True), (out["f1"], out["f2"], out["again"]))
+    def test_the_map_dialog_shows_what_the_same_reply_carries_and_confirms_with_its_token(self):
+        fn = js_between("async function mapPublish(id)", "// Observed routes (D5)")
+        out = self.js("""
+const asked = [], sent = []; globalThis.confirm = t => { asked.push(t); return true; }; globalThis.alert = () => {}; globalThis.loadAudit = async () => {}; globalThis.mapLoad = () => {};
+let step = 0; globalThis.post = async (u, b) => { sent.push(b); step++;
+  if (step === 1) return {needs_confirm: true, name: "Hill", lat: 53.5, lon: -1.4, token: "T1"};
+  if (step === 2) return {needs_confirm: true, changed: true, name: "Moved", lat: 40, lon: 3, token: "T2"};
+  return {ok: true, status: 200}; };
+await mapPublish("AB".repeat(32));
+console.log(JSON.stringify({asked, sent}));""", fn)
+        self.assertEqual([{"device": "AB" * 32}, {"device": "AB" * 32, "confirm": "T1"}, {"device": "AB" * 32, "confirm": "T2"}], out["sent"])
+        self.assertIn("Hill", out["asked"][0]); self.assertIn("53.50000", out["asked"][0]); self.assertIn("Moved", out["asked"][1]); self.assertIn("40.00000", out["asked"][1]); self.assertIn("changed", out["asked"][1])
+    def test_the_map_dialog_does_not_confirm_when_cancelled(self):
+        fn = js_between("async function mapPublish(id)", "// Observed routes (D5)")
+        out = self.js("""
+const sent = []; globalThis.confirm = () => false; globalThis.alert = () => {}; globalThis.loadAudit = async () => {}; globalThis.mapLoad = () => {};
+globalThis.post = async (u, b) => { sent.push(b); return {needs_confirm: true, name: "Hill", lat: 1, lon: 2, token: "T1"}; };
+await mapPublish("AB".repeat(32)); console.log(JSON.stringify({sent}));""", fn)
+        self.assertEqual(1, len(out["sent"]))
+    def test_catalogue_text_is_escaped_where_the_page_shows_it(self):
+        out = self.js("""console.log(JSON.stringify({e: esc('<img src=x onerror=alert(1)> " \\' &')}));""")
+        self.assertNotIn("<", out["e"]); self.assertNotIn('"', out["e"])
+        for frag in ("esc(x.label || \"\")", "esc(x.l)", "esc(c.credit || \"\")", "esc(c.error)"): self.assertIn(frag, HTML)
+        self.assertNotRegex(HTML, r"innerHTML\s*=\s*[^;\n]*\.label[^;\n]*;")                  # no direct innerHTML assignment of a channel label
+
+
+class CatalogueHardening(unittest.TestCase):
+    """P: the 2.37 catalogue code."""
+    KEY = base64.b64encode(bytes(range(16))).decode()
+    def setUp(self): dash.db_init(); dash.conf_load(); dash.cat_reset(); self.keep = dash.CAT_HTTP
+    def tearDown(self): dash.CAT_HTTP = self.keep; dash.cat_reset(); dash.conf_load()
+    def test_labels_with_direction_overrides_zero_width_or_unassigned_characters_are_refused(self):
+        for lab in ("Club‮gnp.exe", "zero​width", "bell\x07", "line\nbreak", "﻿bom", " sep", "   ", "privateuse", "unassigned͸"):
+            self.assertIsNone(dash.cat_entry({"channel": "#leeds", "description": lab}), repr(lab))
+        for lab in ("Leeds & district <net>", "Café Ünïcode ✓", "O'Brien \"quoted\""): self.assertEqual(lab, dash.cat_entry({"channel": "#leeds", "description": lab})["label"])
+    def test_a_redirect_must_stay_on_the_host_the_port_and_https_without_a_login(self):
+        h = dash.CatRedirect("raw.githubusercontent.com"); rq = urllib.request.Request("https://raw.githubusercontent.com/a")
+        for bad in ("https://evil.example/x", "http://raw.githubusercontent.com/x", "https://raw.githubusercontent.com:8443/x", "https://user:pw@raw.githubusercontent.com/x", "https://raw.githubusercontent.com:99999999/x", "ftp://raw.githubusercontent.com/x"):
+            with self.assertRaises(urllib.error.URLError, msg=bad): h.redirect_request(rq, None, 302, "Found", {}, bad)
+        self.assertIsNotNone(h.redirect_request(rq, None, 302, "Found", {}, "https://RAW.githubusercontent.com/other"))
+    def test_a_server_that_drips_bytes_cannot_hold_the_thread(self):
+        class R:
+            headers = {}
+            def __enter__(s): return s
+            def __exit__(s, *a): pass
+            def read(s, n=-1): time.sleep(0.01); return b"x"
+        class Op:
+            def open(s, *a, **k): return R()
+        real = dash.urllib.request.build_opener; real_dl = dash.CAT_DEADLINE; dash.urllib.request.build_opener = lambda *a: Op(); dash.CAT_DEADLINE = 0.2
+        try:
+            t0 = time.time()
+            with self.assertRaises(ValueError) as cm: dash.cat_http_get("https://raw.githubusercontent.com/x")
+            self.assertLess(time.time() - t0, 5); self.assertIn("too long", str(cm.exception))
+        finally: dash.urllib.request.build_opener = real; dash.CAT_DEADLINE = real_dl
+    def test_the_name_index_is_never_seen_empty_while_it_is_rebuilt(self):
+        dash.CAT["entries"] = [{"name": "#c%d" % i, "label": "x", "key": None, "prio": 2} for i in range(300)]; dash.cat_build_index(); stop = _th.Event(); misses = []
+        def reader():
+            while not stop.is_set():
+                if dash.CAT_BY_NAME.get("#c5") is None: misses.append(1)
+        t = _th.Thread(target=reader, daemon=True); t.start()
+        try:
+            for _ in range(60): dash.cat_build_index()
+        finally: stop.set(); t.join(5)
+        self.assertEqual([], misses)
+    def test_watched_channels_that_the_catalogue_no_longer_lists_are_dropped(self):
+        dash.CAT["entries"] = [{"name": "#a", "label": "A", "key": None, "prio": 2}, {"name": "#b", "label": "B", "key": None, "prio": 2}]; dash.cat_build_index()
+        dash.CAT["hits"].update({"#a": {"packets": 2, "last": 1}, "#b": {"packets": 1, "last": 1}}); dash.CAT["entries"] = [dash.CAT["entries"][0]]; dash.cat_build_index()
+        self.assertEqual({"#a"}, set(dash.CAT["hits"])); self.assertNotIn("#b", dash.CAT_BY_NAME)
+    def test_a_promoted_channel_is_not_lost_to_a_settings_save(self):
+        dash.CAT["entries"] = [{"name": "#zed", "label": "Zed", "key": None, "prio": 2}]; dash.cat_build_index(); dash.CAT["hits"]["#zed"] = {"packets": dash.GROUP_SCAN_MIN, "last": 1}
+        self.assertEqual(["#zed"], dash.cat_promote()); self.assertIsNone(dash.conf_update({"title": "Another title"})); self.assertIn("#zed", [c["name"] for c in dash.CONF["messages"]["channels"]])
+    def test_a_hand_edited_config_file_cannot_break_the_refresh_loop(self):
+        with open(dash.conf_path(), "w") as f: json.dump({"catalogue": {"refresh_hours": "soon", "url": "http://insecure.example/x", "enabled": "yes", "keyed": 1}}, f)
+        dash.conf_load(); c = dash.CONF["catalogue"]; self.assertEqual(dash.DEFAULTS["catalogue"], c)
+        with open(dash.conf_path(), "w") as f: json.dump({"catalogue": {"refresh_hours": 12, "keyed": True}}, f)
+        dash.conf_load(); self.assertEqual((12, True), (dash.CONF["catalogue"]["refresh_hours"], dash.CONF["catalogue"]["keyed"])); os.remove(dash.conf_path())
+    def test_the_status_and_exports_still_carry_no_key(self):
+        e = dash.cat_parse(json.dumps({"license": "CC0-1.0", "channels": [{"channel": "club", "description": "Club", "key": self.KEY}]}).encode())["entries"]; dash.CAT["entries"] = e; dash.cat_build_index()
+        for who in ("admin", "vic"):
+            for path in ("/api/overview", "/api/catalogue", "/api/messages", "/api/groups"): self.assertNotIn(self.KEY, http_call(path, who)[1], (who, path))

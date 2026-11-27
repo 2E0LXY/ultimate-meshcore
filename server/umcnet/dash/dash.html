@@ -300,6 +300,16 @@ document.addEventListener("mouseover", e => { if (e.target.closest(".helppop") &
 document.addEventListener("mouseleave", e => { if (e.target === pop && !popPinned) closeHelp(); }, true);
 document.addEventListener("keydown", e => { if (e.key === "Escape" && pop) closeHelp(); });
 
+// The slow panels (airtime, routes, watchtower, battery, presence, sensors, map, node analytics) are drawn again every 5 s with the page, but their data is fetched
+// only when what they hold is older than SLOW_MS, and never twice at once. A range or node change empties the cached html, which forces a fetch.
+const SLOW_MS = 45000;
+function slowFresh(key, htmlKey, boxId) {
+  S.T = S.T || {}; S.E = S.E || {}; const box = document.getElementById(boxId);
+  if (box && (S[htmlKey] || S.E[key]) && Date.now() - (S.T[key] || 0) < SLOW_MS) { if (S[htmlKey]) box.innerHTML = S[htmlKey]; return true; }
+  return false;
+}
+function slowBusy(key, tag = 1) { S.B = S.B || {}; if (S.B[key] === tag) return true; S.B[key] = tag; return false; }
+function slowDone(key, ok) { S.B = S.B || {}; S.T = S.T || {}; S.E = S.E || {}; S.B[key] = 0; S.E[key] = ok ? 0 : 1; S.T[key] = ok ? Date.now() : Date.now() - SLOW_MS + 10000; }      // a failure is tried again in 10 s, not every tick
 async function jget(u) { const r = await fetch(u, {cache: "no-store"}); if (!r.ok) throw new Error(u + " " + r.status); return r.json(); }
 const panel = (title, note, inner, hk = "", cls = "s12") => `<div class="pn ${cls}"><h3>${esc(title)}${hk ? q(hk) : ""} <em>${esc(note || "")}</em></h3>${inner}</div>`;
 const table = (heads, rows, empty = "Nothing yet.") => `<div style="overflow-x:auto"><table><thead><tr>${heads.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="${heads.length}" class="tr">${esc(empty)}</td></tr>`}</tbody></table></div>`;
@@ -428,12 +438,14 @@ function presStrip(r) {
 }
 async function presLoad() {
   const box = document.getElementById("presBox"); if (!box) return;
+  if (slowFresh("pres", "presHtml", "presBox") || slowBusy("pres")) return;
+  let ok = false;
   try {
     const d = await jget("/api/presence?hours=" + (S.presH || 24));
     S.presHtml = d.length ? d.map(presStrip).join("") + '<div class="tr">The blue line is the movement score (0 to 100 %) where the sensor reports it.</div>'
       : '<span class="tr">No presence sensor has reported yet. Turn on Wi-Fi motion sensing on a repeater built with it (set csi on), or fit a PIR or mmWave sensor.</span>';
-    const b2 = document.getElementById("presBox"); if (b2) b2.innerHTML = S.presHtml;
-  } catch { box.innerHTML = '<span class="tr">could not load the timeline</span>'; }
+    const b2 = document.getElementById("presBox"); if (b2) b2.innerHTML = S.presHtml; ok = true;
+  } catch { box.innerHTML = '<span class="tr">could not load the timeline</span>'; } finally { slowDone("pres", ok); }
 }
 
 // Battery trend (D7): each repeater's own battery voltage over a chosen range, with a rough time-to-low estimate only when the data allows
@@ -457,11 +469,13 @@ function battChart(r, d) {
 }
 async function battLoad() {
   const box = document.getElementById("batBox"); if (!box) return;
+  if (slowFresh("batt", "batHtml", "batBox") || slowBusy("batt")) return;
+  let ok = false;
   try {
     const d = await jget("/api/battery?hours=" + (S.batH || 24));
     S.batHtml = d.devices.length ? d.devices.map(r => battChart(r, d)).join("") + `<div class="tr">Dashed line: the low limit (${d.low_v.toFixed(2)} V, Settings &gt; Checks). ${esc(d.note)}</div>` : '<span class="tr">No battery readings in this range. A repeater with a battery gauge sends them to the broker.</span>';
-    const b2 = document.getElementById("batBox"); if (b2) b2.innerHTML = S.batHtml;
-  } catch { box.innerHTML = '<span class="tr">could not load the battery history</span>'; }
+    const b2 = document.getElementById("batBox"); if (b2) b2.innerHTML = S.batHtml; ok = true;
+  } catch { box.innerHTML = '<span class="tr">could not load the battery history</span>'; } finally { slowDone("batt", ok); }
 }
 
 // Sensors: the newest reading of every sensor on every repeater, with a 24 h line
@@ -478,12 +492,16 @@ function vSensors(o) {
   return `<div class="panels">${battPanel()}${presPanel()}${html}</div>`;
 }
 async function sensLines() {
+  S.sc = S.sc || {};
   for (const el of document.querySelectorAll("svg[data-i]")) {
+    const c = S.sc[el.id];
+    if (c && Date.now() - c.t < SLOW_MS) { el.innerHTML = c.h; continue; }
     try {
       const d = await jget(`/api/telemetry?id=${el.dataset.i}&ch=${el.dataset.c}&type=${el.dataset.t}&hours=24`);
-      if (d.length < 2) continue;
+      if (d.length < 2) { S.sc[el.id] = {t: Date.now(), h: ""}; continue; }
       const t0 = d[0][0], t1 = d[d.length - 1][0] || t0 + 1, vs = d.map(x => x[1]), lo = Math.min(...vs), hi = Math.max(...vs), sp = hi - lo || 1;
-      el.innerHTML = `<polyline fill="none" stroke="#2fe27a" stroke-width="1.5" points="${d.map(x => `${((x[0] - t0) / Math.max(1, t1 - t0) * 148 + 1).toFixed(1)},${(32 - (x[1] - lo) / sp * 30).toFixed(1)}`).join(" ")}"/>`;
+      const h = `<polyline fill="none" stroke="#2fe27a" stroke-width="1.5" points="${d.map(x => `${((x[0] - t0) / Math.max(1, t1 - t0) * 148 + 1).toFixed(1)},${(32 - (x[1] - lo) / sp * 30).toFixed(1)}`).join(" ")}"/>`;
+      S.sc[el.id] = {t: Date.now(), h}; el.innerHTML = h;
     } catch {}
   }
 }
@@ -522,12 +540,14 @@ function airChart(r, d) {
 }
 async function airLoad() {
   const box = document.getElementById("airBox"); if (!box) return;
+  if (slowFresh("air", "airHtml", "airBox") || slowBusy("air")) return;
+  let ok = false;
   try {
     const d = await jget("/api/airtime?hours=" + (S.airH || 24));
     S.airHtml = d.devices.length ? d.devices.map(r => airChart(r, d)).join("") + `<div class="tr">Dashed line: the alert threshold (${d.warn_pct}% sustained for ${d.warn_minutes} minutes). Worked out from each repeater's transmit and receive airtime counters. This is an operational alert over a short window, not the regulatory duty-cycle limit, which is measured over a rolling hour.</div>`
       : '<span class="tr">No airtime readings yet. They build up from the repeaters\' status messages (tx_air_secs).</span>';
-    const b2 = document.getElementById("airBox"); if (b2) b2.innerHTML = S.airHtml;
-  } catch { box.innerHTML = '<span class="tr">could not load the airtime history</span>'; }
+    const b2 = document.getElementById("airBox"); if (b2) b2.innerHTML = S.airHtml; ok = true;
+  } catch { box.innerHTML = '<span class="tr">could not load the airtime history</span>'; } finally { slowDone("air", ok); }
 }
 // Watchtower (2.36): signal trend, clock drift, flood.max advice and TX advice. Everything here is advisory: nothing is applied from this table.
 const wtSec = v => v == null ? "collecting" : (v >= 0 ? "+" : "−") + (Math.abs(v) >= 3600 ? (Math.abs(v) / 3600).toFixed(1) + " h" : Math.abs(v) >= 120 ? Math.round(Math.abs(v) / 60) + " min" : Math.abs(v) + " s");
@@ -537,6 +557,8 @@ function watchPanel() {
 }
 async function wtLoad() {
   const box = document.getElementById("wtBox"); if (!box) return;
+  if (slowFresh("wt", "wtHtml", "wtBox") || slowBusy("wt")) return;
+  let ok = false;
   try {
     const d = await jget("/api/watchtower");
     const snr = table(["Node", "Last 24 h (median)", "Previous 7 days (median)", "Change", "Packets (24 h / 7 d)", ""], d.snr.rows.map(r => `<tr><td><b>${esc(r.name)}</b>${r.own ? ' <span class="tr">ours</span>' : ""}</td><td>${r.recent} dB</td><td>${r.base} dB</td><td>${r.delta > 0 ? "" : "+"}${(-r.delta).toFixed(1)} dB</td><td>${r.n_recent} / ${r.n_base}</td><td>${r.alert ? '<span class="tag tx">worse</span>' : r.delta >= d.snr.thr ? '<span class="tag tx">worse, alert pending</span>' : ""}</td></tr>`),
@@ -549,8 +571,8 @@ async function wtLoad() {
       <h4 style="margin:4px 0">Clocks <span class="tr">${d.drift.alerts ? "alerts on" : "report only"}, beyond ${wtSec(d.drift.thr).replace("+", "")}</span></h4>${drift}<div class="tr" style="margin:4px 0 12px">Each node's own clock from its signed adverts, compared with the time they were heard (median of up to five samples in 48 hours). Adverts can be a few seconds late; a repeater with no clock source drifts steadily.</div>
       <h4 style="margin:4px 0">Maximum flood hops <span class="tr">advisory, never applied</span></h4>${hops}<div class="tr" style="margin:4px 0 12px">The smallest value covering 95% of the hop counts our repeater heard on flood packets, plus one, between 2 and 64, from at least 200 packets over 3 days. Counts start when this version starts. It reflects what reaches that repeater, not what it should forward.</div>
       <h4 style="margin:4px 0">Transmit power <span class="tr">advisory only</span></h4>${tx}<div class="tr" style="margin:4px 0">${esc(d.tx_label)} Margin is the neighbour's SNR over the demodulation limit of the repeater's spreading factor. Lowering is only suggested when every active neighbour keeps more than the headroom, and raising is never suggested.</div>`;
-    const b2 = document.getElementById("wtBox"); if (b2) b2.innerHTML = S.wtHtml;
-  } catch { box.innerHTML = '<span class="tr">could not load the watchtower</span>'; }
+    const b2 = document.getElementById("wtBox"); if (b2) b2.innerHTML = S.wtHtml; ok = true;
+  } catch { box.innerHTML = '<span class="tr">could not load the watchtower</span>'; } finally { slowDone("wt", ok); }
 }
 // Internet map (2.36): one repeater at a time, by the administrator, after a confirmation. Never automatic.
 function mapPanel(o) {
@@ -560,19 +582,22 @@ function mapPanel(o) {
 }
 async function mapLoad() {
   const box = document.getElementById("mapBox"); if (!box) return;
+  if (slowFresh("map", "mapHtml", "mapBox") || slowBusy("map")) return;
+  let ok = false;
   try {
     const d = await jget("/api/mappublish");
     const rows = d.repeaters.map(r => { const l = r.last, ok = d.enabled && !r.why_not; return `<tr><td><b>${esc(r.repeater)}</b></td><td>${r.stored ? "verified advert, " + ago(r.stored) : '<span class="tr">none yet</span>'}</td><td>${r.lat != null ? r.lat.toFixed(5) + ", " + r.lon.toFixed(5) : '<span class="tr">no position</span>'}</td><td class="tr" style="white-space:normal">${l ? (l.ok ? "published " : "failed ") + ago(l.ts) + (l.status ? ", HTTP " + l.status : "") + (l.text ? ": " + esc(l.text) : "") : esc(r.why_not)}</td><td><button class="tool" data-mappub="${esc(r.id)}" ${ok ? "" : "disabled"}>Publish…</button></td></tr>`; });
     S.mapHtml = (d.enabled ? "" : '<p class="tr">Publishing is switched off. Turn it on under Settings, General, if you want to use it.</p>') + table(["Repeater", "Advert held", "Position that would be published", "Last attempt / why not", ""], rows, "No repeater yet.")
       + '<div class="tr" style="margin-top:6px">Sends the repeater\'s own signed advert to the public map when you press the button, and only then. Its name and position become public. The map\'s reply is shown as it came.</div>';
-    const b2 = document.getElementById("mapBox"); if (b2) b2.innerHTML = S.mapHtml;
-  } catch { box.innerHTML = '<span class="tr">could not load the map status</span>'; }
+    const b2 = document.getElementById("mapBox"); if (b2) b2.innerHTML = S.mapHtml; ok = true;
+  } catch { box.innerHTML = '<span class="tr">could not load the map status</span>'; } finally { slowDone("map", ok); }
 }
 async function mapPublish(id) {
   let r = await post("/api/mappublish", {device: id});
-  if (r.needs_confirm) {
-    if (!confirm(`Publish "${r.name || id.slice(0, 8)}" to map.meshcore.dev?\n\nIts name and its LOCATION (${Number(r.lat).toFixed(5)}, ${Number(r.lon).toFixed(5)}) become PUBLIC on the internet map for anyone to see.\nThis dashboard cannot take it off again; that is done from the MeshCore app.`)) return;
-    r = await post("/api/mappublish", {device: id, confirm: true});
+  for (let i = 0; r.needs_confirm && r.token && i < 3; i++) {          // the name and position asked about come from the same reply as the token that confirms them
+    const warn = r.changed ? "The repeater's advert changed since you were last shown it. Check it again.\n\n" : "";
+    if (!confirm(`${warn}Publish "${r.name || id.slice(0, 8)}" to map.meshcore.dev?\n\nIts name and its LOCATION (${Number(r.lat).toFixed(5)}, ${Number(r.lon).toFixed(5)}) become PUBLIC on the internet map for anyone to see.\nThis dashboard cannot take it off again; that is done from the MeshCore app.`)) return;
+    r = await post("/api/mappublish", {device: id, confirm: r.token});
   }
   alert(r.ok ? "The map accepted it: HTTP " + r.status + (r.response ? "\n" + r.response : "") : "Not published: " + (r.error || "failed") + (r.response ? "\n" + r.response : ""));
   S.mapHtml = ""; await loadAudit(); mapLoad();
@@ -585,6 +610,8 @@ function routeHealthPanel() {
 }
 async function rhLoad() {
   const box = document.getElementById("rhBox"); if (!box) return;
+  if (slowFresh("rh", "rhHtml", "rhBox") || slowBusy("rh")) return;
+  let ok = false;
   try {
     const d = await jget("/api/routes");
     const rows = d.routes.map(r => {
@@ -593,15 +620,15 @@ async function rhLoad() {
     });
     S.rhHtml = table(["State", "Route (last repeater is the one that heard it)", "Last seen", "24 h", "7 d", ""], rows, "No routes recorded yet: they build up as flood packets are heard.")
       + `<div class="tr" style="margin-top:6px">Observed: live = seen in the last ${d.live_minutes} min, stale = older, silent = nothing for ${d.silent_minutes} min (while the dashboard was watching and the hearing repeater was connected), unknown = cannot tell. Counts are receptions by our own repeaters per whole clock hour, so a packet heard twice counts twice. A quiet route may only be unused; this is not a measure of link quality. A short hop ID shared by two repeaters can show the wrong name.${d.total > d.routes.length ? " Showing the busiest " + d.routes.length + " of " + d.total + "." : ""}</div>`;
-    const b2 = document.getElementById("rhBox"); if (b2) b2.innerHTML = S.rhHtml;
-  } catch { box.innerHTML = '<span class="tr">could not load the routes</span>'; }
+    const b2 = document.getElementById("rhBox"); if (b2) b2.innerHTML = S.rhHtml; ok = true;
+  } catch { box.innerHTML = '<span class="tr">could not load the routes</span>'; } finally { slowDone("rh", ok); }
 }
 // Node analytics (D6): SNR over time (packets heard with no repeater between), hop counts, and an hourly heatmap of the last 7 days (UTC)
 function nodeAnPanel() {
   setTimeout(naLoad, 0);
   const list = S.naList || [], sel = S.naSel || "", dsel = S.naDays || 7;
-  const ctl = `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><select onchange="S.naSel=this.value;S.naHtml='';draw()" style="min-width:220px"><option value="">choose a node</option>${list.map(x => `<option value="${esc(x.id)}" ${x.id === sel ? "selected" : ""}>${esc(x.name)} (${x.n})</option>`).join("")}</select>`
-    + `<select onchange="S.naDays=+this.value;S.naHtml='';draw()">${[[1, "24 hours"], [7, "7 days"], [30, "30 days"]].map(([v, l]) => `<option value="${v}" ${v === dsel ? "selected" : ""}>${l}</option>`).join("")}</select></div>`;
+  const ctl = `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><select id="naSelect" onchange="S.naSel=this.value;S.naHtml='';S.naTag='';draw()" style="min-width:220px"><option value="">choose a node</option>${list.map(x => `<option value="${esc(x.id)}" ${x.id === sel ? "selected" : ""}>${esc(x.name)} (${x.n})</option>`).join("")}</select>`
+    + `<select onchange="S.naDays=+this.value;S.naHtml='';S.naTag='';draw()">${[[1, "24 hours"], [7, "7 days"], [30, "30 days"]].map(([v, l]) => `<option value="${v}" ${v === dsel ? "selected" : ""}>${l}</option>`).join("")}</select></div>`;
   return panel("Node analytics", "signal, hops and activity for one node, from what our repeaters heard", ctl + `<div id="naBox">${S.naHtml || (sel ? '<span class="tr">loading…</span>' : '<span class="tr">Choose a node (busiest in the last 7 days are listed).</span>')}</div>`, "", "s12");
 }
 function naSnr(d) {
@@ -622,18 +649,33 @@ function naHeat(d) {
   const labels = days.map((r, ri) => `<text x="0" y="${ri * ch + 12}" fill="#7fa392" font-size="10">${new Date(r.day * 1000).toISOString().slice(5, 10)}</text>`).join("") + [0, 6, 12, 18].map(h => `<text x="${h * cw + 44}" y="${days.length * ch + 10}" fill="#7fa392" font-size="10">${String(h).padStart(2, "0")}</text>`).join("");
   return `<svg viewBox="0 0 ${24 * cw + 44} ${days.length * ch + 14}" style="width:100%;max-width:760px">${labels}${cells}</svg><div class="tr">Packets per hour, UTC, last 7 days. Dashed cells: nothing was being recorded then (not the same as quiet). Dark solid: recorded, none from this node.</div>`;
 }
+const naOptions = list => list.map(x => `<option value="${esc(x.id)}" ${x.id === S.naSel ? "selected" : ""}>${esc(x.name)} (${x.n})</option>`).join("");
 async function naLoad() {
   const box = document.getElementById("naBox"); if (!box) return;
+  S.T = S.T || {};
+  try {                                                               // the node list is read again every 5 minutes (new nodes, new traffic)
+    if (!S.naList || Date.now() - (S.T.naList || 0) > 300000) {
+      S.T.naList = Date.now(); const l = await jget("/api/node"); S.naList = l.nodes;
+      const sl = document.getElementById("naSelect"); if (sl && S.naSel) sl.innerHTML = '<option value="">choose a node</option>' + naOptions(S.naList);
+      if (!S.naSel) { draw(); return; }
+    }
+  } catch (e) { S.T.naList = Date.now() - 240000; box.innerHTML = '<span class="tr">could not load: ' + esc(e.message || "") + '</span>'; return; }
+  if (!S.naSel) return;
+  const tag = S.naSel + "|" + (S.naDays || 7);                       // what this answer is for: an answer for another node or range than the one now chosen is thrown away
+  if (S.naHtml && S.naTag === tag && Date.now() - (S.T.na || 0) < SLOW_MS) { box.innerHTML = S.naHtml; return; }
+  if (slowBusy("na", tag)) return;
+  let ok = false;
   try {
-    if (!S.naList) { const l = await jget("/api/node"); S.naList = l.nodes; if (!S.naSel) { draw(); return; } }
-    if (!S.naSel) return;
-    if (S.naHtml) { box.innerHTML = S.naHtml; return; }
-    const d = await jget(`/api/node?id=${encodeURIComponent(S.naSel)}&days=${S.naDays || 7}`), mx = Math.max(1, ...d.hops.map(h => h.n));
+    const d = await jget(`/api/node?id=${encodeURIComponent(S.naSel)}&days=${S.naDays || 7}`);
+    if (S.naSel + "|" + (S.naDays || 7) !== tag) return;
+    const mx = Math.max(1, ...d.hops.map(h => h.n));
     S.naHtml = `<div class="kpis">${kpi("✉", "Packets", d.total, esc(d.name) + ", " + (d.days === 1 ? "24 hours" : d.days + " days"))}</div><h4>SNR over time</h4>${naSnr(d)}<h4>Hops when heard</h4>`
       + (d.hops.length ? table(["Hops", "Packets", ""], d.hops.map(h => `<tr><td>${h.hops}</td><td>${h.n}</td><td style="width:50%"><div style="background:#2fe27a;height:8px;border-radius:4px;width:${(h.n / mx * 100).toFixed(0)}%"></div></td></tr>`)) : '<div class="tr">no data</div>')
       + `<h4>Activity by hour</h4>${naHeat(d)}`;
+    S.naTag = tag; ok = true;
     const b2 = document.getElementById("naBox"); if (b2) b2.innerHTML = S.naHtml;
-  } catch (e) { box.innerHTML = '<span class="tr">could not load: ' + esc(e.message || "") + '</span>'; }
+  } catch (e) { if (S.naSel + "|" + (S.naDays || 7) === tag) box.innerHTML = '<span class="tr">could not load: ' + esc(e.message || "") + '</span>'; }
+  finally { if (S.B.na === tag) slowDone("na", ok); }
 }
 function newNodesPanel(o) {
   const rows = (o.new_nodes || []).map(n => `<tr><td>${clock(n.ts)}</td><td><b>${esc(n.name || n.key.slice(0, 8))}</b></td><td>${esc(n.kind)}</td><td class="tr">${esc(n.key.slice(0, 8))}</td><td>${esc(n.rx)}</td><td class="tr">${n.state === "alert" ? "alerted" : n.state === "warmup" ? "start-up, no alert" : "over the hourly limit"}</td></tr>`);

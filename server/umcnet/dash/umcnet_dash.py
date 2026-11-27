@@ -5,7 +5,7 @@ Reads the broker as a read-only 'monitor' account (its $SYS statistics and the m
 broker's log for who connects and who is refused, samples the machine, and serves a JSON API and the page on
 127.0.0.1 for Caddy to put behind a login. Python standard library only: no packages to install.
 """
-import base64, collections, csv, hashlib, hmac, io, json, os, re, secrets, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.error, urllib.request
+import base64, collections, csv, hashlib, hmac, http.client, io, json, math, os, re, secrets, shutil, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, unicodedata, urllib.error, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -28,7 +28,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.37"
+VERSION = "2.38"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -61,6 +61,24 @@ PUBLIC_SETTING_KEYS = tuple(k for k in DEVICE_SETTING_KEYS if k not in ("lat", "
 SETTINGS = {}                              # device id -> values, update time and preload state
 
 # ----------------------------------------------------------------------------- packets
+CTRL_RX = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069\u200b-\u200f\ufeff]")
+def clean_text(s, n=200):
+    """One line of text with no control, line-break or direction-override characters (names and titles that come from the radio or from a catalogue)."""
+    return re.sub(r" {2,}", " ", CTRL_RX.sub(" ", str(s))).strip()[:n].strip()
+
+def finite_num(x, lo=None, hi=None):
+    """x as a finite float inside [lo, hi], else None. Never raises, whatever x is (strings such as '1e999' or 'nan' give None)."""
+    try: f = float(x)
+    except (TypeError, ValueError, OverflowError): return None
+    if not math.isfinite(f) or (lo is not None and f < lo) or (hi is not None and f > hi): return None
+    return f
+
+def finite_int(x, lo=None, hi=None):
+    f = finite_num(x, lo, hi)
+    if f is None: return None
+    try: return int(f)
+    except (ValueError, OverflowError): return None
+
 def parse_packet(raw):
     """What a packet says about itself, without decrypting anything (same layout the radios use)."""
     try:
@@ -85,7 +103,7 @@ def parse_packet(raw):
                 j += 8
             if f & 0x20: j += 2
             if f & 0x40: j += 2
-            if f & 0x80 and j < len(p): out["name"] = p[j:].decode("utf-8", "replace").rstrip("\0").strip()
+            if f & 0x80 and j < len(p): out["name"] = clean_text(p[j:].decode("utf-8", "replace").split("\0")[0], 64)
         return out
     except Exception:
         return None
@@ -93,7 +111,7 @@ def parse_packet(raw):
 def node_for_hash(h):
     """The one known node whose key starts with this hash, or None when it fits none or several."""
     if not h: return None
-    hits = [k for k in NODES if k.startswith(h.upper())]
+    hits = [k for k in list(NODES) if k.startswith(h.upper())]
     return hits[0] if len(hits) == 1 else None
 
 def hop_name(h):
@@ -109,8 +127,11 @@ def note_network(did, info, snr, rssi, now):
         except Exception as e: sys.stderr.write("hop histogram: %s\n" % e)
     if info.get("fkey"):
         k = info["fkey"]; n = NODES.get(k); fresh = n is None
-        if n is None:
+        if fresh:
             if len(NODES) >= 3000: return
+            try: ok = advert_note(k, info, now, rx=did, fresh=True)
+            except Exception as e: sys.stderr.write("advert check: %s\n" % e); ok = False
+            if ok is not True: return                      # a node is recorded only once its advert's signature has checked out: forged adverts create nothing
             n = NODES[k] = {"key": k, "name": "", "type": 0, "lat": None, "lon": None, "first": now, "last": 0, "adverts": 0}
         n["last"] = now; n["adverts"] += 1
         if info.get("name"): n["name"] = info["name"]
@@ -120,8 +141,9 @@ def note_network(did, info, snr, rssi, now):
             try: newnode_seen(k, n, did, now)
             except Exception as e: sys.stderr.write("new node: %s\n" % e)
         sender = k
-        try: advert_note(k, info, now)
-        except Exception as e: sys.stderr.write("advert check: %s\n" % e)
+        if not fresh:
+            try: advert_note(k, info, now, rx=did)
+            except Exception as e: sys.stderr.write("advert check: %s\n" % e)
         try: decoded_advert(did, n, info, snr, now)
         except Exception as e: sys.stderr.write("advert copy: %s\n" % e)
     elif info.get("src"): sender = node_for_hash(info["src"])
@@ -212,13 +234,13 @@ def network_view(hours=24):
     now = time.time(); cutoff = now - max(1.0, float(hours)) * 3600
     with LOCK:
         nodes = []; seen = set()
-        for k, n in NODES.items():
+        for k, n in list(NODES.items()):
             d = DEV.get(k); seen.add(k)
             conn = bool(d and d["last"] and now - d["last"] < CONF["stale_minutes"] * 60)
             if not conn and n["last"] < cutoff: continue                       # not on the network and not heard lately: not on the map
             nodes.append({"key": k, "name": (d["name"] if d and d["name"] else n["name"]) or k[:8], "type": n["type"], "lat": n["lat"], "lon": n["lon"], "last": n["last"], "first": n.get("first", 0), "adverts": n["adverts"], "connected": conn,
                           "online": conn and (d.get("status") != "offline"), "info": device_info(d, now) if d else None})
-        for k, d in DEV.items():
+        for k, d in list(DEV.items()):
             if k not in seen:
                 conn = bool(d["last"] and now - d["last"] < CONF["stale_minutes"] * 60)
                 if conn: nodes.append({"key": k, "name": d["name"] or k[:8], "type": 2, "lat": d.get("lat"), "lon": d.get("lon"), "last": d["last"], "first": d.get("first", 0), "adverts": 0, "connected": True, "online": d.get("status") != "offline", "info": device_info(d, now)})
@@ -307,6 +329,8 @@ def lpp_decode(b):
         v = int.from_bytes(b[i + 2:i + 2 + n], "big", signed=sg)
         out.append((ch, t, name, round(v / div, 3), unit)); i += 2 + n
     return out
+
+TELEM_LAST = {}; TELEM_MIN_GAP = 20
 
 def telem_store(did, area, lpp_hex, now):
     try: vals = lpp_decode(bytes.fromhex(lpp_hex))
@@ -426,7 +450,8 @@ def on_publish(topic, payload, retained=False):
                     except Exception as e: sys.stderr.write("airtime: %s\n" % e)
             return
         if kind == "telemetry":
-            if not retained and isinstance(j.get("lpp"), str) and len(j["lpp"]) <= 400: telem_store(did, area, j["lpp"], now)
+            if not retained and isinstance(j.get("lpp"), str) and len(j["lpp"]) <= 400 and now - TELEM_LAST.get(did, 0) >= TELEM_MIN_GAP:
+                TELEM_LAST[did] = now; telem_store(did, area, j["lpp"], now)         # a repeater cannot fill the table by sending often: one reading set every 20 s at most
             return
         if not retained: d["last_pkt"] = now                      # the moment of the newest radio packet, for the live flow pulses
         if kind == "raw": d["n_raw"] += 1
@@ -680,8 +705,8 @@ def accounts():
     for n, v in sorted(raw.items()):
         v = v if isinstance(v, dict) else {"role": v}
         with LOCK:
-            online = [c for c in CLIENTS.values() if c.get("user") == n and c.get("state") == "connected"]
-            last = max([c.get("last", 0) for c in CLIENTS.values() if c.get("user") == n] or [0])
+            online = [c for c in list(CLIENTS.values()) if c.get("user") == n and c.get("state") == "connected"]
+            last = max([c.get("last", 0) for c in list(CLIENTS.values()) if c.get("user") == n] or [0])
         dev = v.get("device", ""); d = DEV.get(dev)
         out.append({"name": n, "role": v.get("role", ""), "state": v.get("state", "approved"), "device": dev, "online": len(online), "last": last, "ip": online[0]["ip"] if online else "", "device_name": d["name"] if d else "", "device_seen": d["last"] if d else 0})
     return out
@@ -719,13 +744,13 @@ def sysnum(topic, default=0):
 def snapshot_values():
     s = system()
     with LOCK:
-        online = [d for d in DEV.values() if time.time() - d["last"] < 900]
+        online = [d for d in list(DEV.values()) if time.time() - d["last"] < 900]
         vals = {"clients": sysnum("$SYS/broker/clients/connected"), "subs": sysnum("$SYS/broker/subscriptions/count"), "msgs_pm": rate_per_min("messages", 300), "pkts_pm": rate_per_min("packets", 300), "unique_pm": rate_per_min("unique", 300),
                 "repeaters": len(online), "retained": sysnum("$SYS/broker/retained messages/count"), "bytes_rx_1m": sysnum("$SYS/broker/load/bytes/received/1min"), "bytes_tx_1m": sysnum("$SYS/broker/load/bytes/sent/1min"),
                 "pub_rx_1m": sysnum("$SYS/broker/load/publish/received/1min"), "pub_tx_1m": sysnum("$SYS/broker/load/publish/sent/1min"), "conn_1m": sysnum("$SYS/broker/load/connections/1min"), "dropped_1m": sysnum("$SYS/broker/load/publish/dropped/1min"),
                 "heap": sysnum("$SYS/broker/heap/current"), "load1": s["load"][0] if s["load"] else 0, "mem_pct": 100.0 * (1 - s["mem_avail"] / s["mem_total"]) if s["mem_total"] else 0, "disk_pct": 100.0 * (1 - s["disk_free"] / s["disk_total"]) if s["disk_total"] else 0}
         if s["cpu"] is not None: vals["cpu"] = s["cpu"]
-        for did, d in DEV.items(): vals["dev:" + did[:16]] = rate_per_min("pkt:" + did, 300)
+        for did, d in list(DEV.items()): vals["dev:" + did[:16]] = rate_per_min("pkt:" + did, 300)
     for n, v in s["net"].items():
         if n != "lo": vals["net_rx:" + n] = v["rx"]; vals["net_tx:" + n] = v["tx"]
     return vals
@@ -792,7 +817,7 @@ MSG_DEFAULTS = {"tx_enabled": True, "sender": "UMC-DASH", "keep_days": 30,
                 "regions": ["yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire", "sheffield", "wakefield"]}
 DEFAULTS = {"publish_decoded": True, "web_users": {}, "messages": MSG_DEFAULTS, "map_hours": 24, "enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
             "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14,
-            "traffic_keep_days": 30, "telem_keep_days": 90, "backup_keep": 7, "backup_hour": 3, "airtime_warn_pct": 10, "airtime_warn_minutes": 15, "newnode_max_per_hour": 6, "newnode_warmup_minutes": 30, "route_live_minutes": 60, "route_silent_minutes": 720, "route_busy_packets": 20, "battery_low_mv": 3500, "silent_overrides": {}, "confirm_risky": True, "control_enabled": True, "map_publish": False, "snr_worse_db": 4, "snr_min_samples": 20, "drift_seconds": 600, "tx_headroom_db": 10,
+            "conf_rev": 2, "traffic_keep_days": 400, "telem_keep_days": 90, "backup_keep": 7, "backup_hour": 3, "airtime_warn_pct": 10, "airtime_warn_minutes": 15, "newnode_max_per_hour": 6, "newnode_warmup_minutes": 30, "route_live_minutes": 60, "route_silent_minutes": 720, "route_busy_packets": 20, "battery_low_mv": 3500, "silent_overrides": {}, "confirm_risky": True, "control_enabled": True, "map_publish": False, "snr_worse_db": 4, "snr_min_samples": 20, "drift_seconds": 600, "tx_headroom_db": 10,
             "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True, "collision": True, "airtime": True, "newnode": True, "route_silent": False, "snr_worse": True, "clock_drift": False},
             "labels": {},
             "catalogue": {"enabled": True, "url": "https://raw.githubusercontent.com/marcelverdult/meshcore-channels/main/channels-unique.json", "refresh_hours": 24, "keyed": False}}
@@ -802,6 +827,23 @@ RANGES = {"map_hours": (1, 8760), "stale_minutes": (2, 1440), "cert_warn_days": 
           "route_live_minutes": (5, 1440), "route_silent_minutes": (30, 10080), "route_busy_packets": (1, 100000), "battery_low_mv": (3000, 4000),
           "snr_worse_db": (1, 30), "snr_min_samples": (5, 1000), "drift_seconds": (60, 86400), "tx_headroom_db": (3, 30)}
 CONF = json.loads(json.dumps(DEFAULTS))
+CONF_LOCK = threading.RLock()      # held across a read-change-save of CONF, so two writers (the settings page, a promoted catalogue channel) cannot lose each other's change
+
+def conf_swap(new):
+    """Replace the settings in one step that readers on other threads never see half done (CONF is updated in place, never emptied)."""
+    CONF.update(new)
+    for k in [k for k in list(CONF) if k not in new]: CONF.pop(k, None)
+
+def conf_redacted(who_is_admin):
+    """The settings as one viewer may see them. A non-administrator gets no channel keys, no web users and no alert address."""
+    c = json.loads(json.dumps(CONF))
+    if who_is_admin: return c
+    for ch in (c.get("messages") or {}).get("channels", []):
+        if isinstance(ch, dict) and "psk" in ch: ch.pop("psk", None); ch["psk_set"] = True
+    a = c.get("alerts") or {}
+    if a.get("url"): a["url"] = "(set by the administrator)"
+    c.pop("web_users", None)
+    return c
 
 def conf_path(): return os.path.join(CFG["data"], "config.json")
 
@@ -815,7 +857,16 @@ def conf_load():
         elif k == "web_users" and isinstance(v, dict): merged["web_users"] = v
         elif k == "catalogue" and isinstance(v, dict): merged["catalogue"].update({a: b for a, b in v.items() if a in merged["catalogue"]})
         elif k in merged: merged[k] = v
-    CONF.clear(); CONF.update(merged)
+    if not isinstance(raw.get("conf_rev"), int) or raw["conf_rev"] < 2:         # 2.37 saved its 30-day default into every config file: put the 400 days back once (a value the operator chose is left alone)
+        if merged.get("traffic_keep_days") == 30: merged["traffic_keep_days"] = 400
+        merged["conf_rev"] = 2
+    c = merged["catalogue"]; d = DEFAULTS["catalogue"]
+    for k in ("enabled", "keyed"):
+        if not isinstance(c.get(k), bool): c[k] = d[k]
+    rh = c.get("refresh_hours")
+    if isinstance(rh, bool) or not isinstance(rh, int) or not 1 <= rh <= 720: c["refresh_hours"] = d["refresh_hours"]
+    if not isinstance(c.get("url"), str) or cat_url_error(c["url"]): c["url"] = d["url"]
+    with CONF_LOCK: conf_swap(merged)
 
 def conf_save():
     tmp = conf_path() + ".tmp"
@@ -824,12 +875,15 @@ def conf_save():
 
 def conf_update(patch):
     """Validate and apply a settings change. Returns an error text or None."""
+    with CONF_LOCK: return _conf_update(patch)
+
+def _conf_update(patch):
     if not isinstance(patch, dict): return "not a settings object"
     new = json.loads(json.dumps(CONF))
     for k, v in patch.items():
         if k in RANGES:
-            try: v = int(v)
-            except (TypeError, ValueError): return "%s must be a whole number" % k
+            v = finite_int(v) if not isinstance(v, bool) else None
+            if v is None: return "%s must be a whole number" % k
             lo, hi = RANGES[k]
             if not lo <= v <= hi: return "%s must be between %d and %d" % (k, lo, hi)
             new[k] = v
@@ -854,8 +908,8 @@ def conf_update(patch):
             for a, b in v.items():
                 if a == "tx_enabled": m[a] = bool(b)
                 elif a == "keep_days":
-                    try: b = int(b)
-                    except (TypeError, ValueError): return "keep_days must be a whole number"
+                    b = finite_int(b) if not isinstance(b, bool) else None
+                    if b is None: return "keep_days must be a whole number"
                     if not 1 <= b <= 365: return "keep_days must be between 1 and 365"
                     m[a] = b
                 elif a == "sender":
@@ -887,8 +941,8 @@ def conf_update(patch):
                     cc[a] = b
                 elif a == "refresh_hours":
                     if isinstance(b, bool) or not isinstance(b, (int, str)): return "refresh_hours must be a whole number"
-                    try: b = int(b)
-                    except ValueError: return "refresh_hours must be a whole number"
+                    b = finite_int(b)
+                    if b is None: return "refresh_hours must be a whole number"
                     if not 1 <= b <= 720: return "refresh_hours must be between 1 and 720"
                     cc[a] = b
                 elif a == "url":
@@ -902,8 +956,8 @@ def conf_update(patch):
                 dev = str(dev).upper()
                 if not re.match(r"^[0-9A-F]{64}$", dev): return "silent_overrides: a repeater id is 64 hex characters"
                 if m is None or (isinstance(m, str) and not m.strip()): so.pop(dev, None); continue      # empty = back to the global default
-                try: m = int(m)
-                except (TypeError, ValueError): return "the silent limit for a repeater must be a whole number of minutes"
+                m = finite_int(m) if not isinstance(m, bool) else None
+                if m is None: return "the silent limit for a repeater must be a whole number of minutes"
                 if not 2 <= m <= 1440: return "the silent limit for a repeater must be between 2 and 1440 minutes"
                 so[dev] = m
             new["silent_overrides"] = so
@@ -916,7 +970,7 @@ def conf_update(patch):
     if new["cert_bad_days"] >= new["cert_warn_days"]: return "the red certificate limit must be below the amber one"
     if new["route_live_minutes"] >= new["route_silent_minutes"]: return "a route is live for fewer minutes than it takes to be called silent"
     url_changed = new["catalogue"]["url"] != CONF["catalogue"]["url"]
-    CONF.clear(); CONF.update(new); conf_save()
+    conf_swap(new); conf_save()
     if url_changed: cat_reset()
     cat_build_index()
     return None
@@ -1283,6 +1337,7 @@ def scan_public_groups(names=None):
 # are used only when the operator switches "keyed" on (these keys are public in the catalogue). Nothing is ever guessed; a channel is added only after real
 # packets authenticate with its key (the hash byte and the MAC both match) GROUP_SCAN_MIN times. Private channels and rooms are never touched.
 CAT_MAX_BYTES = 2 * 1024 * 1024; CAT_MAX_ENTRIES = 5000; CAT_TIMEOUT = 15
+CAT_DEADLINE = 60                      # seconds for the whole download
 CAT_MANUAL_GAP = 300                  # seconds between manual syncs
 CAT_TRY_PER_PACKET = 32               # candidate keys tried for one unreadable packet
 CAT_TRY_PER_MINUTE = 3000             # candidate keys tried in one minute; over that, packets are skipped and counted
@@ -1310,7 +1365,7 @@ def cat_entry(it):
     if not isinstance(it, dict): return None
     nm, lab, key = it.get("channel"), it.get("description"), it.get("key")
     if not isinstance(nm, str) or not CAT_NAME_RE.match(nm): return None
-    if not isinstance(lab, str) or not 1 <= len(lab) <= 200 or any(ord(c) < 32 or ord(c) == 127 for c in lab): return None
+    if not isinstance(lab, str) or not 1 <= len(lab) <= 200 or any(unicodedata.category(c) in ("Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp") for c in lab) or not lab.strip(): return None      # no control, direction-override, zero-width or unassigned characters
     if key is not None:
         if not isinstance(key, str) or not CAT_KEY_RE.match(key): return None
         try:
@@ -1355,8 +1410,9 @@ class CatRedirect(urllib.request.HTTPRedirectHandler):
     """Follows a redirect only to https on the same host as the address that was configured."""
     def __init__(self, host): self.host = host.lower()
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        n = urlparse(newurl)
-        if n.scheme != "https" or (n.hostname or "").lower() != self.host: raise urllib.error.URLError("a redirect to another host was refused")
+        try: n = urlparse(newurl); port = n.port
+        except ValueError: raise urllib.error.URLError("a redirect to a bad address was refused")
+        if n.scheme != "https" or (n.hostname or "").lower() != self.host or port not in (None, 443) or n.username or n.password: raise urllib.error.URLError("a redirect to another host was refused")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 def cat_http_get(url):
@@ -1365,7 +1421,12 @@ def cat_http_get(url):
     with op.open(urllib.request.Request(url, headers={"User-Agent": "umcnet-dash/" + VERSION, "Accept": "application/json"}), timeout=CAT_TIMEOUT) as r:
         n = r.headers.get("Content-Length")
         if n and n.isdigit() and int(n) > CAT_MAX_BYTES: raise ValueError("the file is larger than 2 MB")
-        data = r.read(CAT_MAX_BYTES + 1)
+        data = b""; end = time.time() + CAT_DEADLINE                 # the socket timeout is per read: a server that drips bytes must not hold the thread for ever
+        while len(data) <= CAT_MAX_BYTES:
+            chunk = r.read(min(65536, CAT_MAX_BYTES + 1 - len(data)))
+            if not chunk: break
+            data += chunk
+            if time.time() > end: raise ValueError("the download took too long")
     if len(data) > CAT_MAX_BYTES: raise ValueError("the file is larger than 2 MB")
     return data
 
@@ -1382,7 +1443,9 @@ def cat_build_index():
                 else: continue
             except Exception: continue
             idx.setdefault(ch.hash, []).append((e, ch))
-        CAT["index"] = idx; CAT_BY_NAME.clear(); CAT_BY_NAME.update(by)
+        CAT["index"] = idx; CAT_BY_NAME.update(by)
+        for k in [k for k in list(CAT_BY_NAME) if k not in by]: CAT_BY_NAME.pop(k, None)           # updated in place: a reader on another thread never sees it empty
+        for k in [k for k in list(CAT["hits"]) if k.lower() not in by]: CAT["hits"].pop(k, None)    # a channel the catalogue no longer lists is not being watched
 
 def cat_db_ready():
     if not DB: return False
@@ -1486,14 +1549,14 @@ def cat_promote():
     with CAT_LOCK: ready = [(n, h["packets"]) for n, h in CAT["hits"].items() if h["packets"] >= GROUP_SCAN_MIN]
     added = []
     for name, n in ready:
-        e = CAT_BY_NAME.get(name)
+        with CAT_LOCK: e = CAT_BY_NAME.get(name)
         if not e or any(x.get("name", "").lower() == name for x in CONF["messages"]["channels"]):
             with CAT_LOCK: CAT["hits"].pop(name, None)
             continue
         if not name.startswith("#") and not (c["keyed"] and e.get("key")): continue
         ent = {"name": name, "source": "catalogue", "label": e["label"]}; ch = chan_obj(ent)
         if not ch: continue
-        CONF["messages"]["channels"].append(ent); conf_save()
+        with CONF_LOCK: CONF["messages"]["channels"].append(ent); conf_save()
         with LOCK: MSGSTAT.pop("%02X" % ch.hash, None)
         with CAT_LOCK: CAT["hits"].pop(name, None)
         audit("system", "group added", name, "catalogue channel %r opened %d heard packets" % (e["label"][:60], n))
@@ -1516,7 +1579,7 @@ def rooms_heard():
     now = time.time()
     with LOCK:
         return sorted([{"key": k, "name": n["name"] or k[:8], "last": n["last"], "lat": n["lat"], "lon": n["lon"]}
-                       for k, n in NODES.items() if n["type"] == 3 and now - n["last"] < 30 * 86400], key=lambda r: -r["last"])
+                       for k, n in list(NODES.items()) if n["type"] == 3 and now - n["last"] < 30 * 86400], key=lambda r: -r["last"])
 
 def chan_rows():
     """Configured channels for display: name, hash, label, source. No keys."""
@@ -1547,7 +1610,7 @@ def messages_view(chan="", region="", direction="", before=0, limit=100, q="", s
         counts = [{"chan": r[0], "region": r[1], "n": r[2]} for r in DB.execute("SELECT chan, region, COUNT(*) FROM messages WHERE seen>? GROUP BY chan, region", (day,)).fetchall()]
         unread = unreadable_stats()
         for k, v in unread.items(): v["status"] = "unknown/encrypted"; v["candidates"] = len(CAT["index"].get(int(k, 16), ()))       # counts only: never any content
-        names = {d["id"]: (d["name"] or d["id"][:8]) for d in DEV.values()}
+        names = {d["id"]: (d["name"] or d["id"][:8]) for d in list(DEV.values())}
     out = []
     for r in rows:
         heard = json.loads(r[12] or "[]")
@@ -1602,7 +1665,7 @@ def send_message(who, chan, region, text, sender=None, via=None):
         while TX_TIMES and now - TX_TIMES[0] > 60: TX_TIMES.popleft()
         if len(TX_TIMES) >= 6: return {"ok": False, "error": "at most 6 messages a minute"}
         TX_TIMES.append(now)
-    live = [d for d in DEV.values() if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60]
+    live = [d for d in list(DEV.values()) if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60]
     if not live: return {"ok": False, "error": "no repeater is online to send it"}
     want = [str(v).upper() for v in (via or []) if v]
     if want:                                                    # send through only these repeaters (the firmware drops it elsewhere)
@@ -1743,7 +1806,7 @@ def enrol_housekeeping():
         for dev in [d for d, p in ENROL["pending"].items() if now - p.get("last", 0) > 86400]: ENROL["pending"].pop(dev); changed = True
         approved = list(ENROL["approved"].items())
     for dev, a in approved:
-        with LOCK: online = any(c.get("user") == a["account"] and c.get("state") == "connected" for c in CLIENTS.values())
+        with LOCK: online = any(c.get("user") == a["account"] and c.get("state") == "connected" for c in list(CLIENTS.values()))
         if not a.get("delivered") and (online or now - a["at"] > 7 * 86400):
             if conn and conn.up:
                 try: conn.publish("umcnet/v1/enrol/grant/" + dev, b"", retain=True)       # an empty retained message clears it
@@ -1757,7 +1820,7 @@ def enrol_view():
     with LOCK:
         pend = [dict(p) for p in ENROL["pending"].values()]; dec = [dict(d) for d in ENROL["declined"].values()]
         app = [dict(a, id=d) for d, a in ENROL["approved"].items() if now - a["at"] < 7 * 86400][-10:]
-        ips = {c.get("client", ""): c.get("ip", "") for c in CLIENTS.values()}
+        ips = {c.get("client", ""): c.get("ip", "") for c in list(CLIENTS.values())}
     accts = {a["device"]: a["name"] for a in accounts() if a["device"]}
     for p in pend:
         p["ip"] = ips.get("umc-enrol-" + p["id"][:12], ""); p["age"] = int(now - p["last"]); p["existing"] = accts.get(p["id"], "")
@@ -1894,8 +1957,12 @@ ROUTE_BUF = {}      # (hour, path, receiving repeater) -> [receptions, newest ti
 SNR_BUF = {}        # (hour, node) -> [count, sum, min, max]; only packets heard with no repeater between (flood, 0 hops)
 HOP_BUF = collections.Counter()   # (hour, receiving repeater, hop count) -> packets; flood packets only (a direct-routed packet's path is what is left to travel, not what it has travelled)
 BUF_CAP = 20000
+ROUTES_PER_HOUR = 2000      # new route rows a clock hour may add (an existing row is always counted); beyond that new paths are dropped, and counted
+ROUTES_MAX_ROWS = 150000    # the whole table, oldest hours go first
+ROUTE_MAX_HOPS = 64
 
 def route_note(path, rx, now):
+    if not path or len(path) > ROUTE_MAX_HOPS: return False
     key = (int(now) // 3600 * 3600, ",".join(path), rx)
     with TRAFFIC_LOCK:
         e = ROUTE_BUF.get(key)
@@ -1932,8 +1999,15 @@ def traffic_flush():
         if hops: DB.executemany("INSERT INTO hophist VALUES(?,?,?,?) ON CONFLICT(h, rx, hops) DO UPDATE SET n = n + excluded.n", [(h, rx, hp, n) for (h, rx, hp), n in hops])
         if items: DB.executemany("INSERT INTO traffic VALUES(?,?,?,?,?,?) ON CONFLICT(h, node, rx, ptype, hops) DO UPDATE SET n = n + excluded.n",
                                  [(h, node, rx, pt, hp, n) for (h, node, rx, pt, hp), n in items])
-        if routes: DB.executemany("INSERT INTO routes VALUES(?,?,?,?,?) ON CONFLICT(h, path, rx) DO UPDATE SET n = n + excluded.n, last = MAX(last, excluded.last)",
-                                  [(h, p, rx, n, last) for (h, p, rx), (n, last) in routes])
+        if routes:
+            room = {}; keep = []
+            for (h, p, rx), (n, last) in sorted(routes, key=lambda r: -r[1][0]):       # the busiest paths first, so a flood of one-off paths is what gets dropped
+                if h not in room: room[h] = max(0, ROUTES_PER_HOUR - DB.execute("SELECT COUNT(*) FROM routes WHERE h=?", (h,)).fetchone()[0])
+                if DB.execute("SELECT 1 FROM routes WHERE h=? AND path=? AND rx=?", (h, p, rx)).fetchone() is None:
+                    if room[h] <= 0: COUNT["routes_dropped"] += 1; continue
+                    room[h] -= 1
+                keep.append((h, p, rx, n, last))
+            if keep: DB.executemany("INSERT INTO routes VALUES(?,?,?,?,?) ON CONFLICT(h, path, rx) DO UPDATE SET n = n + excluded.n, last = MAX(last, excluded.last)", keep)
         if snrs: DB.executemany("INSERT INTO snr VALUES(?,?,?,?,?,?) ON CONFLICT(h, node) DO UPDATE SET n = n + excluded.n, s = s + excluded.s, lo = MIN(lo, excluded.lo), hi = MAX(hi, excluded.hi)",
                                 [(h, node, n, sm, lo, hi) for (h, node), (n, sm, lo, hi) in snrs])
 
@@ -1966,7 +2040,7 @@ def node_stats(key, days=7):
 
 def link_checks(hours=48):
     """Links between our own repeaters only: a one-way hearing, and a repeater that transmits well but hears badly."""
-    own = {d["id"]: (d["name"] or d["id"][:8]) for d in DEV.values()}
+    own = {d["id"]: (d["name"] or d["id"][:8]) for d in list(DEV.values())}
     cut = int(time.time()) - hours * 3600
     with LOCK: rows = DB.execute("SELECT a, b, snr FROM links WHERE last > ?", (cut,)).fetchall()
     heard = {}; best_in = {}; best_out = {}
@@ -1995,7 +2069,7 @@ def weekly_report():
              "Packets with a known sender: %d" % tot, "", "By type", *["  %-8s %d" % (t, n) for t, n in byt], "", "Busiest nodes"]
     lines += ["  %-24s %d" % ((NODES.get(k) or {}).get("name") or k[:8], n) for k, n in top] or ["  none"]
     lines += ["", "Own repeaters"]
-    for d in DEV.values():
+    for d in list(DEV.values()):
         seen = time.strftime("%d %b %H:%M", time.localtime(d["last"])) if d.get("last") else "never"
         lines.append("  %-24s last heard %s" % (d["name"] or d["id"][:8], seen))
     lines += ["", "One-way hearing (own repeaters, last 7 days)"] + (["  %s hears %s (%s dB), not the other way" % (x["hears"], x["heard"], x["snr"]) for x in lc["one_way"]] or ["  none"])
@@ -2047,9 +2121,27 @@ def prune_batched(table, col, cut, batch=5000):
         if n < batch: return total
         time.sleep(0.05)
 
+NEWNODES_MAX_ROWS = 50000
+
+def prune_excess(table, col, cap, batch=5000):
+    """Keep at most `cap` rows: the oldest by `col` go. Table and column names are ours, never user input."""
+    with LOCK: n = DB.execute("SELECT COUNT(*) FROM %s" % table).fetchone()[0]
+    if n <= cap: return 0
+    return prune_batched_rows(table, col, n - cap, batch)
+
+def prune_batched_rows(table, col, count, batch=5000):
+    total = 0
+    while total < count:
+        with LOCK: k = DB.execute("DELETE FROM %s WHERE rowid IN (SELECT rowid FROM %s ORDER BY %s ASC LIMIT ?)" % (table, table, col), (min(batch, count - total),)).rowcount
+        total += k
+        if k <= 0: break
+        time.sleep(0.01)
+    return total
+
 def retention_run(now=None):
     """Trim the high-volume tables to their configured age. Presence and history views read telem (kept at least 8 days) and traffic (at least 7)."""
     now = int(now or time.time()); C = CONF
+    if CFG["backup"] and not BACKUP["ts"]: return {"skipped": "no database backup has succeeded yet: nothing is deleted until one has"}
     return {"traffic": prune_batched("traffic", "h", now - max(7, C["traffic_keep_days"]) * 86400),
             "telem": telem_prune(now),
             "routes": prune_batched("routes", "h", now - max(8, C["traffic_keep_days"]) * 86400),
@@ -2057,10 +2149,12 @@ def retention_run(now=None):
             "airtime": prune_batched("airtime", "ts", now - max(8, C["telem_keep_days"]) * 86400),
             "newnodes": prune_batched("newnodes", "ts", now - 365 * 86400),
             "hophist": prune_batched("hophist", "h", now - max(8, C["traffic_keep_days"]) * 86400),
-            "clockdrift": prune_batched("clockdrift", "ts", now - 14 * 86400)}
+            "clockdrift": prune_batched("clockdrift", "ts", now - 14 * 86400),
+            "routes_excess": prune_excess("routes", "h", ROUTES_MAX_ROWS), "newnodes_excess": prune_excess("newnodes", "ts", NEWNODES_MAX_ROWS)}
 
 # --- D1: nightly consistent backup of the database
 BACKUP_RX = re.compile(r"^dash-\d{8}-\d{6}\.sqlite$")
+BACKUP_TMP_RX = re.compile(r"^\.tmp-dash-\d{8}-\d{6}\.sqlite$")
 BACKUP = {"ts": 0, "size": 0, "ok": None, "error": "", "secs": 0.0, "count": 0, "try": 0}
 BACKUP_LOCK = threading.Lock()
 
@@ -2097,6 +2191,10 @@ def backup_run(now=None):
     t0 = time.time(); now = int(now or t0); d = backup_dir(); tmp = os.path.join(d, ".tmp-" + backup_name(now))
     try:
         os.makedirs(d, mode=0o700, exist_ok=True)
+        for n in os.listdir(d):                                  # half-written copies left by a crash or a kill: ours only, and only while we hold the lock
+            if BACKUP_TMP_RX.match(n):
+                try: os.remove(os.path.join(d, n))
+                except OSError: pass
         need = backup_space_needed(db_path())
         free = shutil.disk_usage(d).free
         if free < need: raise RuntimeError("skipped: %.0f MB free, %.0f MB needed (twice the database)" % (free / 1e6, need / 1e6))
@@ -2182,9 +2280,9 @@ def collisions_new(found, seen):
 
 def repeater_keys(now=None):
     now = now or time.time(); out = {}
-    for k, n in NODES.items():
+    for k, n in list(NODES.items()):
         if n["type"] == 2 and n["last"] and now - n["last"] < 30 * 86400: out[k] = n["name"]
-    for d in DEV.values(): out[d["id"]] = d["name"] or out.get(d["id"], "")
+    for d in list(DEV.values()): out[d["id"]] = d["name"] or out.get(d["id"], "")
     return list(out.items())
 
 def collisions_view(now=None): return collisions_find(repeater_keys(now))
@@ -2203,12 +2301,13 @@ def collision_alerts(now=None):
 
 # --- D3: airtime and duty cycle per repeater, from the tx_air_secs / rx_air_secs counters in each status message
 AIR_LAST = {}
+AIR_MAX_SECS = 1e10          # about 300 years of airtime: a counter past this is not a counter
 def airtime_sample(stats):
     """(tx_air_secs, rx_air_secs) from a status block, or None."""
     try:
-        tx = float(stats["tx_air_secs"]); rx = float(stats.get("rx_air_secs", 0))
-    except (KeyError, TypeError, ValueError): return None
-    return (tx, rx) if tx >= 0 and rx >= 0 else None
+        tx = finite_num(stats["tx_air_secs"], 0, AIR_MAX_SECS); rx = finite_num(stats.get("rx_air_secs", 0), 0, AIR_MAX_SECS)
+    except (KeyError, TypeError, AttributeError): return None
+    return (tx, rx) if tx is not None and rx is not None else None
 
 def airtime_note(did, stats, now, boot=None):
     s = airtime_sample(stats)
@@ -2231,6 +2330,7 @@ def duty_steps(rows, max_gap=3600):
     out = []
     for a, b in zip(rows, rows[1:]):
         t0, x0, r0 = a[:3]; t1, x1, r1 = b[:3]
+        if any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) for v in (t0, x0, r0, t1, x1, r1)): continue      # NULL, NaN or infinity in the table: missing data, never a number
         dt = t1 - t0
         if len(a) > 3 and len(b) > 3 and a[3] and b[3] and a[3] != b[3]: continue
         if dt <= 0 or dt > max_gap or x1 < x0 or r1 < r0: continue
@@ -2263,7 +2363,7 @@ def airtime_rows(did, since):
     with LOCK: return DB.execute("SELECT ts,tx,rx,boot FROM airtime WHERE did=? AND ts>=? ORDER BY ts", (did, int(since))).fetchall()
 
 def airtime_view(hours=24, now=None, allowed=None):
-    now = int(now or time.time()); hours = max(1, min(168, float(hours))); since = now - int(hours * 3600); out = []
+    now = int(now or time.time()); hours = max(1, min(168, finite_num(hours) or 24)); since = now - int(hours * 3600); out = []
     with LOCK: ids = [r[0] for r in DB.execute("SELECT DISTINCT did FROM airtime WHERE ts>=?", (since,)).fetchall()]
     for did in ids:
         if allowed is not None and did not in allowed: continue
@@ -2273,18 +2373,29 @@ def airtime_view(hours=24, now=None, allowed=None):
     out.sort(key=lambda r: r["name"].lower())
     return {"hours": hours, "since": since, "now": now, "warn_pct": CONF["airtime_warn_pct"], "warn_minutes": CONF["airtime_warn_minutes"], "devices": out}
 
+def alert_clear_stale(prefix, live, now):
+    """Active alert states under `prefix` whose subject is not in `live` (no data in the window, or the alert is off) are cleared, silently:
+    an alert about a repeater that has gone quiet must not stay red for ever."""
+    n = 0
+    for key in alert_keys(prefix):
+        if key not in live: alert_put(key, "clear", now); n += 1
+    return n
+
 def airtime_alerts(now=None):
-    now = int(now or time.time()); thr = CONF["airtime_warn_pct"]; mins = CONF["airtime_warn_minutes"]; st = ALERT_STATE
+    now = int(now or time.time()); thr = CONF["airtime_warn_pct"]; mins = CONF["airtime_warn_minutes"]
+    if not CONF["alerts"].get("airtime", True): return {"cleared": alert_clear_stale("air:", set(), now)}
     with LOCK: ids = [r[0] for r in DB.execute("SELECT DISTINCT did FROM airtime WHERE ts>=?", (now - mins * 60 - 300,)).fetchall()]
+    live = set()
     for did in ids:
         steps = duty_steps(airtime_rows(did, now - mins * 60 - 300)); avg, cov = duty_window(steps, now - mins * 60)
-        act = st.get("air:" + did, False); step = duty_alert_step(act, avg, cov, thr, mins, now - st["airrec:" + did] if "airrec:" + did in st else None); nm = (DEV.get(did) or {}).get("name") or did[:8]
+        key = "air:" + did; state, ts = alert_get(key); act = state == "active"
+        if avg is not None and cov >= 0.6 * mins * 60: live.add(key)             # readings for most of the window: the state means something
+        step = duty_alert_step(act, avg, cov, thr, mins, now - ts if state == "clear" else None); nm = (DEV.get(did) or {}).get("name") or did[:8]
         if step == "fire":
-            st["air:" + did] = True
-            if CONF["alerts"].get("airtime", True): send_alert("High airtime: " + nm, "transmitting %.1f%% of the time over %d minutes (limit %d%%)" % (avg, mins, thr), "warn", "airtime")
+            alert_put(key, "active", now); send_alert("High airtime: " + nm, "transmitting %.1f%% of the time over %d minutes (limit %d%%)" % (avg, mins, thr), "warn", "airtime")
         elif step == "recover":
-            st["air:" + did] = False; st["airrec:" + did] = now
-            if CONF["alerts"].get("airtime", True): send_alert("Airtime back to normal: " + nm, "%.1f%% over %d minutes" % (avg, mins), "ok", "airtime")
+            alert_put(key, "clear", now); send_alert("Airtime back to normal: " + nm, "%.1f%% over %d minutes" % (avg, mins), "ok", "airtime")
+    return {"cleared": alert_clear_stale("air:", live, now)}
 
 # --- D4: a node never heard before
 NEWNODE_ALERTS = collections.deque(maxlen=500)
@@ -2309,7 +2420,7 @@ def newnodes_baseline(now=None):
     now = int(now or time.time())
     with LOCK:
         have = {r[0] for r in DB.execute("SELECT key FROM newnodes")}
-        rows = [(k, int(n.get("first") or now), n.get("name", ""), n.get("type", 0), "", "baseline") for k, n in NODES.items() if k not in have]
+        rows = [(k, int(n.get("first") or now), n.get("name", ""), n.get("type", 0), "", "baseline") for k, n in list(NODES.items()) if k not in have]
         DB.executemany("INSERT OR IGNORE INTO newnodes VALUES(?,?,?,?,?,?)", rows)
     return len(rows)
 
@@ -2348,7 +2459,7 @@ def silent_step(active, age, thr, since_recover=None, cooldown=SILENT_COOLDOWN):
 
 def silent_alerts(now=None):
     now = int(now or time.time()); a = CONF["alerts"]
-    with LOCK: devs = [dict(d) for d in DEV.values()]
+    with LOCK: devs = [dict(d) for d in list(DEV.values())]
     link_ok = MQTT["state"] == "connected" and now - MQTT.get("since", 0) >= 60      # a dashboard that cannot hear the broker hears nobody: that is not silence
     out = []
     for d in devs:
@@ -2375,7 +2486,8 @@ def route_state(age, live_s, silent_s, rx_ok, watched_s):
     if watched_s < silent_s: return "unknown", "the dashboard has not been watching long enough to call it silent"
     return "silent", ""
 
-def route_view(now=None):
+def route_view(now=None, full=False):
+    """Every observed route with its state. `full` returns all of them (for the alert check); the page gets the busiest 100."""
     now = int(now or time.time()); C = CONF; live_s = C["route_live_minutes"] * 60; silent_s = C["route_silent_minutes"] * 60
     traffic_flush(); cur = now // 3600 * 3600; h24 = cur - 23 * 3600; h7 = cur - 167 * 3600
     with LOCK:
@@ -2387,7 +2499,7 @@ def route_view(now=None):
         out.append({"key": path + "|" + rx, "path": [{"h": h, "n": hop_name(h)} for h in path.split(",")], "rx": rx, "rx_name": (d["name"] if d and d["name"] else rx[:8]), "last": last, "n24": n24, "n7d": n7,
                     "state": st, "why": why, "busy": n7 >= C["route_busy_packets"]})
     out.sort(key=lambda r: (-r["n7d"], r["key"]))
-    return {"now": now, "live_minutes": C["route_live_minutes"], "silent_minutes": C["route_silent_minutes"], "busy_packets": C["route_busy_packets"], "total": len(out), "routes": out[:100],
+    return {"now": now, "live_minutes": C["route_live_minutes"], "silent_minutes": C["route_silent_minutes"], "busy_packets": C["route_busy_packets"], "total": len(out), "routes": out if full else out[:100],
             "note": "Observed receptions by our own repeaters. Not a measure of link quality: a quiet route may only be unused. Counts are receptions per whole clock hour."}
 
 def route_alert_step(active, state, busy, since_recover=None, cooldown=ROUTE_COOLDOWN):
@@ -2396,7 +2508,7 @@ def route_alert_step(active, state, busy, since_recover=None, cooldown=ROUTE_COO
     return "recover" if state == "live" else None
 
 def route_alerts(now=None):
-    now = int(now or time.time()); v = route_view(now); seen = set(); fires = []; backs = []
+    now = int(now or time.time()); v = route_view(now, full=True); seen = set(); fires = []; backs = []      # the whole list: a route below the page's top 100 still has its state kept
     for r in v["routes"]:
         key = "route:" + r["key"]; seen.add(key); state, ts = alert_get(key); active = state == "active"
         step = route_alert_step(active, r["state"], r["busy"], now - ts if state == "clear" else None)
@@ -2496,8 +2608,9 @@ def extra_diagnostics(now):
     if one: out.append({"level": "ok", "title": "%d shared 1-byte repeater ID%s" % (len(one), "" if len(one) == 1 else "s"), "detail": "informational, normal once a mesh has more than a few dozen repeaters: " + ", ".join("%s (%d)" % (c["prefix"], len(c["nodes"])) for c in one[:12])})
     for d in list(DEV.values()):
         if d.get("boot_changed") and now - d["boot_changed"] < 3600: out.append({"level": "warn", "title": "Rebooted: " + (d["name"] or d["id"][:8]), "detail": "its boot id changed %d min ago (%d reboot%s seen since the dashboard started)" % ((now - d["boot_changed"]) // 60, d["reboots"], "" if d["reboots"] == 1 else "s")})
-    for did, st in list(ALERT_STATE.items()):
-        if did.startswith("air:") and st: out.append({"level": "warn", "title": "High airtime: " + ((DEV.get(did[4:]) or {}).get("name") or did[4:12]), "detail": "transmitting over %d%% of the time (sustained %d minutes)" % (CONF["airtime_warn_pct"], CONF["airtime_warn_minutes"])})
+    try:
+        for k in alert_keys("air:"): out.append({"level": "warn", "title": "High airtime: " + ((DEV.get(k[4:]) or {}).get("name") or k[4:12]), "detail": "transmitting over %d%% of the time (sustained %d minutes)" % (CONF["airtime_warn_pct"], CONF["airtime_warn_minutes"])})
+    except Exception: pass
     try:
         for k in alert_keys("snrw:"): out.append({"level": "warn", "title": "Signal worse: " + _name_of(k[5:]), "detail": "heard at least %d dB weaker over the last 24 hours than over the 7 days before (see Watchtower below)" % CONF["snr_worse_db"]})
     except Exception: pass
@@ -2529,29 +2642,56 @@ def advert_parts(payload):
     if not payload or not 100 <= len(payload) <= 184 or len(payload) - 100 > MAX_ADVERT_DATA: return None
     return bytes(payload[:32]), struct.unpack("<I", payload[32:36])[0], bytes(payload[36:100]), bytes(payload[100:])
 
+def small_order_key(pub):
+    """True for a public key that is not a point of the prime-order group (one of the few small-order points, or no point at all). With such a key a signature of all
+    zeros checks out for a quarter of all messages, so a forger could make 'nodes' out of thin air: these keys are never accepted."""
+    try:
+        A = ENR._dec(bytes(pub))
+        if A is None: return True
+        q = ENR._mul(8, A)
+        return q[0] % ENR.P == 0 and (q[1] - q[2]) % ENR.P == 0
+    except Exception: return True
+
 def advert_verified(payload):
     """The advert's parts when its Ed25519 signature (over key + timestamp + app data) is good, else None."""
     parts = advert_parts(payload)
     if not parts: return None
     pub, ts, sig, app = parts
+    if small_order_key(pub): return None
     return parts if ENR.ed_verify(pub, pub + payload[32:36] + app, sig) else None
 
 def advert_packet(hdr, payload):
     """The advert the way a companion exports it: flood route, no transport codes, empty path (the path is not signed)."""
     return bytes([(int(hdr) & 0xFC) | 1, 0]) + bytes(payload)
 
-def advert_note(key, info, now):
-    """Called for each advert heard. Verified here, throttled per node and overall, so forged adverts neither count nor cost much."""
+ADV_FAIL_GAP = 60                  # seconds before a key whose advert failed its check is checked again (a forger cannot lock a genuine node out for long)
+ADV_BUDGET_NEW = collections.deque(maxlen=30)      # checks a minute for keys not yet known: forged adverts with made-up keys use only this lane
+ADV_BUDGET_RX = {}                 # receiving repeater -> deque of check times: one noisy source cannot use everyone's checks
+ADV_RX_PER_MIN = 60
+
+def _budget_take(dq, now, window=60):
+    while dq and now - dq[0] > window: dq.popleft()
+    if len(dq) >= dq.maxlen: return False
+    dq.append(now); return True
+
+def advert_note(key, info, now, rx=None, fresh=False):
+    """Called for each advert heard. Verified here, throttled per node, per receiving repeater, per lane (known keys or new keys) and overall, so forged adverts
+    neither count nor cost much and cannot use up the checks genuine ones need. True = verified, False = failed, None = not checked."""
     p = info.get("advp")
     if not p or info.get("hdr") is None: return None
-    if now - ADV_LAST.get(key, 0) < ADV_MIN_GAP: return None
-    while ADV_BUDGET and now - ADV_BUDGET[0] > 60: ADV_BUDGET.popleft()
-    if len(ADV_BUDGET) >= ADV_BUDGET.maxlen: return None            # more than 120 checks a minute: skip, not an error
-    ADV_BUDGET.append(now)
+    last = ADV_LAST.get(key)
+    if last is not None:
+        if now - last[0] < (ADV_MIN_GAP if last[1] else ADV_FAIL_GAP) and not (fresh and last[1]): return None
+    if rx is not None:
+        q = ADV_BUDGET_RX.setdefault(rx, collections.deque(maxlen=ADV_RX_PER_MIN))
+        if len(ADV_BUDGET_RX) > 500: ADV_BUDGET_RX.clear()
+        if not _budget_take(q, now): return None
+    if not _budget_take(ADV_BUDGET_NEW if fresh else ADV_BUDGET, now): return None        # over the limit: skip, not an error
     parts = advert_verified(p)
-    if parts is None or parts[0].hex().upper() != key: COUNT["advert_badsig"] += 1; return False
-    if len(ADV_LAST) > 6000: ADV_LAST.clear()
-    ADV_LAST[key] = now
+    while len(ADV_LAST) > 6000: ADV_LAST.pop(next(iter(ADV_LAST)), None)      # drop the oldest, so a flood of made-up keys cannot wipe the failure memory
+    if parts is None or parts[0].hex().upper() != key:
+        COUNT["advert_badsig"] += 1; ADV_LAST[key] = (now, False); return False
+    ADV_LAST[key] = (now, True)
     drift_note(key, parts[1], now)
     if key in DEV: advert_store(key, advert_packet(info["hdr"], p), parts[1], now)
     return True
@@ -2608,7 +2748,7 @@ def map_status(now=None):
     now = int(now or time.time())
     with LOCK: rows = {r[0]: r for r in DB.execute("SELECT key, ts, ats, raw FROM adverts").fetchall()}
     out = []
-    for d in sorted(DEV.values(), key=lambda x: (x["name"] or x["id"]).lower()):
+    for d in sorted(list(DEV.values()), key=lambda x: (x["name"] or x["id"]).lower()):
         r = rows.get(d["id"]); last = MAP_LAST.get(d["id"])
         if not r: s = {"id": d["id"], "stored": None, "advert_time": None, "name": "", "lat": None, "lon": None, "age": None, "why_not": "no verified advert has been heard from this repeater yet"}
         else:
@@ -2618,8 +2758,29 @@ def map_status(now=None):
         s["repeater"] = d["name"] or d["id"][:8]; s["last"] = dict(last) if last else None; out.append(s)
     return {"enabled": bool(CONF.get("map_publish")), "url": MAP_URL, "repeaters": out}
 
-def map_publish(who, dev, confirm=False, now=None):
-    """Publish one repeater's verified advert to the map. Administrator only, switched on in Settings, confirmed by the operator, one repeater per call."""
+MAP_SECRET = secrets.token_bytes(32)      # per process: a confirmation does not survive a restart
+MAP_TOKEN_TTL = 120
+MAP_LOCK = threading.Lock()
+
+def map_digest(row):
+    """A fingerprint of the exact stored advert (key, advert time, packet)."""
+    return hashlib.sha256(("%s|%s|%s" % (row[0], row[2], row[3])).encode()).hexdigest()
+
+def map_token(who, dev, digest, name, lat, lon, exp):
+    """The confirmation: a MAC over who is publishing, which repeater, the exact advert and what the operator was shown (name, position), valid until `exp`."""
+    msg = "\n".join(str(x) for x in (who, dev, digest, name, repr(lat), repr(lon), int(exp))).encode()
+    return "%d.%s" % (exp, hmac.new(MAP_SECRET, msg, hashlib.sha256).hexdigest())
+
+def map_token_ok(token, who, dev, digest, name, lat, lon, now):
+    if not isinstance(token, str) or len(token) > 120 or "." not in token: return False
+    e = token.split(".", 1)[0]
+    if not e.isdigit() or int(e) < now or int(e) > now + MAP_TOKEN_TTL + 5: return False
+    return hmac.compare_digest(token, map_token(who, dev, digest, name, lat, lon, int(e)))
+
+def map_publish(who, dev, confirm=None, now=None):
+    """Publish one repeater's verified advert to the map. Administrator only, switched on in Settings, one repeater per call. Two steps: the first call
+    (no `confirm`) returns what would be published and a short-lived token for exactly that advert; the second must present the token, and is refused if the
+    advert held for the repeater is no longer the one that was shown."""
     now = int(now or time.time()); dev = str(dev or "").upper()
     def fail(msg, **extra):
         audit(who, "map publish", dev[:12], msg, False); return dict({"ok": False, "error": msg}, **extra)
@@ -2631,17 +2792,28 @@ def map_publish(who, dev, confirm=False, now=None):
     s = map_summary(row)
     if now - s["stored"] > MAP_MAX_AGE: return fail("the stored advert is older than 7 days: send an advert from the repeater first")
     if s["lat"] is None: return fail("the advert carries no position, so there is nothing to put on the map")
-    if not confirm: return {"ok": False, "needs_confirm": True, "error": "confirm that %s's name and position become public" % (s["name"] or dev[:8]), "name": s["name"], "lat": s["lat"], "lon": s["lon"]}
-    if now - (MAP_LAST.get(dev) or {}).get("ts", 0) < 60: return fail("published a moment ago: wait a minute")
+    dg = map_digest(row)
+    if not confirm or confirm is True or not map_token_ok(confirm, who, dev, dg, s["name"], s["lat"], s["lon"], now):
+        exp = now + MAP_TOKEN_TTL
+        r = {"ok": False, "needs_confirm": True, "error": "confirm that %s's name and position become public" % (s["name"] or dev[:8]), "name": s["name"], "lat": s["lat"], "lon": s["lon"],
+             "token": map_token(who, dev, dg, s["name"], s["lat"], s["lon"], exp), "expires": exp}
+        if confirm and confirm is not True: r["error"] = "the confirmation has expired or the repeater's advert has changed since it was shown: check the name and position again"; r["changed"] = True
+        return r
+    with MAP_LOCK:                                         # claim the slot BEFORE the request goes out: two calls at once cannot both publish
+        if now - (MAP_LAST.get(dev) or {}).get("ts", 0) < 60: return fail("published a moment ago: wait a minute")
+        MAP_LAST[dev] = {"ts": now, "ok": False, "status": None, "text": "sending"}
+    result = {"ts": now, "ok": False, "status": None, "text": "no answer"}
     try:
         uri = map_uri(bytes.fromhex(row[3])); req = map_request(uri)
         status, body = (MAP_SEND or _map_open)(req)
-    except (ValueError, OSError) as e:                    # URLError, timeouts and TLS failures are all OSError
-        MAP_LAST[dev] = {"ts": now, "ok": False, "status": None, "text": str(e)[:200]}
+        text = re.sub(r"[^\x20-\x7e]", " ", bytes(body or b"").decode("utf-8", "replace"))[:300].strip()
+        ok = 200 <= int(status) < 300
+        result = {"ts": now, "ok": ok, "status": int(status), "text": text}
+    except (ValueError, OSError, http.client.HTTPException) as e:        # URLError, timeouts and TLS failures are OSError; a broken HTTP reply is HTTPException
+        result = {"ts": now, "ok": False, "status": None, "text": str(e)[:200]}
         return fail("could not publish: %s" % e)
-    text = re.sub(r"[^\x20-\x7e]", " ", bytes(body or b"").decode("utf-8", "replace"))[:300].strip()
-    ok = 200 <= int(status) < 300
-    MAP_LAST[dev] = {"ts": now, "ok": ok, "status": int(status), "text": text}
+    finally:
+        with MAP_LOCK: MAP_LAST[dev] = result                                   # whatever happened, the slot shows the outcome
     audit(who, "map publish", dev[:12], "%s: HTTP %s %s" % (s["name"] or dev[:8], status, text[:150]), ok)
     return {"ok": ok, "status": int(status), "response": text, "error": None if ok else "the map answered HTTP %s" % status}
 
@@ -2673,8 +2845,8 @@ def hop_advice(counts, first_h, last_h, current=None):
     return out
 
 def setting_int(dev, key):
-    try: return int(float(re.sub(r"^[>\s]+", "", str((SETTINGS.get(dev) or {}).get("values", {}).get(key, ""))).strip()))
-    except ValueError: return None
+    raw = re.sub(r"^[>\s]+", "", str((SETTINGS.get(dev) or {}).get("values", {}).get(key, ""))).strip()
+    return finite_int(raw, -1000, 100000) if raw else None          # a repeater's reply is data: 'nan', '1e999' or a huge number is no setting
 
 def hop_advice_view(now=None):
     now = int(now or time.time()); since = now // 3600 * 3600 - HOP_WINDOW_DAYS * 86400
@@ -2684,7 +2856,7 @@ def hop_advice_view(now=None):
     for rx, hp, n, lo, hi in rows:
         e = acc.setdefault(rx, [{}, lo, hi]); e[0][hp] = n; e[1] = min(e[1], lo); e[2] = max(e[2], hi)
     out = []
-    for d in sorted(DEV.values(), key=lambda x: (x["name"] or x["id"]).lower()):
+    for d in sorted(list(DEV.values()), key=lambda x: (x["name"] or x["id"]).lower()):
         c, lo, hi = acc.get(d["id"], [{}, 0, 0]); a = hop_advice(c, lo, hi, setting_int(d["id"], "flood.max")); a["id"] = d["id"]; a["name"] = d["name"] or d["id"][:8]; out.append(a)
     return out
 
@@ -2723,9 +2895,11 @@ def snr_view(now=None):
     return out
 
 def snr_alerts(now=None):
-    if not CONF["alerts"].get("snr_worse"): return {}
-    now = int(now or time.time()); thr = CONF["snr_worse_db"]; fires = []; backs = []
-    for r in snr_view(now):
+    now = int(now or time.time())
+    if not CONF["alerts"].get("snr_worse"): return {"cleared": alert_clear_stale("snrw:", set(), now)}
+    thr = CONF["snr_worse_db"]; fires = []; backs = []; view = snr_view(now)
+    alert_clear_stale("snrw:", {"snrw:" + r["key"] for r in view}, now)             # a node with no readings in the window has no 'worse' to report
+    for r in view:
         key = "snrw:" + r["key"]; state, ts = alert_get(key); step = snr_alert_step(state == "active", r["delta"], thr, now - ts if state == "clear" else None)
         if step == "fire": alert_put(key, "active", now); fires.append((r["name"], "%.1f dB worse: median %.1f dB over the last 24 h against %.1f dB over the 7 days before" % (r["delta"], r["recent"], r["base"])))
         elif step == "recover": alert_put(key, "clear", now); backs.append((r["name"], "signal back to %.1f dB (7 day median %.1f dB)" % (r["recent"], r["base"])))
@@ -2741,14 +2915,22 @@ def drift_note(key, ats, now):
         r = DB.execute("SELECT samples FROM clockdrift WHERE key=?", (key,)).fetchone()
         try: s = json.loads(r[0]) if r else []
         except ValueError: s = []
-        if s and (s[-1][2] == ats or now - s[-1][0] < ADV_MIN_GAP): return False
-        s = [x for x in s if now - x[0] < DRIFT_WINDOW] + [[int(now), int(ats - now), int(ats)]]
+        if not isinstance(s, list): s = []
+        if s and isinstance(s[-1], list) and len(s[-1]) == 3 and (s[-1][2] == ats or now - s[-1][0] < ADV_MIN_GAP): return False
+        s = [x for x in s if isinstance(x, list) and len(x) == 3 and now - x[0] < DRIFT_WINDOW] + [[int(now), int(ats - now), int(ats)]]
         DB.execute("INSERT OR REPLACE INTO clockdrift VALUES(?,?,?)", (key, int(now), json.dumps(s[-5:])))
     return True
 
+DRIFT_NEAR = 300           # a timestamp this close to our clock is believed at once; a farther one only when a second sample agrees with it
+DRIFT_AGREE = 120
+
 def drift_median(samples, now):
-    """Median drift in seconds (positive = the node is ahead of us) from at least two samples in the last 48 hours, else None."""
-    v = [x[1] for x in samples if now - x[0] < DRIFT_WINDOW]
+    """Median drift in seconds (positive = the node is ahead of us) from at least two samples in the last 48 hours, else None.
+    A sample more than DRIFT_NEAR from our clock counts only when another far sample agrees within DRIFT_AGREE s: a real mis-set clock
+    gives the same offset each time, while a replayed old advert gives an offset that grows by the time since it was recorded."""
+    v = [x[1] for x in samples if now - x[0] < DRIFT_WINDOW and isinstance(x[1], (int, float))]
+    far = [d for d in v if abs(d) > DRIFT_NEAR]
+    v = [d for d in v if abs(d) <= DRIFT_NEAR] + [d for d in far if sum(1 for e in far if abs(e - d) <= DRIFT_AGREE) >= 2]
     return _median(v) if len(v) >= 2 else None
 
 def drift_alert_step(active, drift, thr, since_recover=None, cooldown=DRIFT_COOLDOWN):
@@ -2769,6 +2951,8 @@ def drift_view(now=None):
     for key, ts, raw in rows:
         try: s = json.loads(raw)
         except ValueError: continue
+        if not isinstance(s, list): continue
+        s = [x for x in s if isinstance(x, list) and len(x) == 3]
         nd = NODES.get(key) or {}
         if not (key in DEV or nd.get("type") in (2, 3)): continue              # repeaters and rooms; phones and sensors often have no clock source at all
         m = drift_median(s, now)
@@ -2778,9 +2962,11 @@ def drift_view(now=None):
     return out
 
 def drift_alerts(now=None):
-    if not CONF["alerts"].get("clock_drift"): return {}
-    now = int(now or time.time()); thr = CONF["drift_seconds"]; fires = []; backs = []
-    for r in drift_view(now):
+    now = int(now or time.time())
+    if not CONF["alerts"].get("clock_drift"): return {"cleared": alert_clear_stale("drift:", set(), now)}
+    thr = CONF["drift_seconds"]; fires = []; backs = []; view = drift_view(now)
+    alert_clear_stale("drift:", {"drift:" + r["key"] for r in view if not r["covered"] and r["drift"] is not None}, now)
+    for r in view:
         if r["covered"]: continue
         key = "drift:" + r["key"]; state, ts = alert_get(key); step = drift_alert_step(state == "active", r["drift"], thr, now - ts if state == "clear" else None)
         if step == "fire": alert_put(key, "active", now); fires.append((r["name"], "its clock is %+d s against this server (limit %d s)" % (r["drift"], thr)))
@@ -2797,36 +2983,72 @@ def radio_sf(text):
     """The spreading factor in a 'frequency,bandwidth,SF,CR' text, or None."""
     m = RADIO_RX.search(str(text or "")); return int(m.group(3)) if m else None
 
-def tx_advice(sf, neigh, headroom, tx=None):
-    """neigh: [(name, SNR dB or None)], the signal between this repeater and each active neighbour. Suggests lowering only when the margin over the
-    SF's demodulation limit exceeds `headroom` for every one of at least two neighbours. Unknown SF or a missing reading gives no advice."""
-    out = {"status": "none", "sf": sf, "floor": SF_FLOOR.get(sf), "headroom": headroom, "min_margin": None, "weakest": None, "drop": 0, "label": TX_LABEL}
+TX_MIN, TX_MAX = 1, 22     # the range `set tx` takes (MANUAL.md); advice never goes under the lowest or is given for a value outside the range
+TX_MIN_HOURS_7D = 6; TX_MIN_HOURS_24H = 3; TX_MIN_PACKETS_24H = 5
+
+def tx_advice(sf, neigh, headroom, tx=None, assumed=False):
+    """neigh: [(name, SNR dB or None)], the signal between this repeater and each active neighbour, in the direction our transmit power affects. Suggests lowering
+    only when the margin over the SF's demodulation limit exceeds `headroom` for every one of at least two neighbours. Unknown SF, a missing reading or a power
+    setting outside the supported range gives no advice. Never suggests raising. `assumed`: some neighbours could not be observed hearing us (stated in the text)."""
+    out = {"status": "none", "sf": sf, "floor": SF_FLOOR.get(sf), "headroom": headroom, "min_margin": None, "weakest": None, "drop": 0, "label": TX_LABEL, "assumes_symmetric": bool(assumed)}
     if sf not in SF_FLOOR: out["status"] = "skip"; out["text"] = "Spreading factor unknown or outside SF7 to SF12: no advice."; return out
+    if tx is not None and not TX_MIN <= tx <= TX_MAX: out["status"] = "skip"; out["text"] = "Transmit power %s dBm is outside the supported %d to %d dBm: no advice." % (tx, TX_MIN, TX_MAX); return out
     if len(neigh) < 2: out["status"] = "skip"; out["text"] = "Needs at least two active neighbours with a measured signal (has %d): no advice." % len(neigh); return out
-    if any(s is None for _, s in neigh): out["status"] = "skip"; out["text"] = "A neighbour has no signal reading yet: no advice."; return out
+    if any(s is None or not math.isfinite(s) for _, s in neigh): out["status"] = "skip"; out["text"] = "A neighbour has no recent signal reading in the direction our transmitter reaches it: no advice."; return out
     name, snr = min(neigh, key=lambda x: x[1]); margin = snr - SF_FLOOR[sf]
     out.update(min_margin=round(margin, 1), weakest=name)
     drop = min(6, int(margin - headroom)) if margin - headroom >= 1 else 0
+    if tx is not None: drop = max(0, min(drop, tx - TX_MIN))
     if drop < 1:
-        out["text"] = "Weakest neighbour %s is %.1f dB above the SF%d limit (%.1f dB), not more than the %g dB headroom: no change suggested." % (name, margin, sf, SF_FLOOR[sf], headroom); return out
+        out["text"] = "Weakest neighbour %s is %.1f dB above the SF%d limit (%.1f dB), not more than the %g dB headroom%s: no change suggested." % (name, margin, sf, SF_FLOOR[sf], headroom, "" if tx is None or tx > TX_MIN else ", and power is already at the lowest setting"); return out
     out["status"] = "advice"; out["drop"] = drop
     to = (" (to about %g dBm)" % (tx - drop)) if tx is not None else ""
-    out["text"] = "Every active neighbour is at least %.1f dB above the SF%d limit (%.1f dB; weakest: %s), more than the %g dB headroom. Transmit power could be lowered by up to %d dB%s. %s" % (margin, sf, SF_FLOOR[sf], name, headroom, drop, to, TX_LABEL)
+    out["text"] = "Every active neighbour is at least %.1f dB above the SF%d limit (%.1f dB; weakest: %s), more than the %g dB headroom. Transmit power could be lowered by up to %d dB%s.%s %s" % (
+        margin, sf, SF_FLOOR[sf], name, headroom, drop, to, (" Neighbours that are not ours could not be observed hearing this repeater: their signal is assumed to be as good in both directions." if assumed else ""), TX_LABEL)
+    return out
+
+def snr_recent(now, rows=None):
+    """node -> recent SNR in dB: the lower of the median hourly mean over 7 days (needs snr_min_samples packets over 6 hours) and over 24 hours (5 packets over 3 hours),
+    from the snr table (packets heard with no repeater between). Nodes without enough readings are absent: no data is never 0 dB."""
+    cur = int(now) // 3600 * 3600; r24 = cur - 23 * 3600; ms = CONF["snr_min_samples"]
+    if rows is None:
+        with LOCK: rows = DB.execute("SELECT node, h, n, s FROM snr WHERE h>=? AND h<=?", (cur - 167 * 3600, cur)).fetchall()
+    acc = {}
+    for node, h, n, sm in rows:
+        if not n or n <= 0 or sm is None or not math.isfinite(sm): continue
+        e = acc.setdefault(node, ([], []))
+        e[0].append((n, sm / n))
+        if h >= r24: e[1].append((n, sm / n))
+    out = {}
+    for node, (w7, w1) in acc.items():
+        c = []
+        if sum(n for n, _ in w7) >= ms and len(w7) >= TX_MIN_HOURS_7D: c.append(_median([v for _, v in w7]))
+        if sum(n for n, _ in w1) >= TX_MIN_PACKETS_24H and len(w1) >= TX_MIN_HOURS_24H: c.append(_median([v for _, v in w1]))
+        if c: out[node] = min(c)
     return out
 
 def tx_view(now=None, hours=48):
     now = int(now or time.time())
-    with LOCK: rows = DB.execute("SELECT a, b, snr FROM links WHERE last>?", (now - hours * 3600,)).fetchall()
-    out = []
-    for d in sorted(DEV.values(), key=lambda x: (x["name"] or x["id"]).lower()):
-        r = d["id"]; seen = {}                                  # neighbour -> the readings of its signal with this repeater
-        for a, b, snr in rows:
-            if a == r and b != r: seen.setdefault(b, []).append(snr)                 # this repeater hears b
-            elif b == r and a in DEV and a != r: seen.setdefault(a, []).append(snr)  # own repeater a hears this one: the direction our power affects
-        neigh = [(_name_of(k), (min(x for x in v if x is not None) if any(x is not None for x in v) else None)) for k, v in seen.items()]
+    with LOCK: pairs = {(a, b) for a, b in DB.execute("SELECT a, b FROM links WHERE last>?", (now - hours * 3600,)).fetchall()}
+    sn = snr_recent(now); out = []
+    for d in sorted(list(DEV.values()), key=lambda x: (x["name"] or x["id"]).lower()):
+        r = d["id"]; peers = {}                                 # neighbour -> {"in": this repeater hears it, "out": it was heard hearing this repeater}
+        for a, b in pairs:
+            if a == r and b != r: peers.setdefault(b, {})["in"] = True
+            elif b == r and a in DEV and a != r: peers.setdefault(a, {})["out"] = True
+        neigh = []; assumed = False
+        for k, f in peers.items():
+            nd = NODES.get(k) or {}
+            if not (k in DEV or nd.get("type") in (2, 3)): continue                      # repeaters and rooms only: a phone or a sensor is no reason to keep power up
+            if k in DEV:                                                                 # ours: the direction our power affects must itself have been observed
+                vals = [x for x in (sn.get(r), sn.get(k) if f.get("in") else None) if x is not None]
+                sig = min(vals) if sn.get(r) is not None and f.get("out") else None
+            else:                                                                        # not ours: we only ever hear it, so its signal is assumed to hold both ways
+                sig = sn.get(k) if f.get("in") else None; assumed = True
+            neigh.append((_name_of(k), sig))
         radio = (SETTINGS.get(r) or {}).get("values", {}).get("radio") or d.get("radio")
-        tx = setting_int(r, "tx"); a = tx_advice(radio_sf(radio), neigh, CONF["tx_headroom_db"], tx)
-        a.update(id=r, name=d["name"] or r[:8], neighbours=len(neigh), tx=tx, radio=str(radio or ""), assumed=any(k not in DEV for k in seen)); out.append(a)
+        tx = setting_int(r, "tx"); a = tx_advice(radio_sf(radio), neigh, CONF["tx_headroom_db"], tx, assumed)
+        a.update(id=r, name=d["name"] or r[:8], neighbours=len(neigh), tx=tx, radio=str(radio or ""), assumed=assumed); out.append(a)
     return out
 
 def watchtower_view(now=None):
@@ -2840,7 +3062,7 @@ ALERT_STATE = {}
 def build_alert_request(url, title, text, level="warn"):
     """The HTTP request for one alert. A ntfy address (the word 'ntfy' in it) gets ntfy's headers; an address of the form
     https://user:password@host/topic is sent with that login (HTTP basic), so a private ntfy server can be used."""
-    u = urlparse(url); headers = {}
+    u = urlparse(url); headers = {}; title = clean_text(title, 120); text = str(text).replace("\r", " ")[:2000]      # a name from the radio must not carry a line break into a header
     if u.username is not None:
         import base64 as _b64
         headers["Authorization"] = "Basic " + _b64.b64encode(("%s:%s" % (unquote(u.username), unquote(u.password or ""))).encode()).decode()
@@ -2852,7 +3074,7 @@ def build_alert_request(url, title, text, level="warn"):
     return urllib.request.Request(url, data=json.dumps({"title": title, "message": text, "level": level, "host": CFG["host"], "time": int(time.time())}).encode(), headers=headers)
 
 def send_alert(title, text, level="warn", kind="x"):
-    a = CONF["alerts"]
+    a = CONF["alerts"]; title = clean_text(title, 120); text = "".join(c if c == "\n" or ord(c) >= 32 and ord(c) != 127 else " " for c in str(text))[:2000]
     event("alert", "%s: %s" % (title, text))
     try: DB.execute("INSERT INTO audit(ts,who,action,target,detail,ok) VALUES(?,?,?,?,?,?)", (int(time.time()), "alerts", "alert", kind, "%s - %s" % (title, text), 1))
     except Exception: pass
@@ -2906,7 +3128,7 @@ def pending_list():
     with LOCK:
         for a in accs:
             if a["role"] != "repeater" or not (a.get("state") == "pending" or not a["device"]) or a.get("state") == "blocked": continue
-            cl = [c for c in CLIENTS.values() if c.get("user") == a["name"] and c.get("state") == "connected"]
+            cl = [c for c in list(CLIENTS.values()) if c.get("user") == a["name"] and c.get("state") == "connected"]
             out.append({"name": a["name"], "prefix": (cl[0]["client"].rsplit("-", 1)[-1] if cl and "-" in cl[0]["client"] else ""), "ip": cl[0]["ip"] if cl else "", "since": cl[0].get("since", 0) if cl else 0, "online": bool(cl)})
     return out
 
@@ -2951,13 +3173,13 @@ def diagnostics(sysinfo, accs, cert):
     hour = [e for e in EVENTS if now - e["t"] < 3600]
     fails = [e for e in hour if e["kind"] == "auth_fail"]; ips = collections.Counter(e["ip"] or "?" for e in fails)
     add("bad" if len(fails) >= C["auth_fail_bad"] else "warn" if len(fails) >= C["auth_fail_warn"] else "ok", "Refused logins, last hour", "%d%s" % (len(fails), " from " + ", ".join("%s x%d" % x for x in ips.most_common(4)) if fails else ""))
-    for c in CLIENTS.values():
+    for c in list(CLIENTS.values()):
         h = [t for t in c.get("history", []) if now - t < 600]
         if len(h) >= C["flap_count"]: add("warn", "Reconnecting often: " + (c.get("user") or c["client"]), "%d connections in 10 minutes (%s): a weak WiFi link or two devices sharing one account" % (len(h), c.get("ip", "")))
     for pnd in pending_list():
         add("warn", "Waiting for approval: " + pnd["name"], "connected from %s as device %s... : approve it on the Accounts tab" % (pnd["ip"] or "?", pnd["prefix"] or "?") if pnd["online"] else "created, nobody has used it yet")
     by_user = {}
-    for c in CLIENTS.values():
+    for c in list(CLIENTS.values()):
         if c.get("state") == "connected": by_user.setdefault(c.get("user"), []).append(c)
     for a in accs:
         if a["role"] != "repeater": continue
@@ -2968,7 +3190,7 @@ def diagnostics(sysinfo, accs, cert):
             for c in cl:
                 pre = c["client"].rsplit("-", 1)[-1].upper() if "-" in c["client"] else ""
                 if pre and re.match(r"^[0-9A-F]{6}$", pre) and not a["device"].startswith(pre): add("bad", "Different device on %s" % a["name"], "the connected device starts %s but the account is bound to %s... : someone else may be using these credentials" % (pre, a["device"][:6]))
-    for d in DEV.values():
+    for d in list(DEV.values()):
         age = now - d["last"] if d["last"] else None; nm = d["name"] or d["id"][:12]
         if age is None: add("warn", "No data yet from %s" % nm, "known only from its saved status message; nothing live since the dashboard started")
         elif age > silent_minutes(d["id"]) * 60: add("warn", "No data from %s" % nm, "last heard %d min ago (limit %d)" % (age // 60, silent_minutes(d["id"])))
@@ -2979,17 +3201,17 @@ def diagnostics(sysinfo, accs, cert):
     # mesh issues: nodes gone quiet for a day, repeaters with no position, low batteries, a bridge that holds packets back
     # Our own repeaters are checked one by one (and they are not "stale" while they report). Other nodes heard
     # across the mesh are summarised in one line, so the list stays readable.
-    own = {d["id"] for d in DEV.values() if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60}
-    quiet = [(n["name"] or k[:8]) for k, n in NODES.items() if k not in own and n["type"] in (2, 3) and n["last"] and 86400 < now - n["last"] < 30 * 86400]
+    own = {d["id"] for d in list(DEV.values()) if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60}
+    quiet = [(n["name"] or k[:8]) for k, n in list(NODES.items()) if k not in own and n["type"] in (2, 3) and n["last"] and 86400 < now - n["last"] < 30 * 86400]
     if quiet:
         add("warn", "%d mesh node%s quiet for over a day" % (len(quiet), "" if len(quiet) == 1 else "s"), ", ".join(sorted(quiet, key=str.lower)[:15]) + (" …" if len(quiet) > 15 else ""))
-    for d in DEV.values():
+    for d in list(DEV.values()):
         sv = (SETTINGS.get(d["id"]) or {}).get("values", {})          # the position the repeater reports for itself (read over the control link)
         def _set(v): return str(v).strip(" >") not in ("", "0", "0.0", "(not set)")
         has_pos = (d.get("lat") is not None and d.get("lon") is not None) or (_set(sv.get("lat", "")) and _set(sv.get("lon", "")))
         if d["id"] in own and not has_pos and not (CONF.get("locations") or {}).get(d["id"]):
             add("warn", "No position: %s" % (d["name"] or d["id"][:8]), "this repeater has no position, so it cannot be placed on the map")
-    for d in DEV.values():
+    for d in list(DEV.values()):
         nm = d["name"] or d["id"][:12]; mv = (d.get("stats") or {}).get("battery_mv")
         if mv and mv < CONF["battery_low_mv"] and now - d["last"] < 900: add("warn", "Low battery: %s" % nm, "%.2f V" % (mv / 1000))
         b = d.get("bridge") or {}
@@ -3004,13 +3226,13 @@ def prometheus_text():
     def g(name, help_, samples):
         out.append("# HELP umcnet_%s %s" % (name, help_)); out.append("# TYPE umcnet_%s gauge" % name)
         for labels, v in samples: out.append("umcnet_%s%s %s" % (name, ("{%s}" % labels) if labels else "", v))
-    reps = [d for d in DEV.values() if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60]
+    reps = [d for d in list(DEV.values()) if d["last"] and now - d["last"] < CONF["stale_minutes"] * 60]
     g("repeaters_online", "Repeaters reporting now", [("", len(reps))])
     g("packets_per_minute", "Packets heard per minute by each repeater", [('repeater="%s"' % (d["name"] or d["id"][:8]), round(rate_per_min("pkt:" + d["id"], 300), 2)) for d in reps])
     g("bridge_passed_total", "Packets each bridge has passed on to its radio", [('repeater="%s"' % (d["name"] or d["id"][:8]), (d.get("bridge") or {}).get("passed", 0)) for d in reps])
     g("bridge_held_total", "Packets each bridge held back by its rate limit", [('repeater="%s"' % (d["name"] or d["id"][:8]), (d.get("bridge") or {}).get("dropped", 0)) for d in reps])
     g("clock_skew_seconds", "Each repeater's clock against this server", [('repeater="%s"' % (d["name"] or d["id"][:8]), round(d["skew"] or 0, 3)) for d in reps if d.get("skew") is not None])
-    g("nodes_known", "Nodes heard in the last 30 days", [("", sum(1 for n in NODES.values() if n["last"] and now - n["last"] < 30 * 86400))])
+    g("nodes_known", "Nodes heard in the last 30 days", [("", sum(1 for n in list(NODES.values()) if n["last"] and now - n["last"] < 30 * 86400))])
     g("confirmed_links", "Neighbour links confirmed in the last 48 hours", [("", len(confirmed_links()))])
     ck = CLOCK.get("v") or {}
     g("server_clock_offset_seconds", "This server's clock against its time source", [("", ck.get("offset", 0))])
@@ -3021,23 +3243,23 @@ def overview():
     sysinfo = system(); cert = certificate(); accs = accounts(); now = time.time()
     with LOCK:
         devs = []
-        for d in DEV.values():
+        for d in list(DEV.values()):
             x = dict(d); x["types"] = dict(d["types"]); x["topics"] = dict(d["topics"]); x["pm"] = round(rate_per_min("pkt:" + d["id"], 300), 2); x["has_key"] = d["id"] in KEYS; x["label"] = CONF["labels"].get(d["id"], {}); x["last_cmd"] = CTL["last"].get(d["id"]); x["age"] = round(now - d["last"], 1) if d["last"] else 10 ** 9
             cached = SETTINGS.get(d["id"], {}); x["settings"] = dict(cached.get("values", {})); x["settings_updated"] = cached.get("updated", 0); x["settings_loading"] = bool(cached.get("loading")); x["settings_error"] = cached.get("error", ""); devs.append(x)
         devs.sort(key=lambda d: -d["last"])
         clients = []
-        for c in CLIENTS.values():
+        for c in list(CLIENTS.values()):
             x = {k: v for k, v in c.items() if k != "history"}; x["age"] = round(now - c.get("since", now)); x["recent"] = len([t for t in c.get("history", []) if now - t < 3600]); clients.append(x)
         clients.sort(key=lambda c: (c.get("state") != "connected", -c.get("last", c.get("since", 0))))
         clients = [c for i, c in enumerate(clients) if c.get("state") == "connected" or i < 60]       # all that are connected, then the most recent that left
-        for cid in [k for k, c in CLIENTS.items() if c.get("state") != "connected" and now - c.get("last", now) > 86400]: del CLIENTS[cid]
+        for cid in [k for k, c in list(CLIENTS.items()) if c.get("state") != "connected" and now - c.get("last", now) > 86400]: del CLIENTS[cid]
         overlap = []
         ids = [d["id"] for d in devs[:12]]
         for a in ids:
             overlap.append([PAIRS.get(tuple(sorted((a, b))), 0) if a != b else None for b in ids])
         multi = collections.Counter(len(e["devs"]) for e in HEARD.values())
         types = collections.Counter()
-        for d in DEV.values(): types.update(d["types"])
+        for d in list(DEV.values()): types.update(d["types"])
         sysd = {k: v[0] for k, v in SYS.items()}
         try: msg_last = (DB.execute("SELECT MAX(id) FROM messages").fetchone() or [0])[0] or 0
         except Exception: msg_last = 0
@@ -3046,24 +3268,38 @@ def overview():
                "rates": {"messages": rate_per_min("messages"), "packets": rate_per_min("packets"), "unique": rate_per_min("unique")},
                "overlap": {"ids": ids, "names": [DEV[i]["name"] or i[:8] for i in ids], "m": overlap}, "heard_by": dict(sorted(multi.items())), "types": dict(types),
                "latency": {"n": len(LATENCY), "avg": round(sum(LATENCY) / len(LATENCY), 2) if LATENCY else None, "max": round(max(LATENCY), 2) if LATENCY else None},
-               "ev_hour": dict(collections.Counter(e["kind"] for e in EVENTS if now - e["t"] < 3600)), "host": CFG["host"], "config": CONF, "control": {"state": CTL_STATUS.get("state", "idle"), "error": CTL_STATUS.get("error", ""), "keys": sorted(KEYS)}}
+               "ev_hour": dict(collections.Counter(e["kind"] for e in EVENTS if now - e["t"] < 3600)), "host": CFG["host"], "config": conf_redacted(False), "control": {"state": CTL_STATUS.get("state", "idle"), "error": CTL_STATUS.get("error", ""), "keys": sorted(KEYS)}}
     res["pending"] = pending_list()
     res["enrol"] = enrol_view()
     res["diagnostics"] = diagnostics(sysinfo, accs, cert)
     res["backup"] = backup_view(); res["collisions"] = collisions_view(); res["new_nodes"] = newnodes_recent()
     return res
 
+PUBLIC_HIDE_STATS = ("boot_id", "boot_changed", "reboots")
+
+def overview_for(admin, who=None):
+    """The overview as one signed-in viewer may see it: only the administrator gets channel keys, the web users, the alert address and the backup folder and its errors."""
+    o = overview(); o["me"] = me_view(who) if who is not None else None
+    if admin:
+        o["config"] = conf_redacted(True); o["web_users"] = CONF["web_users"]; return o
+    b = dict(o.get("backup") or {}); b.pop("dir", None); b["error"] = "see the administrator" if b.get("error") else ""; o["backup"] = b
+    for d in o.get("diagnostics", []):
+        if d.get("title", "").startswith("Database backup"): d["detail"] = "see the administrator" if d["level"] != "ok" else d["detail"]
+    return o
+
 def public_overview():
     """Operational data safe to publish: no accounts, addresses, logs, keys or write state."""
     o = overview(); now = o["now"]; devices = []
     for d in o["devices"]:
-        devices.append({k: d.get(k) for k in ("id", "area", "name", "first", "last", "last_status", "status", "model", "fw", "radio", "client", "repeat", "stats", "n_raw", "n_pkt", "n_rx", "n_tx", "types", "rssi", "snr", "bytes", "skew", "topics", "pm", "label", "age", "last_pkt", "last_tx", "boot_id", "boot_changed", "reboots")})
+        devices.append({k: d.get(k) for k in ("id", "area", "name", "first", "last", "last_status", "status", "model", "fw", "radio", "client", "repeat", "stats", "n_raw", "n_pkt", "n_rx", "n_tx", "types", "rssi", "snr", "bytes", "skew", "topics", "pm", "label", "age", "last_pkt", "last_tx")})
         br = d.get("bridge") or {}
         devices[-1]["pm"] = d.get("pm"); devices[-1]["age"] = d.get("age")
         devices[-1]["bridge"] = {k: br.get(k) for k in ("heard_pm", "passed_pm", "dropped_pm")} if br else None      # rates only: how much each bridge passes on
         devices[-1]["label"] = {"label": d.get("label", {}).get("label", "")}
         devices[-1]["settings"] = {k: d.get("settings", {}).get(k) for k in PUBLIC_SETTING_KEYS if k in d.get("settings", {})}
         devices[-1]["settings_updated"] = d.get("settings_updated", 0)
+        st = devices[-1].get("stats")
+        if isinstance(st, dict): devices[-1]["stats"] = {k: v for k, v in st.items() if k not in PUBLIC_HIDE_STATS}      # a boot id is a device fingerprint: not for the public page
     packets = [{k: p.get(k) for k in ("t", "area", "dev", "dname", "dir", "type", "flood", "hops", "via", "src", "dst", "chan", "key", "name", "len", "rssi", "snr")} for p in o["packets"]]
     return {"version": VERSION, "now": now, "title": CONF["title"], "mqtt": {"state": o["mqtt"].get("state", "unknown")}, "devices": devices,
             "packets": packets, "totals": {"packets": sum(d.get("n_pkt", 0) for d in devices)}, "nodes": len(NODES),
@@ -3093,6 +3329,29 @@ def parse_body(raw):
     except (UnicodeDecodeError, ValueError): return {}, "body is not valid JSON"
     if not isinstance(body, dict): return {}, "body must be a JSON object"
     return body, None
+
+class BadQuery(ValueError):
+    """A query-string value that is not a usable number: the caller gets HTTP 400, never a 500 or a NaN in the reply."""
+
+def qnum(q, name, default, lo, hi, integer=False):
+    """A number from the query string, finite and clamped to [lo, hi]. Text, 'nan', 'inf' and '1e999' raise BadQuery."""
+    v = finite_num((q.get(name) or [default])[0])
+    if v is None: raise BadQuery("bad %s" % name)
+    v = max(lo, min(hi, v))
+    return int(v) if integer else v
+
+VIEW_CACHE = {}; VIEW_LOCK = threading.Lock(); VIEW_TTL = 15
+def cached_view(key, fn, ttl=None):
+    """A heavy view for the page's polling: recomputed at most every VIEW_TTL seconds however many pages ask, so polling cannot keep flushing the traffic buffers and holding the database lock."""
+    ttl = VIEW_TTL if ttl is None else ttl; now = time.time()
+    with VIEW_LOCK:
+        hit = VIEW_CACHE.get(key)
+        if hit and now - hit[0] < ttl: return hit[1]
+    v = fn()
+    with VIEW_LOCK:
+        if len(VIEW_CACHE) > 64: VIEW_CACHE.clear()
+        VIEW_CACHE[key] = (now, v)
+    return v
 
 class H(BaseHTTPRequestHandler):
     server_version = "umcnet-dash"
@@ -3137,7 +3396,7 @@ class H(BaseHTTPRequestHandler):
                 audit(who, "control setup shown", dev[:12], ""); return self.send(200, json.dumps({"ok": True, "text": text}))
             if p == "/api/config":
                 err = conf_update(body.get("config", body)); audit(who, "settings changed", "dashboard", ",".join(k for k in (body.get("config", body) or {}))[:100], not err)
-                return self.send(200, json.dumps({"ok": not err, "error": err, "config": CONF}))
+                return self.send(200, json.dumps({"ok": not err, "error": err, "config": conf_redacted(role == "admin")}))
             if p.startswith("/api/accounts/"):
                 op = p.rsplit("/", 1)[-1]; name = str(body.get("name", ""))
                 m = {"add": "user_add", "remove": "user_remove", "approve": "user_device", "block": "user_state", "unblock": "user_state", "passwd": "user_passwd", "pending": "user_state"}.get(op)
@@ -3169,7 +3428,8 @@ class H(BaseHTTPRequestHandler):
                 nm = str(body.get("name", "")).strip()
                 if not re.match(r"^#[a-z0-9][a-z0-9-]{0,30}$", nm): return self.send(200, json.dumps({"ok": False, "error": "a group name starts with # and has letters, digits and dashes"}))
                 if any(c.get("name") == nm for c in CONF["messages"]["channels"]): return self.send(200, json.dumps({"ok": True, "note": "already added"}))
-                CONF["messages"]["channels"].append({"name": nm, "source": "scan"}); conf_save(); audit(who, "group added", nm, "public hashtag group found by the scan")
+                with CONF_LOCK: CONF["messages"]["channels"].append({"name": nm, "source": "scan"}); conf_save()
+                audit(who, "group added", nm, "public hashtag group found by the scan")
                 with LOCK: MSGSTAT.pop("%02X" % MSG.Channel(nm).hash, None)
                 return self.send(200, json.dumps({"ok": True}))
             if p == "/api/catalogue/sync":
@@ -3203,7 +3463,7 @@ class H(BaseHTTPRequestHandler):
                 r = admin_call(op="service", name=str(body.get("name", "")), action="restart"); audit(who, "service restart", str(body.get("name")), r.get("error") or "ok", bool(r.get("ok")))
                 return self.send(200, json.dumps(r))
             if p == "/api/mappublish":
-                return self.send(200, json.dumps(map_publish(who, body.get("device"), body.get("confirm") is True)))
+                return self.send(200, json.dumps(map_publish(who, body.get("device"), body.get("confirm") if isinstance(body.get("confirm"), str) else None)))
             if p == "/api/alerts/test":
                 err = send_alert("Test alert", "If you can read this, alerts work.", "ok", "test"); return self.send(200, json.dumps({"ok": not err, "error": err}))
             return self.send(404, '{"error":"not found"}')
@@ -3217,7 +3477,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/public/api/overview": return self.send(200, json.dumps(public_overview(), default=str))
             if u.path == "/public/api/network": return self.send(200, json.dumps(public_network_view(), default=str))
             if u.path == "/public/api/health": return self.send(200, json.dumps({"ok": True, "mqtt": MQTT["state"]}))
-            if u.path == "/api/network": return self.send(200, json.dumps(network_view(float(parse_qs(u.query).get("hours", [CONF["map_hours"]])[0]))))
+            if u.path == "/api/network": return self.send(200, json.dumps(network_view(qnum(q, "hours", CONF["map_hours"], 1, 8760))))
             if u.path == "/api/node/stats":
                 q = parse_qs(u.query); return self.send(200, json.dumps(node_stats(str(q.get("key", [""])[0]).upper(), q.get("days", ["7"])[0])))
             if u.path == "/api/node":
@@ -3225,20 +3485,18 @@ class H(BaseHTTPRequestHandler):
                 if not key: return self.send(200, json.dumps({"nodes": node_choices()}))
                 if not re.match(r"^[0-9A-F]{64}$", key): return self.send(400, '{"error":"id is the node\'s 64 character key"}')
                 return self.send(200, json.dumps(node_analytics(key, q.get("days", ["7"])[0])))
-            if u.path == "/api/watchtower": return self.send(200, json.dumps(watchtower_view()))
-            if u.path == "/api/routes": return self.send(200, json.dumps(route_view()))
-            if u.path == "/api/battery":
-                try: return self.send(200, json.dumps(battery_view(int(float(q.get("hours", ["24"])[0])))))
-                except ValueError: return self.send(400, '{"error":"bad request"}')
-            if u.path == "/api/links/checks": return self.send(200, json.dumps(link_checks(int(parse_qs(u.query).get("hours", ["48"])[0]))))
+            if u.path == "/api/watchtower": return self.send(200, json.dumps(cached_view("watchtower", watchtower_view)))
+            if u.path == "/api/routes": return self.send(200, json.dumps(cached_view("routes", route_view)))
+            if u.path == "/api/battery": return self.send(200, json.dumps(battery_view(qnum(q, "hours", 24, 1, 168, True))))
+            if u.path == "/api/links/checks": return self.send(200, json.dumps(link_checks(qnum(q, "hours", 48, 1, 8760, True))))
             if u.path == "/api/report/weekly": return self.send(200, weekly_report(), "text/plain")
             if u.path == "/api/export/geojson": return self.send(200, json.dumps(geojson_export(), default=str), "application/geo+json")
             if u.path == "/api/messages":
                 q = parse_qs(u.query); g = lambda k, d="": q.get(k, [d])[0]
-                try: return self.send(200, json.dumps(messages_view(g("channel"), g("region"), g("dir"), int(g("before", "0") or 0), int(g("limit", "100") or 100), g("q"), g("source"))))
+                try: return self.send(200, json.dumps(messages_view(g("channel"), g("region"), g("dir"), qnum(q, "before", 0, 0, 2 ** 62, True), qnum(q, "limit", 100, 1, 500, True), g("q"), g("source"))))
                 except ValueError: return self.send(400, '{"error":"bad request"}')
             if u.path == "/api/audit":
-                secs = max(60, min(90 * 86400, int(q.get("range", ["604800"])[0])))
+                secs = qnum(q, "range", 604800, 60, 90 * 86400, True)
                 rows = DB.execute("SELECT ts,who,action,target,detail,ok FROM audit WHERE ts>=? ORDER BY ts DESC LIMIT 500", (int(time.time()) - secs,)).fetchall()
                 return self.send(200, json.dumps([dict(zip(("ts", "who", "action", "target", "detail", "ok"), r)) for r in rows]))
             who = (self.headers.get("X-UMC-User") or "admin").strip() or "admin"; role = role_of(who)
@@ -3253,9 +3511,9 @@ class H(BaseHTTPRequestHandler):
                 rows = DB.execute("SELECT datetime(ts,'unixepoch'),who,action,target,detail,ok FROM audit ORDER BY ts DESC LIMIT 20000").fetchall()
                 return self.send(200, csv_text(("time (UTC)", "who", "action", "target", "detail", "ok"), rows), "text/csv")
             if u.path == "/api/export/devices.csv":
-                with LOCK: rows = [(d["id"], d["name"], d["area"], d["model"], d["fw"], d["radio"], d["status"], d["n_rx"], d["n_tx"], round(d["last"]), CONF["labels"].get(d["id"], {}).get("label", "")) for d in DEV.values()]
+                with LOCK: rows = [(d["id"], d["name"], d["area"], d["model"], d["fw"], d["radio"], d["status"], d["n_rx"], d["n_tx"], round(d["last"]), CONF["labels"].get(d["id"], {}).get("label", "")) for d in list(DEV.values())]
                 return self.send(200, csv_text(("device id", "name", "area", "model", "firmware", "radio", "status", "received", "sent", "last data (epoch)", "label"), rows), "text/csv")
-            if u.path == "/api/export/config.json": return self.send(200, json.dumps(CONF, indent=1))
+            if u.path == "/api/export/config.json": return self.send(200, json.dumps(conf_redacted(role == "admin"), indent=1))
             if u.path in ("/", "/index.html"): return self.send(200, open(CFG["static"], "rb").read(), "text/html")
             if u.path == "/api/catalogue": return self.send(200, json.dumps(cat_status()))
             if u.path == "/api/groups":
@@ -3265,29 +3523,26 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/metrics":
                 return self.send(200, prometheus_text(), ctype="text/plain; version=0.0.4")
             if u.path == "/api/overview":
-                o = overview(); o["me"] = me_view(who)
-                if role == "admin": o["web_users"] = CONF["web_users"]
-                else:                                           # nothing secret leaves for other users
-                    c = json.loads(json.dumps(o["config"])); c.get("alerts", {})["url"] = "(set by the administrator)" if c.get("alerts", {}).get("url") else ""; c.pop("web_users", None); o["config"] = c
-                return self.send(200, json.dumps(o, default=str))
+                return self.send(200, json.dumps(overview_for(role == "admin", who), default=str))
             if u.path == "/api/airtime":
-                try: return self.send(200, json.dumps(airtime_view(float(q.get("hours", ["24"])[0]))))
-                except ValueError: return self.send(400, '{"error":"bad request"}')
+                h = qnum(q, "hours", 24, 1, 168); return self.send(200, json.dumps(cached_view(("airtime", round(h, 2)), lambda: airtime_view(h))))
             if u.path == "/api/presence":
-                try: return self.send(200, json.dumps(presence_view(float(q.get("hours", ["24"])[0]))))
+                try: return self.send(200, json.dumps(presence_view(qnum(q, "hours", 24, 1, 168))))
                 except ValueError: return self.send(400, '{"error":"bad request"}')
             if u.path == "/api/telemetry":
-                try: return self.send(200, json.dumps(telem_series(str(q.get("id", [""])[0]).upper(), int(q.get("ch", ["0"])[0]), int(q.get("type", ["0"])[0]), max(1, min(168, float(q.get("hours", ["24"])[0]))))))
+                try: return self.send(200, json.dumps(telem_series(str(q.get("id", [""])[0]).upper(), qnum(q, "ch", 0, 0, 255, True), qnum(q, "type", 0, 0, 255, True), qnum(q, "hours", 24, 1, 168))))
                 except ValueError: return self.send(400, '{"error":"bad request"}')
             if u.path == "/api/history":
-                keys = [k for k in (q.get("k", [""])[0]).split(",") if k][:60]; secs = max(60, min(14 * 86400, int(q.get("range", ["3600"])[0])))
+                keys = [k for k in (q.get("k", [""])[0]).split(",") if k][:60]; secs = qnum(q, "range", 3600, 60, 14 * 86400, True)
                 return self.send(200, json.dumps(history(keys, secs)))
             if u.path == "/api/events":
-                secs = max(60, min(14 * 86400, int(q.get("range", ["86400"])[0]))); kind = q.get("kind", [""])[0]
+                secs = qnum(q, "range", 86400, 60, 14 * 86400, True); kind = q.get("kind", [""])[0]
                 rows = DB.execute("SELECT ts,kind,client,user,ip,text FROM events WHERE ts>=? " + ("AND kind=? " if kind else "") + "ORDER BY ts DESC LIMIT 500", (int(time.time()) - secs,) + ((kind,) if kind else ())).fetchall()
                 return self.send(200, json.dumps([dict(zip(("ts", "kind", "client", "user", "ip", "text"), r)) for r in rows]))
             if u.path == "/api/health": return self.send(200, json.dumps({"ok": True, "mqtt": MQTT["state"]}))
             return self.send(404, '{"error":"not found"}')
+        except BadQuery as e:
+            return self.send(400, json.dumps({"error": str(e)}))
         except Exception as e:
             return self.send(500, json.dumps({"error": str(e)}))
 
