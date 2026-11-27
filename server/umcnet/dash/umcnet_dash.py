@@ -28,7 +28,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.36"
+VERSION = "2.37"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -794,7 +794,8 @@ DEFAULTS = {"publish_decoded": True, "web_users": {}, "messages": MSG_DEFAULTS, 
             "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14,
             "traffic_keep_days": 30, "telem_keep_days": 90, "backup_keep": 7, "backup_hour": 3, "airtime_warn_pct": 10, "airtime_warn_minutes": 15, "newnode_max_per_hour": 6, "newnode_warmup_minutes": 30, "route_live_minutes": 60, "route_silent_minutes": 720, "route_busy_packets": 20, "battery_low_mv": 3500, "silent_overrides": {}, "confirm_risky": True, "control_enabled": True, "map_publish": False, "snr_worse_db": 4, "snr_min_samples": 20, "drift_seconds": 600, "tx_headroom_db": 10,
             "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True, "collision": True, "airtime": True, "newnode": True, "route_silent": False, "snr_worse": True, "clock_drift": False},
-            "labels": {}}
+            "labels": {},
+            "catalogue": {"enabled": True, "url": "https://raw.githubusercontent.com/marcelverdult/meshcore-channels/main/channels-unique.json", "refresh_hours": 24, "keyed": False}}
 RANGES = {"map_hours": (1, 8760), "stale_minutes": (2, 1440), "cert_warn_days": (2, 60), "cert_bad_days": (1, 30), "disk_warn_pct": (50, 99), "mem_warn_pct": (50, 99), "flap_count": (2, 50),
           "skew_seconds": (5, 3600), "auth_fail_warn": (1, 1000), "auth_fail_bad": (2, 10000), "keep_days": (1, 90),
           "traffic_keep_days": (7, 1000), "telem_keep_days": (8, 730), "backup_keep": (1, 60), "backup_hour": (0, 23), "airtime_warn_pct": (1, 100), "airtime_warn_minutes": (5, 120), "newnode_max_per_hour": (1, 100), "newnode_warmup_minutes": (0, 1440),
@@ -812,6 +813,7 @@ def conf_load():
         if k == "alerts" and isinstance(v, dict): merged["alerts"].update({a: b for a, b in v.items() if a in merged["alerts"]})
         elif k == "messages" and isinstance(v, dict): merged["messages"].update(v)
         elif k == "web_users" and isinstance(v, dict): merged["web_users"] = v
+        elif k == "catalogue" and isinstance(v, dict): merged["catalogue"].update({a: b for a, b in v.items() if a in merged["catalogue"]})
         elif k in merged: merged[k] = v
     CONF.clear(); CONF.update(merged)
 
@@ -864,16 +866,35 @@ def conf_update(patch):
                     m[a] = [x.strip().lstrip("#") for x in b]
                 elif a == "channels":
                     if not isinstance(b, list) or len(b) > 40: return "channels: a list of up to 40"
-                    out = []
+                    out = []; prev = {x.get("name", "").lower(): x for x in m.get("channels", [])}
                     for c in b:
                         if not isinstance(c, dict) or not isinstance(c.get("name"), str): return "each channel needs a name"
                         e = {"name": c["name"].strip()}
                         if c.get("psk"): e["psk"] = str(c["psk"]).strip()
+                        was = prev.get(e["name"].lower())
+                        if was and was.get("source") in ("scan", "catalogue") and "psk" not in e and was["name"] == e["name"]: out.append(dict(was)); continue    # found by the scan or the catalogue: keep its source and label
                         try: MSG.Channel(e["name"], e.get("psk"))
                         except Exception as ex: return "channel %s: %s" % (e["name"], ex)
                         if len(e["name"]) > 31 or not re.match(r"^[A-Za-z0-9#][A-Za-z0-9 #_-]*$", e["name"]): return "channel names are letters, digits, # _ - and spaces"
                         out.append(e)
                     m[a] = out
+        elif k == "catalogue":
+            if not isinstance(v, dict): return "catalogue must be an object"
+            cc = new["catalogue"]
+            for a, b in v.items():
+                if a in ("enabled", "keyed"):
+                    if not isinstance(b, bool): return "catalogue %s must be true or false" % a
+                    cc[a] = b
+                elif a == "refresh_hours":
+                    if isinstance(b, bool) or not isinstance(b, (int, str)): return "refresh_hours must be a whole number"
+                    try: b = int(b)
+                    except ValueError: return "refresh_hours must be a whole number"
+                    if not 1 <= b <= 720: return "refresh_hours must be between 1 and 720"
+                    cc[a] = b
+                elif a == "url":
+                    err = cat_url_error(b)
+                    if err: return err
+                    cc[a] = b.strip()
         elif k == "silent_overrides":
             if not isinstance(v, dict): return "silent_overrides must be an object"
             so = dict(new["silent_overrides"])
@@ -894,7 +915,10 @@ def conf_update(patch):
             new["labels"] = lab
     if new["cert_bad_days"] >= new["cert_warn_days"]: return "the red certificate limit must be below the amber one"
     if new["route_live_minutes"] >= new["route_silent_minutes"]: return "a route is live for fewer minutes than it takes to be called silent"
+    url_changed = new["catalogue"]["url"] != CONF["catalogue"]["url"]
     CONF.clear(); CONF.update(new); conf_save()
+    if url_changed: cat_reset()
+    cat_build_index()
     return None
 
 def make_join_code(user, password, iata="LBA", key_hex=None, bridge=True, host=None, port=443):
@@ -1082,12 +1106,19 @@ RECENT_GRP = collections.deque(maxlen=600)   # (time, payload) of group packets 
 MSGSTAT = {}                                # channel hash -> deque of (time, region): messages we cannot read, kept 24 h
 TX_TIMES = collections.deque(maxlen=20)
 
+def chan_obj(c):
+    """The Channel for a configured entry, or None. A channel taken from the catalogue keeps no key in the settings: a hashtag one is derived
+    from its name, and a keyed one is looked up in the catalogue cache, and only while the 'keyed' switch is on."""
+    try:
+        if c.get("psk"): return MSG.Channel(c["name"], c["psk"])
+        if c.get("source") == "catalogue" and not c["name"].startswith("#"):
+            e = CAT_BY_NAME.get(c["name"].lower())
+            return MSG.Channel(c["name"], e["key"]) if CONF["catalogue"]["keyed"] and e and e.get("key") else None
+        return MSG.Channel(c["name"])
+    except Exception: return None
+
 def msg_channels():
-    out = []
-    for c in CONF["messages"]["channels"]:
-        try: out.append(MSG.Channel(c["name"], c.get("psk") or None))
-        except Exception: pass
-    return out
+    return [ch for ch in (chan_obj(c) for c in CONF["messages"]["channels"]) if ch]
 
 REPLAY_WINDOW = 3600        # catch-up for clients: the last hour of group packets, at most 500, oldest first
 REPLAY_MAX = 500
@@ -1181,6 +1212,7 @@ def note_message(did, raw, snr, rssi, now):
         if r is None:                                           # a channel we have no key for: count it, keep it for the name scan
             RECENT_GRP.append((int(now), p["payload"]))
             MSGSTAT.setdefault("%02X" % p["payload"][0], collections.deque(maxlen=5000)).append((now, region or "-"))
+            cat_observe(p["payload"], now)
             return
         ch, ts, flags, text = r
         sender, body = MSG.split_sender(text)
@@ -1214,11 +1246,12 @@ def group_scan_loop():
                 for g in scan_public_groups():
                     if g["packets"] < GROUP_SCAN_MIN: continue
                     if any(c.get("name") == g["name"] for c in CONF["messages"]["channels"]): continue
-                    CONF["messages"]["channels"].append({"name": g["name"]}); conf_save()
+                    CONF["messages"]["channels"].append({"name": g["name"], "source": "scan"}); conf_save()
                     h = "%02X" % MSG.Channel(g["name"]).hash
                     with LOCK: MSGSTAT.pop(h, None)
                     audit("system", "group added", g["name"], "public hashtag group opened %d heard packets" % g["packets"])
                     event("info", "public group %s found on the mesh and added" % g["name"])
+                cat_promote()
         except Exception as e: sys.stderr.write("group scan: %s\n" % e)
         time.sleep(GROUP_SCAN_EVERY)
 
@@ -1244,6 +1277,240 @@ def scan_public_groups(names=None):
                 break
     return sorted(found.values(), key=lambda g: -g["packets"])
 
+# ----------------------------------------------------------------------------- public channel catalogue
+# Source: github.com/marcelverdult/meshcore-channels (CC0 1.0, checked in its LICENSE and in the "license" field of each file). It lists public channel names
+# with a label. A #hashtag channel carries no key: it is derived from the name exactly as for the group scan (MSG.Channel). Channels with a published key
+# are used only when the operator switches "keyed" on (these keys are public in the catalogue). Nothing is ever guessed; a channel is added only after real
+# packets authenticate with its key (the hash byte and the MAC both match) GROUP_SCAN_MIN times. Private channels and rooms are never touched.
+CAT_MAX_BYTES = 2 * 1024 * 1024; CAT_MAX_ENTRIES = 5000; CAT_TIMEOUT = 15
+CAT_MANUAL_GAP = 300                  # seconds between manual syncs
+CAT_TRY_PER_PACKET = 32               # candidate keys tried for one unreadable packet
+CAT_TRY_PER_MINUTE = 3000             # candidate keys tried in one minute; over that, packets are skipped and counted
+CAT_NAME_RE = re.compile(r"^#?[a-z0-9]{1,29}(-[a-z0-9]{1,29})*$")
+CAT_KEY_RE = re.compile(r"^[A-Za-z0-9+/]{22}==$")
+CAT_PRIO = {"gb": 0, "sco": 0, "ie": 1, "ioi": 1}      # UK first, then Ireland, then everything else
+CAT_HTTP = None                                         # tests put a fake fetch here: fn(url) -> bytes
+CAT = {"entries": [], "index": {}, "meta": {}, "hits": {}, "seen": collections.OrderedDict(), "minute": 0, "tries": 0, "skipped": 0, "truncated": 0, "last_manual": 0, "busy": False}
+CAT_BY_NAME = {}
+CAT_LOCK = threading.RLock()
+
+def cat_url_error(url):
+    """None if the address may be fetched: https only, a named host (no IP address, no local name), the standard port."""
+    if not isinstance(url, str) or not 12 <= len(url.strip()) <= 300: return "catalogue url: an https:// address"
+    try: u = urlparse(url.strip()); port = u.port
+    except ValueError: return "catalogue url: not a valid address"
+    h = (u.hostname or "").lower()
+    if u.scheme != "https" or not h or u.username or u.password or port not in (None, 443): return "catalogue url: https only, standard port, no login in the address"
+    if h != "raw.githubusercontent.com" and ("." not in h or ":" in h or re.match(r"^[0-9.]+$", h) or h == "localhost" or h.endswith((".local", ".internal", ".lan"))):
+        return "catalogue url: use raw.githubusercontent.com or a public host name (not an IP address or a local name)"
+    return None
+
+def cat_entry(it):
+    """One validated catalogue entry {name, label, key}, or None. A hashtag channel never keeps a key (it is derived)."""
+    if not isinstance(it, dict): return None
+    nm, lab, key = it.get("channel"), it.get("description"), it.get("key")
+    if not isinstance(nm, str) or not CAT_NAME_RE.match(nm): return None
+    if not isinstance(lab, str) or not 1 <= len(lab) <= 200 or any(ord(c) < 32 or ord(c) == 127 for c in lab): return None
+    if key is not None:
+        if not isinstance(key, str) or not CAT_KEY_RE.match(key): return None
+        try:
+            if len(base64.b64decode(key, validate=True)) != 16: return None
+        except Exception: return None
+    if nm.startswith("#"): key = None
+    elif key is None: return None                           # a channel without a # must carry its key
+    return {"name": nm, "label": lab.strip(), "key": key}
+
+def cat_parse(raw):
+    """Validate a catalogue file (channels-unique.json or channels-by-country.json). Raises ValueError. Bad entries are skipped and counted;
+    the whole file is refused when it is not CC0-1.0, too big, too long, the wrong shape, or more than a tenth of it is bad."""
+    if not isinstance(raw, (bytes, bytearray)): raise ValueError("no data")
+    if len(raw) > CAT_MAX_BYTES: raise ValueError("the file is larger than 2 MB")
+    try: j = json.loads(raw.decode("utf-8"))
+    except Exception: raise ValueError("not valid JSON")
+    if not isinstance(j, dict): raise ValueError("not a catalogue file")
+    if j.get("license") != "CC0-1.0": raise ValueError("the licence is not CC0-1.0")
+    gen = j.get("generated_at"); gen = gen[:40] if isinstance(gen, str) else ""
+    if isinstance(j.get("channels"), list): groups = [("", j["channels"])]
+    elif isinstance(j.get("countries"), dict):
+        groups = []
+        for code, items in j["countries"].items():
+            if not isinstance(code, str) or not re.match(r"^[a-z0-9]{1,29}$", code) or not isinstance(items, list): raise ValueError("a country list is malformed")
+            groups.append((code, items))
+    else: raise ValueError("no channel list in the file")
+    total = sum(len(i) for _, i in groups)
+    if total > CAT_MAX_ENTRIES: raise ValueError("more than %d entries" % CAT_MAX_ENTRIES)
+    out = {}; bad = 0
+    for code, items in groups:
+        pr = CAT_PRIO.get(code, 2)
+        for it in items:
+            e = cat_entry(it)
+            if e is None: bad += 1; continue
+            old = out.get(e["name"].lower())
+            if old is None or pr < old["prio"]: e["prio"] = pr; out[e["name"].lower()] = e
+    if not out: raise ValueError("no usable entries")
+    if bad * 10 > total: raise ValueError("%d of %d entries are malformed" % (bad, total))
+    return {"entries": sorted(out.values(), key=lambda e: (e["prio"], e["name"])), "generated_at": gen, "rejected": bad, "total": total}
+
+class CatRedirect(urllib.request.HTTPRedirectHandler):
+    """Follows a redirect only to https on the same host as the address that was configured."""
+    def __init__(self, host): self.host = host.lower()
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        n = urlparse(newurl)
+        if n.scheme != "https" or (n.hostname or "").lower() != self.host: raise urllib.error.URLError("a redirect to another host was refused")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+def cat_http_get(url):
+    """The real fetch: TLS verified, 15 s, 2 MB, redirects only within the same host."""
+    op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl.create_default_context()), CatRedirect(urlparse(url).hostname or ""))
+    with op.open(urllib.request.Request(url, headers={"User-Agent": "umcnet-dash/" + VERSION, "Accept": "application/json"}), timeout=CAT_TIMEOUT) as r:
+        n = r.headers.get("Content-Length")
+        if n and n.isdigit() and int(n) > CAT_MAX_BYTES: raise ValueError("the file is larger than 2 MB")
+        data = r.read(CAT_MAX_BYTES + 1)
+    if len(data) > CAT_MAX_BYTES: raise ValueError("the file is larger than 2 MB")
+    return data
+
+def cat_build_index():
+    """Candidates by the protocol's one-byte channel hash (from MSG.Channel). Hashtag entries always; keyed entries only with 'keyed' on."""
+    c = CONF["catalogue"]; idx = {}; by = {}
+    with CAT_LOCK:
+        for e in CAT["entries"]:
+            by[e["name"].lower()] = e
+            if not c["enabled"]: continue
+            try:
+                if e["name"].startswith("#"): ch = MSG.Channel(e["name"])
+                elif c["keyed"] and e.get("key"): ch = MSG.Channel(e["name"], e["key"])
+                else: continue
+            except Exception: continue
+            idx.setdefault(ch.hash, []).append((e, ch))
+        CAT["index"] = idx; CAT_BY_NAME.clear(); CAT_BY_NAME.update(by)
+
+def cat_db_ready():
+    if not DB: return False
+    DB.execute("CREATE TABLE IF NOT EXISTS catalogue(k TEXT PRIMARY KEY, v TEXT)"); return True
+
+def cat_save():
+    with LOCK:
+        if not cat_db_ready(): return
+        DB.execute("INSERT OR REPLACE INTO catalogue VALUES('entries',?)", (json.dumps(CAT["entries"], separators=(",", ":")),))
+        DB.execute("INSERT OR REPLACE INTO catalogue VALUES('meta',?)", (json.dumps(CAT["meta"], separators=(",", ":")),))
+
+def cat_load():
+    """Last-known-good cache from the database; every entry is validated again."""
+    try:
+        with LOCK:
+            if not cat_db_ready(): return
+            rows = dict(DB.execute("SELECT k, v FROM catalogue").fetchall())
+        ents = []
+        for x in json.loads(rows.get("entries", "[]")):
+            e = cat_entry({"channel": x.get("name"), "description": x.get("label"), "key": x.get("key")})
+            if e: e["prio"] = x.get("prio", 2) if x.get("prio") in (0, 1, 2) else 2; ents.append(e)
+        meta = json.loads(rows.get("meta", "{}"))
+        with CAT_LOCK: CAT["entries"] = ents[:CAT_MAX_ENTRIES]; CAT["meta"] = meta if isinstance(meta, dict) else {}
+    except Exception as e: sys.stderr.write("catalogue load: %s\n" % e)
+    cat_build_index()
+
+def cat_reset():
+    with CAT_LOCK: CAT["entries"] = []; CAT["meta"] = {}; CAT["hits"].clear(); CAT["seen"].clear()
+    try:
+        with LOCK:
+            if cat_db_ready(): DB.execute("DELETE FROM catalogue")
+    except Exception: pass
+    cat_build_index()
+
+def cat_sync(manual=False, now=None):
+    """Fetch, validate and swap in the catalogue. On any failure the cache is kept and the error and its time are recorded."""
+    now = time.time() if now is None else now; c = CONF["catalogue"]
+    if not c["enabled"]: return {"ok": False, "error": "the catalogue is switched off"}
+    err = cat_url_error(c["url"])
+    if err: return {"ok": False, "error": err}
+    with CAT_LOCK:
+        if CAT["busy"]: return {"ok": False, "error": "a sync is already running"}
+        if manual and now - CAT["last_manual"] < CAT_MANUAL_GAP: return {"ok": False, "error": "wait %d more seconds before syncing again" % (CAT_MANUAL_GAP - (now - CAT["last_manual"]) + 0.999)}
+        if manual: CAT["last_manual"] = now
+        CAT["busy"] = True
+    get = CAT_HTTP or cat_http_get; meta = dict(CAT["meta"]); meta["attempt"] = int(now); res = {"ok": False}
+    try:
+        got = cat_parse(get(c["url"])); meta.pop("note", None)
+        comp = c["url"].replace("channels-unique.json", "channels-by-country.json") if c["url"].endswith("/channels-unique.json") else ""
+        if comp:                                           # the unique list has no country: read it from the by-country file, if that can be had
+            try:
+                pri = {e["name"]: e["prio"] for e in cat_parse(get(comp))["entries"]}
+                for e in got["entries"]: e["prio"] = pri.get(e["name"], e["prio"])
+                got["entries"].sort(key=lambda e: (e["prio"], e["name"]))
+            except Exception as ex: meta["note"] = "country order not loaded: %s" % str(ex)[:120]
+        with CAT_LOCK: CAT["entries"] = got["entries"]
+        meta.update({"ok": int(now), "error": "", "error_at": meta.get("error_at", 0), "generated_at": got["generated_at"], "rejected": got["rejected"], "url": c["url"]})
+        res = {"ok": True, "entries": len(got["entries"])}
+    except Exception as ex:
+        meta["error"] = (str(ex) or ex.__class__.__name__)[:200]; meta["error_at"] = int(now); res = {"ok": False, "error": meta["error"]}
+    finally:
+        with CAT_LOCK: CAT["meta"] = meta; CAT["busy"] = False
+    cat_build_index(); cat_save()
+    return res
+
+def cat_loop():
+    time.sleep(60)
+    while True:
+        try:
+            c = CONF["catalogue"]; m = CAT["meta"]
+            if c["enabled"] and time.time() - m.get("attempt", 0) >= (3600 if m.get("error") else c["refresh_hours"] * 3600): cat_sync()
+        except Exception as e: sys.stderr.write("catalogue: %s\n" % e)
+        time.sleep(300)
+
+def cat_observe(payload, now):
+    """Called with a group packet that no configured channel opened. Tries only the catalogue entries whose hash byte matches, within the budget.
+    The MAC check (MSG.decrypt_group) decides: the hash byte alone never labels anything. Nothing decoded is kept."""
+    if not CONF["catalogue"]["enabled"] or len(payload) < 19: return
+    with CAT_LOCK:
+        cands = CAT["index"].get(payload[0])
+        if not cands: return
+        k = hashlib.sha1(payload).digest()[:10]
+        if k in CAT["seen"]: return                         # the same packet heard by another repeater
+        CAT["seen"][k] = 1
+        if len(CAT["seen"]) > 2000: CAT["seen"].popitem(last=False)
+        m = int(now // 60)
+        if CAT["minute"] != m: CAT["minute"] = m; CAT["tries"] = 0
+        taken = {c.get("name", "").lower() for c in CONF["messages"]["channels"]}
+        todo = [x for x in cands if x[0]["name"].lower() not in taken]        # a channel the operator already has is not a candidate
+        if len(todo) > CAT_TRY_PER_PACKET: CAT["truncated"] += 1; todo = todo[:CAT_TRY_PER_PACKET]
+        if CAT["tries"] + len(todo) > CAT_TRY_PER_MINUTE: CAT["skipped"] += 1; return
+        CAT["tries"] += len(todo)
+        for e, ch in todo:
+            if MSG.decrypt_group([ch], payload) is not None:
+                h = CAT["hits"].setdefault(e["name"], {"packets": 0, "last": 0}); h["packets"] += 1; h["last"] = int(now); break
+
+def cat_promote():
+    """Add the catalogue channels that opened GROUP_SCAN_MIN real packets, labelled and marked source 'catalogue'. Returns the names added."""
+    c = CONF["catalogue"]
+    if not c["enabled"] or not CONF["messages"].get("auto_groups", True): return []
+    with CAT_LOCK: ready = [(n, h["packets"]) for n, h in CAT["hits"].items() if h["packets"] >= GROUP_SCAN_MIN]
+    added = []
+    for name, n in ready:
+        e = CAT_BY_NAME.get(name)
+        if not e or any(x.get("name", "").lower() == name for x in CONF["messages"]["channels"]):
+            with CAT_LOCK: CAT["hits"].pop(name, None)
+            continue
+        if not name.startswith("#") and not (c["keyed"] and e.get("key")): continue
+        ent = {"name": name, "source": "catalogue", "label": e["label"]}; ch = chan_obj(ent)
+        if not ch: continue
+        CONF["messages"]["channels"].append(ent); conf_save()
+        with LOCK: MSGSTAT.pop("%02X" % ch.hash, None)
+        with CAT_LOCK: CAT["hits"].pop(name, None)
+        audit("system", "group added", name, "catalogue channel %r opened %d heard packets" % (e["label"][:60], n))
+        event("info", "catalogue channel %s found on the mesh and added" % name); added.append(name)
+    return added
+
+def cat_status():
+    """What the Messages page shows. Counts and names only: never a key."""
+    c = CONF["catalogue"]; m = CAT["meta"]
+    with CAT_LOCK:
+        ents = CAT["entries"]
+        return {"enabled": c["enabled"], "keyed": c["keyed"], "url": c["url"], "refresh_hours": c["refresh_hours"], "entries": len(ents), "hashtag": sum(1 for e in ents if e["name"].startswith("#")), "keyed_entries": sum(1 for e in ents if e.get("key")),
+                "candidates": sum(len(v) for v in CAT["index"].values()), "last_ok": m.get("ok", 0), "last_attempt": m.get("attempt", 0), "error": m.get("error", ""), "error_at": m.get("error_at", 0), "note": m.get("note", ""),
+                "generated_at": m.get("generated_at", ""), "rejected": m.get("rejected", 0), "skipped": CAT["skipped"], "truncated": CAT["truncated"], "license": "CC0-1.0",
+                "credit": "Channel catalogue: marcelverdult/meshcore-channels, CC0 1.0 (public domain)", "manual_gap": CAT_MANUAL_GAP,
+                "watching": [{"name": n, "packets": h["packets"]} for n, h in sorted(CAT["hits"].items(), key=lambda kv: -kv[1]["packets"])[:20]]}
+
 def rooms_heard():
     """Room servers the repeaters have heard in the last month. Joining one needs its password, which is not kept here."""
     now = time.time()
@@ -1251,8 +1518,22 @@ def rooms_heard():
         return sorted([{"key": k, "name": n["name"] or k[:8], "last": n["last"], "lat": n["lat"], "lon": n["lon"]}
                        for k, n in NODES.items() if n["type"] == 3 and now - n["last"] < 30 * 86400], key=lambda r: -r["last"])
 
-def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
+def chan_rows():
+    """Configured channels for display: name, hash, label, source. No keys."""
+    out = []
+    for c in CONF["messages"]["channels"]:
+        ch = chan_obj(c)
+        if not ch: continue
+        src = c.get("source") if c.get("source") in ("scan", "catalogue") else "operator"
+        e = CAT_BY_NAME.get(c["name"].lower())
+        out.append({"name": c["name"], "hash": "%02X" % ch.hash, "source": src, "label": c.get("label") or (e["label"] if e and src != "operator" else ""), "status": "decoded"})
+    return out
+
+def messages_view(chan="", region="", direction="", before=0, limit=100, q="", source=""):
     where, args = [], []
+    if source in ("operator", "scan", "catalogue"):
+        names = [c["name"] for c in chan_rows() if c["source"] == source]
+        where.append("chan IN (%s)" % ",".join("?" * len(names)) if names else "0"); args += names
     if chan: where.append("chan=?"); args.append(chan)
     if region == "-": where.append("region=''")
     elif region: where.append("region=?"); args.append(region)
@@ -1265,6 +1546,7 @@ def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
         day = int(time.time()) - 86400
         counts = [{"chan": r[0], "region": r[1], "n": r[2]} for r in DB.execute("SELECT chan, region, COUNT(*) FROM messages WHERE seen>? GROUP BY chan, region", (day,)).fetchall()]
         unread = unreadable_stats()
+        for k, v in unread.items(): v["status"] = "unknown/encrypted"; v["candidates"] = len(CAT["index"].get(int(k, 16), ()))       # counts only: never any content
         names = {d["id"]: (d["name"] or d["id"][:8]) for d in DEV.values()}
     out = []
     for r in rows:
@@ -1272,8 +1554,8 @@ def messages_view(chan="", region="", direction="", before=0, limit=100, q=""):
         out.append({"id": r[0], "ts": r[1], "seen": r[2], "chan": r[3], "chash": r[4], "region": r[5], "sender": r[6], "text": r[7], "dir": r[8], "hops": r[9], "snr": r[10], "rssi": r[11],
                     "heard": [{"id": h["d"], "name": names.get(h["d"], h["d"][:8]), "hops": h["h"], "snr": h["s"], "rssi": h["r"], "sent": bool(h.get("x"))} for h in sorted(heard, key=lambda x: (not x.get("x"), x["h"]))]})
     c = CONF["messages"]
-    return {"messages": out, "channels": [{"name": x["name"], "hash": "%02X" % MSG.Channel(x["name"], x.get("psk")).hash} for x in c["channels"]], "regions": c["regions"], "counts": counts,
-            "unreadable": unread, "tx_enabled": bool(c["tx_enabled"]), "sender": c["sender"]}
+    return {"messages": out, "channels": chan_rows(), "regions": c["regions"], "counts": counts,
+            "unreadable": unread, "catalogue": cat_status(), "tx_enabled": bool(c["tx_enabled"]), "sender": c["sender"]}
 
 def clear_messages(who, chan="", region="", direction="", q=""):
     """Delete stored messages (all, or only those matching the filters). Admin only (enforced by the route)."""
@@ -2887,9 +3169,12 @@ class H(BaseHTTPRequestHandler):
                 nm = str(body.get("name", "")).strip()
                 if not re.match(r"^#[a-z0-9][a-z0-9-]{0,30}$", nm): return self.send(200, json.dumps({"ok": False, "error": "a group name starts with # and has letters, digits and dashes"}))
                 if any(c.get("name") == nm for c in CONF["messages"]["channels"]): return self.send(200, json.dumps({"ok": True, "note": "already added"}))
-                CONF["messages"]["channels"].append({"name": nm}); conf_save(); audit(who, "group added", nm, "public hashtag group found by the scan")
+                CONF["messages"]["channels"].append({"name": nm, "source": "scan"}); conf_save(); audit(who, "group added", nm, "public hashtag group found by the scan")
                 with LOCK: MSGSTAT.pop("%02X" % MSG.Channel(nm).hash, None)
                 return self.send(200, json.dumps({"ok": True}))
+            if p == "/api/catalogue/sync":
+                r = cat_sync(manual=True); audit(who, "catalogue sync", "meshcore-channels", r.get("error") or "%d entries" % r.get("entries", 0), bool(r.get("ok")))
+                return self.send(200, json.dumps(dict(r, status=cat_status())))
             if p in ("/api/audit/clear", "/api/events/clear"):
                 return self.send(200, json.dumps(purge_log(who, "audit" if "audit" in p else "events", body.get("older_than_days"))))
             if p == "/api/messages/clear":
@@ -2950,7 +3235,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/export/geojson": return self.send(200, json.dumps(geojson_export(), default=str), "application/geo+json")
             if u.path == "/api/messages":
                 q = parse_qs(u.query); g = lambda k, d="": q.get(k, [d])[0]
-                try: return self.send(200, json.dumps(messages_view(g("channel"), g("region"), g("dir"), int(g("before", "0") or 0), int(g("limit", "100") or 100), g("q"))))
+                try: return self.send(200, json.dumps(messages_view(g("channel"), g("region"), g("dir"), int(g("before", "0") or 0), int(g("limit", "100") or 100), g("q"), g("source"))))
                 except ValueError: return self.send(400, '{"error":"bad request"}')
             if u.path == "/api/audit":
                 secs = max(60, min(90 * 86400, int(q.get("range", ["604800"])[0])))
@@ -2972,6 +3257,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, csv_text(("device id", "name", "area", "model", "firmware", "radio", "status", "received", "sent", "last data (epoch)", "label"), rows), "text/csv")
             if u.path == "/api/export/config.json": return self.send(200, json.dumps(CONF, indent=1))
             if u.path in ("/", "/index.html"): return self.send(200, open(CFG["static"], "rb").read(), "text/html")
+            if u.path == "/api/catalogue": return self.send(200, json.dumps(cat_status()))
             if u.path == "/api/groups":
                 return self.send(200, json.dumps({"scan": scan_public_groups(), "rooms": rooms_heard(), "names": len(SCAN_NAMES), "packets": len(RECENT_GRP)}))
             if u.path == "/api/scope":
@@ -3009,8 +3295,8 @@ def export_accounts_soon():
     pass                                         # the account list is re-read from its copy on every request
 
 def main():
-    db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); settings_load(); collisions_load(); backup_load(); newnodes_baseline(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
-    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop, neighbour_loop, group_scan_loop, traffic_loop): threading.Thread(target=fn, daemon=True).start()
+    db_init(); conf_load(); keys_load(); nodes_load(); enrol_load(); settings_load(); cat_load(); collisions_load(); backup_load(); newnodes_baseline(); event("start", "dashboard %s started" % VERSION); cpu_pct()       # the first reading only primes the counter
+    for fn in (mqtt_loop, control_loop, journal_loop, sampler_loop, alert_loop, locate_loop, settings_loop, bridge_poll_loop, neighbour_loop, group_scan_loop, cat_loop, traffic_loop): threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((CFG["http_host"], CFG["http_port"]), H); srv.daemon_threads = True
     print("umcnet-dash %s on http://%s:%d" % (VERSION, CFG["http_host"], CFG["http_port"]), flush=True)
     try: srv.serve_forever()

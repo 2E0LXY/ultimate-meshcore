@@ -1512,6 +1512,229 @@ class TxAdvice(unittest.TestCase):
 class Watchtower(unittest.TestCase):
     def test_view_has_all_four_parts_and_survives_empty_data(self):
         dash.db_init(); dash.DEV.clear(); dash.NODES.clear(); v = dash.watchtower_view(); self.assertEqual({"now", "snr", "drift", "hops", "tx", "tx_label"}, set(v)); json.dumps(v)
-        self.assertEqual("2.36", dash.VERSION)
+        self.assertEqual("2.37", dash.VERSION)
     def test_advert_parse_still_reports_what_it_did(self):
         k, pkt = make_advert(ts=1); i = dash.parse_packet(pkt); self.assertEqual((k, "Hill"), (i["fkey"], i["name"])); self.assertEqual(2, i["atype"])
+
+
+class Catalogue(unittest.TestCase):
+    """The public channel catalogue: validated, cached, hash-indexed, authenticated by MAC, never exposed."""
+    KEY = base64.b64encode(bytes(range(16))).decode()
+    def doc(self, chans, lic="CC0-1.0", shape="channels"):
+        body = chans if shape == "channels" else chans
+        return json.dumps({"generated_at": "2026-11-21T00:00:00Z", "license": lic, shape: body}).encode()
+    def setUp(self):
+        dash.db_init(); dash.CONF.clear(); dash.CONF.update(json.loads(json.dumps(dash.DEFAULTS)))
+        dash.cat_reset(); dash.CAT.update(skipped=0, truncated=0, last_manual=0, minute=0, tries=0, busy=False); dash.RECENT_GRP.clear(); dash.MSGSTAT.clear()
+        self.old = dash.CAT_HTTP; self.calls = []
+    def tearDown(self): dash.CAT_HTTP = self.old; dash.cat_reset()
+    def fake(self, mapping):
+        def get(url):
+            self.calls.append(url); v = mapping.get(url)
+            if isinstance(v, Exception): raise v
+            if v is None: raise OSError("no such file")
+            return v
+        dash.CAT_HTTP = get
+    def load(self, chans, shape="channels"):
+        e = dash.cat_parse(self.doc(chans, shape=shape))["entries"]; dash.CAT["entries"] = e; dash.cat_build_index(); return e
+    def pkt(self, ch, text="hi"): return dash.MSG.parse_wire(dash.MSG.build_group_text(ch, "Sam", text, int(time.time())))["payload"]
+
+    # validation
+    def test_validation_refuses_bad_files(self):
+        good = [{"channel": "#leeds", "description": "Leeds"}]
+        for raw in (b"not json", b"[]", b'{"license":"CC0-1.0"}', self.doc(good, lic="MIT"), self.doc([]), b"x" * (dash.CAT_MAX_BYTES + 1),
+                    self.doc([{"channel": "#c%d" % i, "description": "x"} for i in range(dash.CAT_MAX_ENTRIES + 1)])):
+            with self.assertRaises(ValueError): dash.cat_parse(raw)
+        self.assertEqual(1, len(dash.cat_parse(self.doc(good))["entries"]))
+    def test_bad_names_and_keys_are_skipped_and_counted(self):
+        ok = [{"channel": "#c%d" % i, "description": "ok"} for i in range(30)]
+        bad = [{"channel": "#Upper", "description": "x"}, {"channel": "#a" * 40, "description": "x"}, {"channel": "#a--b", "description": "x"}, {"channel": "#a b", "description": "x"},
+               {"channel": "#x", "description": ""}, {"channel": "nokey", "description": "x"}, {"channel": "k1", "description": "x", "key": "AAAA"},
+               {"channel": "k2", "description": "x", "key": base64.b64encode(bytes(32)).decode()}, {"channel": "#x", "description": "x", "key": "!!!"}, {"channel": 5, "description": "x"}, "str", {"channel": "#nl", "description": "a\nb"}]
+        for b in bad: self.assertIsNone(dash.cat_entry(b), b)
+        r = dash.cat_parse(self.doc(ok + bad[:2]))
+        self.assertEqual((30, 2), (len(r["entries"]), r["rejected"]))
+        with self.assertRaises(ValueError): dash.cat_parse(self.doc(ok[:5] + bad))                 # more than a tenth bad: the whole file is refused
+    def test_hashtag_key_is_ignored_and_keyed_entry_needs_a_valid_key(self):
+        e = dash.cat_entry({"channel": "#leeds", "description": "L", "key": self.KEY}); self.assertIsNone(e["key"])
+        e = dash.cat_entry({"channel": "room", "description": "R", "key": self.KEY}); self.assertEqual(self.KEY, e["key"])
+    def test_url_rules(self):
+        for u in ("https://raw.githubusercontent.com/a/b/main/x.json", "https://example.org/x.json"): self.assertIsNone(dash.cat_url_error(u))
+        for u in ("http://raw.githubusercontent.com/x.json", "https://127.0.0.1/x.json", "https://localhost/x", "https://nas.local/x", "https://[::1]/x", "https://u:p@example.org/x", "https://example.org:8443/x", "ftp://example.org/x", "", None, 5):
+            self.assertTrue(dash.cat_url_error(u), u)
+    def test_real_catalogue_shapes_parse(self):                       # both shapes of the published files, same entry rules
+        by = {"countries": {"gb": [{"channel": "#leeds", "description": "Leeds"}], "de": [{"channel": "#leeds", "description": "Dup"}, {"channel": "#bonn", "description": "Bonn"}]}}
+        r = dash.cat_parse(json.dumps(dict(by, license="CC0-1.0", generated_at="x")).encode())
+        self.assertEqual([("#leeds", "Leeds", 0), ("#bonn", "Bonn", 2)], [(e["name"], e["label"], e["prio"]) for e in r["entries"]])
+
+    # dedupe and priority
+    def test_dedupe_and_uk_first(self):
+        by = {"license": "CC0-1.0", "generated_at": "x", "countries": {"de": [{"channel": "#aaa", "description": "DE"}, {"channel": "#zzz", "description": "DE"}], "gb": [{"channel": "#aaa", "description": "GB"}], "sco": [{"channel": "#mmm", "description": "SCO"}], "ie": [{"channel": "#iii", "description": "IE"}]}}
+        r = dash.cat_parse(json.dumps(by).encode())["entries"]
+        self.assertEqual(["#aaa", "#mmm", "#iii", "#zzz"], [e["name"] for e in r]); self.assertEqual("GB", r[0]["label"])
+    def test_sync_takes_country_order_from_the_companion_file_and_survives_its_absence(self):
+        u = dash.CONF["catalogue"]["url"]; cu = u.replace("unique", "by-country")
+        uniq = self.doc([{"channel": "#b-de", "description": "DE"}, {"channel": "#a-gb", "description": "GB"}])
+        comp = json.dumps({"license": "CC0-1.0", "generated_at": "x", "countries": {"gb": [{"channel": "#a-gb", "description": "GB"}], "de": [{"channel": "#b-de", "description": "DE"}]}}).encode()
+        self.fake({u: uniq, cu: comp}); self.assertEqual({"ok": True, "entries": 2}, dash.cat_sync()); self.assertEqual(["#a-gb", "#b-de"], [e["name"] for e in dash.CAT["entries"]])
+        self.fake({u: uniq}); self.assertTrue(dash.cat_sync()["ok"]); self.assertIn("country order", dash.CAT["meta"]["note"])
+
+    # hash index and collisions
+    def test_index_by_hash_and_collision_needs_the_mac(self):
+        a = dash.MSG.Channel("#aaa-one"); other = None
+        for i in range(5000):                                         # find a second name with the same one-byte hash
+            c = dash.MSG.Channel("#c%d" % i)
+            if c.hash == a.hash and c.name != a.name: other = c; break
+        self.assertIsNotNone(other)
+        self.load([{"channel": "#aaa-one", "description": "A"}, {"channel": other.name, "description": "B"}])
+        self.assertEqual({"#aaa-one", other.name}, {e["name"] for e, _ in dash.CAT["index"][a.hash]})
+        for _ in range(4): dash.cat_observe(self.pkt(other, "x%d" % _), time.time()); dash.CAT["seen"].clear()
+        self.assertEqual({other.name}, set(dash.CAT["hits"]))        # same hash, but only the key whose MAC verifies is credited
+        forged = bytes([a.hash]) + b"\x00\x00" + bytes(16); dash.cat_observe(forged, time.time()); self.assertNotIn("#aaa-one", dash.CAT["hits"])
+    def test_only_matching_hash_candidates_are_tried(self):
+        names = ["#n%d" % i for i in range(60)]; self.load([{"channel": n, "description": n} for n in names])
+        target = dash.MSG.Channel(names[7]); tried = []; real = dash.MSG.decrypt_group
+        dash.MSG.decrypt_group = lambda chs, p: (tried.extend(chs), real(chs, p))[1]
+        try: dash.cat_observe(self.pkt(target), time.time())
+        finally: dash.MSG.decrypt_group = real
+        self.assertTrue(tried and all(c.hash == target.hash for c in tried)); self.assertLess(len(tried), 60)
+
+    # budget
+    def test_budget_per_packet_and_per_minute(self):
+        names = ["#b%d" % i for i in range(40)]; self.load([{"channel": n, "description": n} for n in names])
+        h = dash.MSG.Channel(names[0]).hash; many = [(e, c) for e, c in [(dict(name="#z%d" % i, label="z", key=None), dash.MSG.Channel("#z%d" % i)) for i in range(200)]]
+        dash.CAT["index"][h] = many + dash.CAT["index"].get(h, [])
+        now = time.time(); dash.cat_observe(bytes([h]) + bytes(40), now)
+        self.assertEqual(1, dash.CAT["truncated"]); self.assertEqual(dash.CAT_TRY_PER_PACKET, dash.CAT["tries"])
+        dash.CAT["tries"] = dash.CAT_TRY_PER_MINUTE - 5; dash.cat_observe(bytes([h]) + bytes(41), now); self.assertEqual(1, dash.CAT["skipped"])
+        dash.cat_observe(bytes([h]) + bytes(42), now + 120); self.assertEqual(1, dash.CAT["skipped"]); self.assertEqual(dash.CAT_TRY_PER_PACKET, dash.CAT["tries"])    # a new minute, a new budget
+        self.assertEqual(1, dash.cat_status()["skipped"])
+
+    # promotion, labels, sources
+    def test_channel_is_added_only_after_real_packets_authenticate_with_its_key(self):
+        self.load([{"channel": "#leeds", "description": "Leeds mesh"}]); ch = dash.MSG.Channel("#leeds")
+        dash.cat_observe(bytes([ch.hash]) + bytes(30), time.time()); self.assertEqual({}, dash.CAT["hits"])       # right hash byte, no MAC: nothing
+        for i in range(dash.GROUP_SCAN_MIN - 1): dash.cat_observe(self.pkt(ch, "m%d" % i), time.time())
+        self.assertEqual([], dash.cat_promote()); self.assertEqual([c["name"] for c in dash.DEFAULTS["messages"]["channels"]], [c["name"] for c in dash.CONF["messages"]["channels"]])
+        dash.cat_observe(self.pkt(ch, "last"), time.time())
+        self.assertEqual(["#leeds"], dash.cat_promote())
+        ent = dash.CONF["messages"]["channels"][-1]; self.assertEqual(("#leeds", "catalogue", "Leeds mesh"), (ent["name"], ent["source"], ent["label"])); self.assertNotIn("psk", ent)
+        row = next(c for c in dash.chan_rows() if c["name"] == "#leeds"); self.assertEqual(("catalogue", "Leeds mesh", "decoded"), (row["source"], row["label"], row["status"]))
+    def test_same_packet_from_two_repeaters_counts_once(self):
+        self.load([{"channel": "#leeds", "description": "L"}]); p = self.pkt(dash.MSG.Channel("#leeds"))
+        for _ in range(5): dash.cat_observe(p, time.time())
+        self.assertEqual(1, dash.CAT["hits"]["#leeds"]["packets"])
+    def test_note_message_feeds_the_catalogue_and_the_message_then_reads(self):
+        self.load([{"channel": "#leeds", "description": "Leeds"}]); ch = dash.MSG.Channel("#leeds"); now = time.time()
+        for i in range(3): dash.note_message("01" * 32, dash.MSG.build_group_text(ch, "Sam", "hello %d" % i, int(now) + i), "1", "-90", now + i)
+        self.assertEqual(0, dash.DB.execute("SELECT COUNT(*) FROM messages WHERE chan='#leeds'").fetchone()[0])      # not decoded or stored before it is added
+        self.assertEqual(["#leeds"], dash.cat_promote())
+        dash.note_message("02" * 32, dash.MSG.build_group_text(ch, "Sam", "after", int(now) + 9), "1", "-90", now + 9)
+        v = dash.messages_view(source="catalogue"); self.assertEqual(["after"], [m["text"] for m in v["messages"]])
+        self.assertEqual([], dash.messages_view(source="operator")["messages"]); dash.DB.execute("DELETE FROM messages")
+    def test_operator_channels_take_precedence(self):
+        dash.CONF["messages"]["channels"].append({"name": "#Leeds"})                    # operator entry, different case
+        self.load([{"channel": "#leeds", "description": "Leeds"}]); ch = dash.MSG.Channel("#leeds")
+        for i in range(4): dash.cat_observe(bytes([ch.hash]) + bytes(30), time.time())
+        self.assertEqual({}, dash.CAT["hits"])                                          # never even a candidate
+        row = next(c for c in dash.chan_rows() if c["name"] == "#Leeds"); self.assertEqual(("operator", ""), (row["source"], row["label"]))
+        dash.CAT["hits"]["#leeds"] = {"packets": 9, "last": 1}; self.assertEqual([], dash.cat_promote()); self.assertEqual(1, sum(c["name"].lower() == "#leeds" for c in dash.CONF["messages"]["channels"]))
+        # an operator entry decodes first: a packet it opens never reaches the catalogue
+        dash.note_message("01" * 32, dash.MSG.build_group_text(ch, "S", "x", int(time.time())), "1", "-90", time.time()); self.assertEqual({}, dash.CAT["hits"]); dash.DB.execute("DELETE FROM messages")
+    def test_scan_added_and_saved_settings_keep_source_and_label(self):
+        self.load([{"channel": "#leeds", "description": "Leeds"}])
+        dash.CONF["messages"]["channels"].append({"name": "#leeds", "source": "scan"})
+        self.assertEqual("Leeds", next(c for c in dash.chan_rows() if c["name"] == "#leeds")["label"])
+        self.assertIsNone(dash.conf_update({"messages": {"channels": [{"name": "#leeds"}, {"name": "#new"}]}}))        # the settings form posts bare names back
+        d = {c["name"]: c for c in dash.CONF["messages"]["channels"]}; self.assertEqual("scan", d["#leeds"]["source"]); self.assertNotIn("source", d["#new"])
+        self.assertIsNone(dash.conf_update({"messages": {"channels": [{"name": "#leeds", "psk": self.KEY}]}})); self.assertNotIn("source", dash.CONF["messages"]["channels"][0])
+
+    # switches
+    def test_defaults_and_switch_off(self):
+        self.assertEqual((True, False, 24), (dash.CONF["catalogue"]["enabled"], dash.CONF["catalogue"]["keyed"], dash.CONF["catalogue"]["refresh_hours"]))
+        self.assertTrue(dash.CONF["catalogue"]["url"].startswith("https://raw.githubusercontent.com/marcelverdult/meshcore-channels/"))
+        self.load([{"channel": "#leeds", "description": "L"}]); self.assertTrue(dash.CAT["index"])
+        self.assertIsNone(dash.conf_update({"catalogue": {"enabled": False}})); self.assertEqual({}, dash.CAT["index"])
+        dash.cat_observe(self.pkt(dash.MSG.Channel("#leeds")), time.time()); self.assertEqual({}, dash.CAT["hits"])
+        self.fake({}); self.assertFalse(dash.cat_sync()["ok"]); self.assertEqual([], self.calls)                       # no network when off
+        self.assertEqual([], dash.cat_promote())
+    def test_keyed_channels_are_off_by_default_and_need_the_switch(self):
+        self.load([{"channel": "club", "description": "Club room", "key": self.KEY}]); room = dash.MSG.Channel("club", self.KEY)
+        self.assertEqual({}, dash.CAT["index"])                                         # off: keyed entries are not even candidates
+        for i in range(4): dash.cat_observe(self.pkt(room, "m%d" % i), time.time())
+        self.assertEqual({}, dash.CAT["hits"])
+        self.assertIsNone(dash.conf_update({"catalogue": {"keyed": True}})); self.assertTrue(dash.CAT["index"])
+        for i in range(3): dash.cat_observe(self.pkt(room, "n%d" % i), time.time())
+        self.assertEqual(["club"], dash.cat_promote()); ent = dash.CONF["messages"]["channels"][-1]; self.assertNotIn("psk", ent)       # the key stays in the cache, not in the settings
+        self.assertEqual("club", dash.msg_channels()[-1].name)
+        dash.conf_update({"catalogue": {"keyed": False}}); self.assertNotIn("club", [c.name for c in dash.msg_channels()])      # switched off again: no longer read
+        self.assertNotIn("club", [c["name"] for c in dash.chan_rows()])
+    def test_conf_validation(self):
+        for bad in ({"enabled": "yes"}, {"keyed": 1}, {"refresh_hours": 0}, {"refresh_hours": 721}, {"refresh_hours": "x"}, {"refresh_hours": True}, {"url": "http://example.org/x.json"}, {"url": "https://10.0.0.1/x"}):
+            self.assertTrue(dash.conf_update({"catalogue": bad}), bad)
+        self.assertTrue(dash.conf_update({"catalogue": []}))
+        self.assertIsNone(dash.conf_update({"catalogue": {"refresh_hours": "6", "url": "https://example.org/c.json", "bogus": 1}}))
+        self.assertEqual((6, "https://example.org/c.json"), (dash.CONF["catalogue"]["refresh_hours"], dash.CONF["catalogue"]["url"])); self.assertNotIn("bogus", dash.CONF["catalogue"])
+
+    # fetch, cache, last known good
+    def test_last_known_good_is_kept_on_failure_and_survives_a_reload(self):
+        u = dash.CONF["catalogue"]["url"]; good = self.doc([{"channel": "#leeds", "description": "Leeds"}])
+        self.fake({u: good}); self.assertTrue(dash.cat_sync(now=1000)["ok"]); self.assertEqual(1000, dash.CAT["meta"]["ok"])
+        for bad in (OSError("down"), b"junk", self.doc([{"channel": "#x", "description": "x"}], lic="GPL")):
+            self.fake({u: bad}); r = dash.cat_sync(now=2000); self.assertFalse(r["ok"])
+            self.assertEqual(["#leeds"], [e["name"] for e in dash.CAT["entries"]]); self.assertTrue(dash.CAT["index"])
+            st = dash.cat_status(); self.assertEqual((1000, 2000), (st["last_ok"], st["error_at"])); self.assertTrue(st["error"])
+        dash.CAT["entries"] = []; dash.CAT["meta"] = {}; dash.CAT["index"] = {}; dash.cat_load()                                 # restart
+        self.assertEqual(["#leeds"], [e["name"] for e in dash.CAT["entries"]]); self.assertEqual(2000, dash.CAT["meta"]["error_at"]); self.assertTrue(dash.CAT["index"])
+        self.fake({u: good}); dash.cat_sync(now=3000); self.assertEqual("", dash.cat_status()["error"])
+    def test_manual_sync_is_rate_limited(self):
+        u = dash.CONF["catalogue"]["url"]; self.fake({u: self.doc([{"channel": "#leeds", "description": "L"}])})
+        self.assertTrue(dash.cat_sync(manual=True, now=5000)["ok"]); r = dash.cat_sync(manual=True, now=5100); self.assertFalse(r["ok"]); self.assertIn("wait", r["error"])
+        self.assertTrue(dash.cat_sync(manual=True, now=5000 + dash.CAT_MANUAL_GAP + 1)["ok"])
+    def test_url_change_drops_the_cache(self):
+        self.load([{"channel": "#leeds", "description": "L"}]); dash.cat_save()
+        self.assertIsNone(dash.conf_update({"catalogue": {"url": "https://example.org/c.json"}})); self.assertEqual([], dash.CAT["entries"]); dash.cat_load(); self.assertEqual([], dash.CAT["entries"])
+    def test_redirects_only_within_the_same_host_and_over_https(self):
+        import urllib.request as ur, urllib.error as ue
+        h = dash.CatRedirect("raw.githubusercontent.com"); req = ur.Request("https://raw.githubusercontent.com/a")
+        for bad in ("https://evil.example/x", "http://raw.githubusercontent.com/x", "https://raw.githubusercontent.com.evil.example/x"):
+            with self.assertRaises(ue.URLError): h.redirect_request(req, None, 302, "Found", {}, bad)
+        self.assertIsNotNone(h.redirect_request(req, None, 302, "Found", {}, "https://RAW.githubusercontent.com/b"))
+    def test_oversize_body_is_refused_by_the_real_fetch(self):
+        import io
+        class R(io.BytesIO):
+            headers = {"Content-Length": str(dash.CAT_MAX_BYTES + 5)}
+            def __enter__(s): return s
+            def __exit__(s, *a): pass
+        class Op:
+            def open(s, *a, **k): return R(b"x")
+        real = dash.urllib.request.build_opener; dash.urllib.request.build_opener = lambda *a: Op()
+        try:
+            with self.assertRaises(ValueError): dash.cat_http_get("https://raw.githubusercontent.com/x")
+        finally: dash.urllib.request.build_opener = real
+
+    # nothing leaks
+    def test_status_and_views_never_carry_a_key(self):
+        self.load([{"channel": "club", "description": "Club room", "key": self.KEY}, {"channel": "#leeds", "description": "L"}]); dash.CONF["catalogue"]["keyed"] = True; dash.cat_build_index()
+        raw = json.dumps(dash.cat_status()) + json.dumps(dash.messages_view()) + json.dumps(dash.chan_rows()) + json.dumps(dash.CONF)
+        self.assertNotIn(self.KEY, raw); self.assertNotIn(base64.b64decode(self.KEY).hex(), raw)
+    def test_unreadable_channels_show_counts_only(self):
+        priv = dash.MSG.Channel("secret", base64.b64encode(bytes([9]) * 16).decode()); now = time.time()
+        dash.note_message("01" * 32, dash.MSG.build_group_text(priv, "Eve", "private words", int(now)), "1", "-90", now)
+        v = dash.messages_view(); u = v["unreadable"]["%02X" % priv.hash]
+        self.assertEqual(("unknown/encrypted", 1), (u["status"], u["n"])); self.assertNotIn("private words", json.dumps(v)); self.assertEqual([], v["messages"])
+    def test_public_endpoints_leak_neither_keys_nor_messages(self):
+        import http.server, threading as th, urllib.request
+        self.load([{"channel": "club", "description": "Club room", "key": self.KEY}]); dash.CONF["catalogue"]["keyed"] = True; dash.cat_build_index()
+        dash.DB.execute("INSERT INTO messages(ts,seen,chan,chash,region,sender,text,pkey,dir,hops,snr,rssi,heard) VALUES(1,?,?,?,?,?,?,?,?,0,0,0,'[]')", (int(time.time()), "#leeds", "00", "", "Sam", "SECRET-MESSAGE-BODY", "pk1", "rx"))
+        dash.CAT["hits"]["club"] = {"packets": 2, "last": 1}
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), dash.H); th.Thread(target=srv.serve_forever, daemon=True).start(); port = srv.server_address[1]; seen = []
+        try:
+            for path in ("/public/api/overview", "/public/api/network", "/public/api/health", "/public/api/catalogue", "/public/api/messages", "/public/api/groups", "/public/api/channels", "/public/"):
+                try: body = urllib.request.urlopen("http://127.0.0.1:%d%s" % (port, path), timeout=5).read().decode("utf-8", "replace")
+                except Exception as ex: body = getattr(ex, "read", lambda: b"")().decode("utf-8", "replace") if hasattr(ex, "read") else str(ex)
+                seen.append(body)
+        finally: srv.shutdown(); dash.DB.execute("DELETE FROM messages")
+        blob = "\n".join(seen)
+        for secret in (self.KEY, base64.b64decode(self.KEY).hex(), "SECRET-MESSAGE-BODY", "Club room", "marcelverdult", "catalogue"): self.assertNotIn(secret, blob, secret)
+        for fn in (dash.public_overview, dash.public_network_view): self.assertNotIn(self.KEY, json.dumps(fn(), default=str))
