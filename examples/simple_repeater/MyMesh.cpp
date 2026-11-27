@@ -1711,7 +1711,7 @@ void MyMesh::trialCommand(uint32_t sender_timestamp, const char* args, char* rep
     return;
   }
   if (strcmp(args, "keep") == 0) {
-    if (!_trial.active()) { strcpy(reply, umctrial::errText(umctrial::R_NONE)); return; }
+    if (!_trial.active()) { strcpy(reply, umctrial::errText(umctrial::TR_NONE)); return; }
     char key[28];
     strncpy(key, _trial.key(), sizeof(key) - 1);
     key[sizeof(key) - 1] = 0;
@@ -1722,7 +1722,7 @@ void MyMesh::trialCommand(uint32_t sender_timestamp, const char* args, char* rep
     return;
   }
   if (strcmp(args, "revert") == 0) {
-    if (!_trial.active()) { strcpy(reply, umctrial::errText(umctrial::R_NONE)); return; }
+    if (!_trial.active()) { strcpy(reply, umctrial::errText(umctrial::TR_NONE)); return; }
     char key[28];
     strncpy(key, _trial.key(), sizeof(key) - 1);
     key[sizeof(key) - 1] = 0;
@@ -1735,10 +1735,10 @@ void MyMesh::trialCommand(uint32_t sender_timestamp, const char* args, char* rep
   }
   umctrial::Args a;
   umctrial::Result r = umctrial::parse(args, a);
-  if (r == umctrial::R_OK && _trial.active()) r = umctrial::R_BUSY;
-  if (r != umctrial::R_OK) {
+  if (r == umctrial::TR_OK && _trial.active()) r = umctrial::TR_BUSY;
+  if (r != umctrial::TR_OK) {
     strcpy(reply, umctrial::errText(r));
-    if (r == umctrial::R_KEY) {
+    if (r == umctrial::TR_KEY) {
       size_t n = strlen(reply);
       snprintf(reply + n, 157 - n, ": %.100s", umctrial::keyList());
     }

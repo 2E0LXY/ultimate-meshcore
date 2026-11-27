@@ -5,22 +5,22 @@ using namespace umctrial;
 
 TEST(TrialParse, GoodAndBad) {
   Args a;
-  EXPECT_EQ(R_OK, parse("60 advert.interval 120", a));
+  EXPECT_EQ(TR_OK, parse("60 advert.interval 120", a));
   EXPECT_EQ(60u, a.secs);
   EXPECT_STREQ("advert.interval", a.key);
   EXPECT_STREQ("120", a.value);
-  EXPECT_EQ(R_OK, parse("  30   txdelay   0.5", a));
+  EXPECT_EQ(TR_OK, parse("  30   txdelay   0.5", a));
   EXPECT_STREQ("0.5", a.value);
-  EXPECT_EQ(R_SECS, parse("29 af 1", a));
-  EXPECT_EQ(R_SECS, parse("3601 af 1", a));
-  EXPECT_EQ(R_OK, parse("3600 af 1", a));
-  EXPECT_EQ(R_FORMAT, parse("", a));
-  EXPECT_EQ(R_FORMAT, parse("abc af 1", a));
-  EXPECT_EQ(R_FORMAT, parse("60x af 1", a));
-  EXPECT_EQ(R_FORMAT, parse("60", a));
-  EXPECT_EQ(R_FORMAT, parse("60 af", a));
-  EXPECT_EQ(R_FORMAT, parse("-5 af 1", a));
-  EXPECT_EQ(R_FORMAT, parse(nullptr, a));
+  EXPECT_EQ(TR_SECS, parse("29 af 1", a));
+  EXPECT_EQ(TR_SECS, parse("3601 af 1", a));
+  EXPECT_EQ(TR_OK, parse("3600 af 1", a));
+  EXPECT_EQ(TR_FORMAT, parse("", a));
+  EXPECT_EQ(TR_FORMAT, parse("abc af 1", a));
+  EXPECT_EQ(TR_FORMAT, parse("60x af 1", a));
+  EXPECT_EQ(TR_FORMAT, parse("60", a));
+  EXPECT_EQ(TR_FORMAT, parse("60 af", a));
+  EXPECT_EQ(TR_FORMAT, parse("-5 af 1", a));
+  EXPECT_EQ(TR_FORMAT, parse(nullptr, a));
 }
 
 TEST(TrialParse, RejectsUnsafeKeys) {
@@ -29,29 +29,29 @@ TEST(TrialParse, RejectsUnsafeKeys) {
                         "name", "repeat", "bridge.secret", "ap.password", "pin", "setperm", "radio.fem.rxgain", "freq", "radio", "tx", "bw", "sf", "cr", "int.thresh", "region", "mqtt.custom.host", "mqtt.custom.password", "mqtt.owner", "set", "ap.mode"}) {
     char buf[100];
     snprintf(buf, sizeof(buf), "60 %s x", k);
-    EXPECT_EQ(R_KEY, parse(buf, a)) << k;
+    EXPECT_EQ(TR_KEY, parse(buf, a)) << k;
   }
-  EXPECT_EQ(R_KEY, parse("60 flood.maxx 1", a));   // exact match only
-  EXPECT_EQ(R_KEY, parse("60 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1", a));
+  EXPECT_EQ(TR_KEY, parse("60 flood.maxx 1", a));   // exact match only
+  EXPECT_EQ(TR_KEY, parse("60 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1", a));
 }
 
 TEST(TrialParse, ValueMustBePrintableAndFit) {
   Args a;
-  EXPECT_EQ(R_FORMAT, parse("60 af 1\n", a));
-  EXPECT_EQ(R_FORMAT, parse((std::string("60 af ") + std::string(70, '1')).c_str(), a));
+  EXPECT_EQ(TR_FORMAT, parse("60 af 1\n", a));
+  EXPECT_EQ(TR_FORMAT, parse((std::string("60 af ") + std::string(70, '1')).c_str(), a));
 }
 
 TEST(Trial, StartKeepRevert) {
   Trial t;
   EXPECT_FALSE(t.active());
-  EXPECT_EQ(R_OK, t.begin(1000, 60, "af"));
+  EXPECT_EQ(TR_OK, t.begin(1000, 60, "af"));
   EXPECT_TRUE(t.active());
   EXPECT_STREQ("af", t.key());
   EXPECT_EQ(60u, t.remainingSecs(1000));
   EXPECT_EQ(30u, t.remainingSecs(31000));
-  EXPECT_EQ(R_OK, t.finish());     // keep or revert
+  EXPECT_EQ(TR_OK, t.finish());     // keep or revert
   EXPECT_FALSE(t.active());
-  EXPECT_EQ(R_NONE, t.finish());
+  EXPECT_EQ(TR_NONE, t.finish());
   EXPECT_EQ(0u, t.remainingSecs(1000));
   EXPECT_FALSE(t.expired(10000000));
 }
@@ -69,7 +69,7 @@ TEST(Trial, Timeout) {
 TEST(Trial, MillisWrap) {
   Trial t;
   const uint32_t start = 0xFFFFFFFFu - 10000u;      // 10 s before millis() wraps
-  EXPECT_EQ(R_OK, t.begin(start, 60, "advert.interval"));     // deadline wraps to 50 s past zero
+  EXPECT_EQ(TR_OK, t.begin(start, 60, "advert.interval"));     // deadline wraps to 50 s past zero
   EXPECT_FALSE(t.expired(start + 5000));
   EXPECT_FALSE(t.expired(0));                       // just wrapped
   EXPECT_FALSE(t.expired(49000));
@@ -79,13 +79,13 @@ TEST(Trial, MillisWrap) {
 
 TEST(Trial, RejectsSecondUnknownAndBadSecs) {
   Trial t;
-  EXPECT_EQ(R_KEY, t.begin(0, 60, "wifi.pwd"));
-  EXPECT_EQ(R_KEY, t.begin(0, 60, nullptr));
-  EXPECT_EQ(R_SECS, t.begin(0, 10, "af"));
-  EXPECT_EQ(R_SECS, t.begin(0, 4000, "af"));
+  EXPECT_EQ(TR_KEY, t.begin(0, 60, "wifi.pwd"));
+  EXPECT_EQ(TR_KEY, t.begin(0, 60, nullptr));
+  EXPECT_EQ(TR_SECS, t.begin(0, 10, "af"));
+  EXPECT_EQ(TR_SECS, t.begin(0, 4000, "af"));
   EXPECT_FALSE(t.active());
-  EXPECT_EQ(R_OK, t.begin(0, 60, "af"));
-  EXPECT_EQ(R_BUSY, t.begin(0, 60, "advert.interval"));
+  EXPECT_EQ(TR_OK, t.begin(0, 60, "af"));
+  EXPECT_EQ(TR_BUSY, t.begin(0, 60, "advert.interval"));
   EXPECT_STREQ("af", t.key());                       // the first trial is untouched
 }
 

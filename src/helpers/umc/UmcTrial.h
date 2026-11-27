@@ -36,15 +36,15 @@ inline const char* keyList() {
          "flood.max.unscoped, rxdelay, txdelay, direct.txdelay, agc.reset.interval, multi.acks";
 }
 
-enum Result : uint8_t { R_OK = 0, R_BUSY, R_NONE, R_KEY, R_SECS, R_FORMAT };
+enum Result : uint8_t { TR_OK = 0, TR_BUSY, TR_NONE, TR_KEY, TR_SECS, TR_FORMAT };
 
 inline const char* errText(Result r) {
   switch (r) {
-    case R_BUSY: return "Err - a trial is already running: tryset keep or tryset revert first";
-    case R_NONE: return "Err - no trial running";
-    case R_KEY: return "Err - that setting cannot be trialled";
-    case R_SECS: return "Err - seconds must be 30 to 3600";
-    case R_FORMAT: return "Err - use: tryset <secs> <key> <value> | keep | revert | status";
+    case TR_BUSY: return "Err - a trial is already running: tryset keep or tryset revert first";
+    case TR_NONE: return "Err - no trial running";
+    case TR_KEY: return "Err - that setting cannot be trialled";
+    case TR_SECS: return "Err - seconds must be 30 to 3600";
+    case TR_FORMAT: return "Err - use: tryset <secs> <key> <value> | keep | revert | status";
     default: return "OK";
   }
 }
@@ -59,33 +59,33 @@ struct Args {
 // whitelist, not the value (the ordinary `set` code does that when the value is applied).
 inline Result parse(const char* s, Args& out) {
   memset(&out, 0, sizeof(out));
-  if (s == nullptr) return R_FORMAT;
+  if (s == nullptr) return TR_FORMAT;
   while (*s == ' ') s++;
-  if (*s < '0' || *s > '9') return R_FORMAT;
+  if (*s < '0' || *s > '9') return TR_FORMAT;
   char* end = nullptr;
   const unsigned long secs = strtoul(s, &end, 10);
-  if (end == s || (*end != ' ' && *end != 0)) return R_FORMAT;
+  if (end == s || (*end != ' ' && *end != 0)) return TR_FORMAT;
   while (*end == ' ') end++;
   const char* k = end;
   while (*end != 0 && *end != ' ') end++;
   const size_t klen = (size_t)(end - k);
-  if (klen == 0) return R_FORMAT;
-  if (klen >= sizeof(out.key)) return R_KEY;
+  if (klen == 0) return TR_FORMAT;
+  if (klen >= sizeof(out.key)) return TR_KEY;
   memcpy(out.key, k, klen);
   out.key[klen] = 0;
   while (*end == ' ') end++;
   const size_t vlen = strlen(end);
-  if (vlen == 0) return R_FORMAT;
-  if (vlen >= sizeof(out.value)) return R_FORMAT;
+  if (vlen == 0) return TR_FORMAT;
+  if (vlen >= sizeof(out.value)) return TR_FORMAT;
   for (size_t i = 0; i < vlen; i++) {
-    if ((uint8_t)end[i] < 0x20 || end[i] == 0x7f) return R_FORMAT;
+    if ((uint8_t)end[i] < 0x20 || end[i] == 0x7f) return TR_FORMAT;
   }
   memcpy(out.value, end, vlen);
   out.value[vlen] = 0;
-  if (!keyAllowed(out.key)) return R_KEY;
-  if (secs < kMinSecs || secs > kMaxSecs) return R_SECS;
+  if (!keyAllowed(out.key)) return TR_KEY;
+  if (secs < kMinSecs || secs > kMaxSecs) return TR_SECS;
   out.secs = (uint32_t)secs;
-  return R_OK;
+  return TR_OK;
 }
 
 // The timer. One trial at a time; the deadline is compared as a signed difference so it survives
@@ -96,14 +96,14 @@ public:
   const char* key() const { return _key; }
 
   Result begin(uint32_t now_ms, uint32_t secs, const char* key) {
-    if (_active) return R_BUSY;
-    if (!keyAllowed(key)) return R_KEY;
-    if (secs < kMinSecs || secs > kMaxSecs) return R_SECS;
+    if (_active) return TR_BUSY;
+    if (!keyAllowed(key)) return TR_KEY;
+    if (secs < kMinSecs || secs > kMaxSecs) return TR_SECS;
     strncpy(_key, key, sizeof(_key) - 1);
     _key[sizeof(_key) - 1] = 0;
     _deadline = now_ms + secs * 1000UL;
     _active = true;
-    return R_OK;
+    return TR_OK;
   }
   // true once the timer has run out (the caller then restores the old value and calls finish())
   bool expired(uint32_t now_ms) const { return _active && (int32_t)(now_ms - _deadline) >= 0; }
@@ -114,10 +114,10 @@ public:
   }
   // the trial is over (kept, reverted or expired): the caller has already done what that means
   Result finish() {
-    if (!_active) return R_NONE;
+    if (!_active) return TR_NONE;
     _active = false;
     _key[0] = 0;
-    return R_OK;
+    return TR_OK;
   }
 
 private:
