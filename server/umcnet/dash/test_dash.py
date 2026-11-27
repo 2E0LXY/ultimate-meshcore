@@ -1598,7 +1598,7 @@ class TxAdvice(unittest.TestCase):
 class Watchtower(unittest.TestCase):
     def test_view_has_all_four_parts_and_survives_empty_data(self):
         dash.db_init(); dash.DEV.clear(); dash.NODES.clear(); v = dash.watchtower_view(); self.assertEqual({"now", "snr", "drift", "hops", "tx", "tx_label"}, set(v)); json.dumps(v)
-        self.assertEqual("2.39", dash.VERSION)
+        self.assertEqual("2.40", dash.VERSION)
     def test_advert_parse_still_reports_what_it_did(self):
         k, pkt = make_advert(ts=1); i = dash.parse_packet(pkt); self.assertEqual((k, "Hill"), (i["fkey"], i["name"])); self.assertEqual(2, i["atype"])
 
@@ -2239,7 +2239,7 @@ const jget = u => new Promise((res, rej) => { fetches++; pend.push({u, res, rej}
     def js(self, body, extra=""):
         return run_node(self.PRE + self.HELPERS + extra + "(async () => {" + body + "})().then(() => {}, e => { console.error(e); process.exit(1); });")
     def test_script_parses(self):
-        i = HTML.index("<script>") + 8; open(os.path.join(tempfile.gettempdir(), "umc_dash_check.js"), "w").write(HTML[i:HTML.rindex("</script>")])
+        i = HTML.rindex("<script>") + 8; open(os.path.join(tempfile.gettempdir(), "umc_dash_check.js"), "w").write(HTML[i:HTML.rindex("</script>")])
         p = subprocess.run(["node", "--check", os.path.join(tempfile.gettempdir(), "umc_dash_check.js")], capture_output=True, text=True); self.assertEqual(0, p.returncode, p.stderr)
     def test_a_stale_node_answer_is_thrown_away(self):
         na = js_between("const naOptions", "function newNodesPanel")
@@ -2374,3 +2374,76 @@ class CatalogueHardening(unittest.TestCase):
         e = dash.cat_parse(json.dumps({"license": "CC0-1.0", "channels": [{"channel": "club", "description": "Club", "key": self.KEY}]}).encode())["entries"]; dash.CAT["entries"] = e; dash.cat_build_index()
         for who in ("admin", "vic"):
             for path in ("/api/overview", "/api/catalogue", "/api/messages", "/api/groups"): self.assertNotIn(self.KEY, http_call(path, who)[1], (who, path))
+
+
+
+# ---- the two UMC themes (docs/umc/theme/tokens.json) on the dashboard and the public viewer
+TOKENS = json.load(open(os.path.join(HERE, "..", "..", "..", "docs", "umc", "theme", "tokens.json"), encoding="utf-8"))
+PAGES = {"dash.html": HTML, "public.html": open(os.path.join(HERE, "public.html"), encoding="utf-8").read()}
+
+def _kebab(k): return re.sub(r"([A-Z])", lambda m: "-" + m.group(1).lower(), k)
+def token_decls(theme):
+    t = TOKENS["themes"][theme]; d = {}
+    for k, v in t.items():
+        if k == "label": continue
+        if k == "series":
+            for i, c in enumerate(v, 1): d["--s%d" % i] = c
+        elif k.startswith("radius"): d["--" + _kebab(k)] = "%spx" % v
+        else: d["--" + _kebab(k)] = v
+    return d
+def theme_block(page, theme):
+    m = re.search(r'html\[data-theme="%s"\][^{]*\{([^}]*)\}' % theme, page); assert m, theme
+    return m, dict(x.split(":", 1) for x in m.group(1).split(";") if ":" in x)
+def strip_allowed(page):
+    for th in TOKENS["themes"]: page = page.replace(theme_block(page, th)[0].group(0), "")
+    a = page.find("/* skins:start")
+    if a >= 0: page = page[:a] + page[page.index("/* skins:end */"):]
+    return "\n".join(l for l in page.split("\n") if "const NC_THEMES = [" not in l)
+def lum(h):
+    h = h.lstrip("#"); c = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    c = [x / 12.92 if x <= .03928 else ((x + .055) / 1.055) ** 2.4 for x in c]; return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]
+def contrast(a, b): x, y = sorted((lum(a), lum(b)), reverse=True); return (x + .05) / (y + .05)
+def mix(a, b, p): return "#" + "".join("%02x" % round(int(a[i:i + 2], 16) * p + int(b[i:i + 2], 16) * (1 - p)) for i in (1, 3, 5))
+
+class Themes(unittest.TestCase):
+    def test_both_theme_blocks_hold_every_token_with_identical_values(self):
+        self.assertEqual("overview", TOKENS["default"])
+        for name, page in PAGES.items():
+            for th in TOKENS["themes"]:
+                _, got = theme_block(page, th)
+                for k, v in token_decls(th).items(): self.assertEqual(v, got.get(k), "%s %s %s" % (name, th, k))
+                n = len(TOKENS["themes"][th]["series"]); self.assertNotIn("--s%d" % (n + 1), got, "%s %s has an extra series colour" % (name, th))
+    def test_default_theme_applies_without_the_attribute(self):
+        for name, page in PAGES.items(): self.assertRegex(page, r'html\[data-theme="overview"\],html:not\(\[data-theme\]\)\{', name)
+    def test_no_stray_colours_and_no_system_scheme(self):
+        for name, page in PAGES.items():
+            body = strip_allowed(page)
+            self.assertNotIn("prefers-color-scheme", page, name)
+            self.assertEqual([], re.findall(r"(?<![&\w])#[0-9a-fA-F]{3,8}\b", body), name + ": hard-coded hex colour")
+            self.assertEqual([], [m for m in re.findall(r"(?:rgba?|hsla?)\(\s*[^)]*\)", body) if not m.replace(" ", "").startswith("rgba(0,0,0,")], name + ": hard-coded rgb/hsl colour")
+            self.assertEqual([], re.findall(r"(?:color|fill|stroke|background)\s*[:=]\s*\"?(?:white|black|red|green|blue|gray|grey|orange|yellow)\b", body), name)
+    def test_head_script_sets_the_theme_before_the_first_style(self):
+        for name, page in PAGES.items():
+            head = page[:page.index("</head>")]; i = head.index('setAttribute("data-theme"'); self.assertLess(i, head.index("<style>"), name)
+            s = head[head.rindex("<script>", 0, i):head.index("</script>", i)]
+            self.assertIn('localStorage.getItem("umc-theme")', s); self.assertRegex(s, r"try\{.*localStorage.*\}catch"); self.assertIn('t="overview"', s)
+    def test_switch_in_header_and_settings_and_storage(self):
+        for name, page in PAGES.items():
+            self.assertIn('<div class="themesw" role="group"', page[page.index("<body"):page.rindex("<script>")], name + ": header switch")
+            for th, tv in TOKENS["themes"].items(): self.assertIn('data-theme-set="%s"' % th, page); self.assertIn(">%s</button>" % tv["label"], page)
+            self.assertIn('"umc-theme"' if name == "dash.html" else "'umc-theme'", page)
+        self.assertIn('panel("Appearance"', PAGES["dash.html"]); self.assertIn("D.themeSwitch()", PAGES["dash.html"])
+    def test_charts_read_the_palette_from_css_variables_and_redraw(self):
+        d = PAGES["dash.html"]; self.assertIn('getPropertyValue("--s"', d); self.assertIn("D.setTheme", d); self.assertIn("if (S.o) draw()", d)
+        p = PAGES["public.html"]; self.assertIn("getComputedStyle(document.documentElement)", p); self.assertIn("LF.P=null", p)
+    def test_contrast_is_at_least_aa(self):
+        for name, page in PAGES.items():
+            for th in TOKENS["themes"]:
+                v = {k: x for k, x in theme_block(page, th)[1].items()}; g = lambda k: v["--" + k]
+                link = mix(g("accent"), g("ink"), .45)          # the --link colour: 45% accent, 55% ink
+                pairs = [("muted", "card"), ("muted", "surface"), ("muted", "surface2"), ("muted", "sidebar"), ("muted", "chip"), ("ink", "card"), ("ink", "chip"),
+                         ("accent-ink", "accent"), ("nav-active-ink", "nav-active"), ("ok", "ok-bg"), ("warn", "warn-bg"), ("bad", "bad-bg"), ("ok", "card"), ("warn", "card"), ("bad", "card")]
+                for fg, bg in pairs: self.assertGreaterEqual(contrast(g(fg), g(bg)), 4.5, "%s %s %s on %s" % (name, th, fg, bg))
+                self.assertGreaterEqual(contrast(link, g("card")), 4.5, "%s %s link on card" % (name, th))
+                self.assertGreaterEqual(contrast(g("faint"), g("card")), 2.8, "%s %s faint on card (decoration only)" % (name, th))
+                for i in range(1, len(TOKENS["themes"][th]["series"]) + 1): self.assertGreaterEqual(contrast(g("s%d" % i), g("card")), 3.0, "%s %s series %d (graphics)" % (name, th, i))

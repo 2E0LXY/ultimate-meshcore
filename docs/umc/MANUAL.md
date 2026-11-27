@@ -488,6 +488,13 @@ The dashboard can recognise and label public channels from the community catalog
 * **Catalogue.** A description with control, direction-override, zero-width or unassigned characters is refused. A redirect must keep the host, port 443 and https and carry no login. The download has a 60-second limit in all, not just per read. Channels the catalogue no longer lists stop being watched. Settings saves and promoted channels cannot lose each other's change, and settings are never seen half-replaced by another thread.
 * **Settings** (`config.json`): `traffic_keep_days` default 400 (range 7 to 1000). API: `POST /api/mappublish` as above. Fixed in umcnet_enrol.ed_verify (dash 2.39): the same small-order-key weakness exists in `ed_verify` in `umcnet_enrol.py` (the enrolment code), which is outside this change.
 
+### 13.2f Appearance (dashboard and public page)
+
+* **Two dark themes.** **Overview** (navy and blue, the default) and **Analytics** (graphite, multi-colour). Use the two-option switch in the dashboard header, or **Settings > Appearance**. The public page (`/public`) has the same switch.
+* **Remembered per browser.** The choice is kept in this browser (`localStorage`, key `umc-theme`) and applied before the page paints, so there is no flash. If storage is blocked the default is used. Charts and the live-flow canvas take their colours from the active theme and redraw when you switch.
+* **Source of the colours.** `docs/umc/theme/tokens.json`; the Android app and T-Deck use the same values. Status colours (green, amber, red) are never used for chart series.
+* **Small screens.** At 700 px or narrower the sidebar becomes the wrapped row of tab buttons. Reduced-motion settings are respected.
+
 ### 13.3 Wi-Fi motion sensing (optional)
 
 Builds named `*_csi` (Heltec V3 and V4 OLED repeaters to start with) can detect movement in the room from the Wi-Fi signal alone, using the [ESPectre](https://espectre.dev/) library. It is a switch next to everything else the node does: LoRa, MQTT and the web panel keep running.
@@ -1115,6 +1122,7 @@ Replies start with `>` for values, `OK` for success, or `Err`/`Error` for proble
 | `get role` | Firmware role |
 | `get/set scope <region>` | Region scope added to flood sends, blank = none *(C)* |
 | `get/set touch.map <0-7>` | T-Deck touch orientation *(C)* |
+| `get/set theme overview\|analytics` | App look on colour screens, and the web panel's default is per browser *(C)*. `set theme <0-15>` still picks the chat colours; `get chat.theme` reads them |
 | `get/set rxdelay <0-20>` | RX delay base |
 | `sensor list\|get\|set` | Sensors (if fitted) |
 | `get setup`, `setup start`, `setup done` | Setup mode |
