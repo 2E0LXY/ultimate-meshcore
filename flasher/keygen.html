@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ultimate MeshCore Vanity Key Generator</title>
+<meta name="description" content="Generate a MeshCore identity whose public key starts with a prefix of your choice. Runs entirely in your browser.">
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#1b1f24;--muted:#626b75;--line:#dde1e6;--acc:#0b6bcb;--acc-ink:#fff;--warn:#9a6700;--bad:#cf222e;--ok:#1a7f37}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ed;--muted:#98a2ad;--line:#2a313a;--acc:#4c9aff;--acc-ink:#07121f;--warn:#d29922;--bad:#ff7b72;--ok:#3fb950}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:17px;margin:0 0 10px}.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+label{display:block;font-weight:600;margin:10px 0 6px}
+.btn{font:inherit;background:var(--acc);color:var(--acc-ink);border:0;border-radius:10px;padding:10px 18px;cursor:pointer;font-weight:600}
+.btn.sec{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:400}.btn:disabled{opacity:.55;cursor:not-allowed}
+input{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+input.mono,textarea,.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+textarea{width:100%;height:5.5em;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.help{color:var(--muted);font-size:13px;margin-top:4px}
+.warn{border-left:4px solid var(--warn);padding:8px 12px;background:var(--bg);border-radius:6px;margin:10px 0}
+.err{color:var(--bad)}.ok{color:var(--ok)}
+progress{width:100%;height:10px}
+.stats{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0;font-variant-numeric:tabular-nums}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>Vanity key generator</h1>
+<p class="sub">Create a MeshCore identity whose public key starts with a prefix you choose. Keys are made in your browser and are never sent anywhere. <a href="index.html">Back to the flasher</a></p>
+
+<div class="card">
+  <label for="prefix">Public-key prefix (1 to 8 hex characters)</label>
+  <input id="prefix" class="mono" maxlength="8" placeholder="e.g. 2e0" autocomplete="off" spellcheck="false">
+  <div class="help" id="pfHelp"></div>
+  <div class="help">A 1-byte prefix (2 characters) is how repeaters appear in paths; pick one nobody nearby uses. 00 and FF are reserved and rejected.</div>
+  <div id="long" class="warn" hidden>More than 5 characters can take hours to days, and 7 to 8 is impractical in a browser. Expect a very long wait.</div>
+  <div class="row" style="margin-top:12px">
+    <button class="btn" id="go">Generate</button>
+    <button class="btn sec" id="stop" disabled>Stop</button>
+    <span id="msg" class="help"></span>
+  </div>
+  <div id="run" hidden>
+    <progress id="bar" max="1" value="0"></progress>
+    <div class="stats"><span>Workers: <b id="nw">0</b></span><span>Rate: <b id="rate">0</b> keys/s</span><span>Tried: <b id="tried">0</b></span><span>Expected: <b id="exp">0</b></span><span>ETA (50% chance): <b id="eta">-</b></span></div>
+    <div class="help">Progress is a guide only: the search is luck-based, so it can finish at any point (or run past 100%).</div>
+  </div>
+</div>
+
+<div class="card" id="res" hidden>
+  <h2>Result</h2>
+  <div class="warn"><b>Store this private key safely.</b> Anyone who has it can impersonate this node, and it cannot be recovered if lost. Do not post it, paste it into chat or keep it in cloud notes. Use a password manager or an encrypted file.</div>
+  <label>Public key</label><div class="mono" id="pub" style="word-break:break-all"></div>
+  <label for="prv">Private key (prv.key, 128 hex characters)</label>
+  <textarea id="prv" readonly></textarea>
+  <div class="row" style="margin-top:10px">
+    <button class="btn sec" id="cp">Copy private key</button>
+    <button class="btn sec" id="cpc">Copy as console command</button>
+    <button class="btn" id="dl">Download as file</button>
+  </div>
+  <div class="help" id="chk"></div>
+  <div class="help">To use it: on the node's web page open Identity, then Private key, paste it and reboot. Or in the console run <code>set prv.key &lt;key&gt;</code>, then reboot. Check the new public key afterwards.</div>
+</div>
+
+<div class="card"><div class="help">Algorithm adapted from <a href="https://github.com/meshcore-dev/config.meshcore.io">config.meshcore.io</a> (MIT). Self-test: <a href="keygen-test.html">keygen-test.html</a>.</div></div>
+</main>
+<script type="module">
+import { checkPrefix, validatePrv, pubFromPrv, fromHex, toHex } from './keygen-core.js';
+const $ = (i) => document.getElementById(i);
+let workers = [], t0 = 0, tried = 0, timer = 0, result = null;
+const fmt = (n) => n >= 1e9 ? (n / 1e9).toFixed(2) + 'G' : n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(Math.round(n));
+const dur = (s) => !isFinite(s) ? '-' : s < 1 ? '<1 s' : s < 90 ? Math.round(s) + ' s' : s < 5400 ? Math.round(s / 60) + ' min' : s < 172800 ? (s / 3600).toFixed(1) + ' h' : (s / 86400).toFixed(1) + ' days';
+const cleanPrefix = () => $('prefix').value.trim().toLowerCase();
+
+$('prefix').addEventListener('input', () => {
+  const p = cleanPrefix(), e = p ? checkPrefix(p) : '';
+  $('pfHelp').textContent = e || (p ? `Expect about ${fmt(Math.pow(16, p.length))} keys on average.` : '');
+  $('pfHelp').className = 'help' + (e ? ' err' : '');
+  $('long').hidden = p.length <= 5;
+});
+
+function finish(msg, cls) {
+  workers.forEach((w) => { try { w.postMessage({ type: 'stop' }); } catch (e) {} setTimeout(() => w.terminate(), 300); });
+  workers = []; clearInterval(timer);
+  $('go').disabled = false; $('stop').disabled = true; $('prefix').disabled = false;
+  $('msg').textContent = msg || ''; $('msg').className = 'help ' + (cls || '');
+}
+
+function show(r) {
+  const prv = r.privKey.toLowerCase(), pub = r.pubKey.toLowerCase(), p = cleanPrefix();
+  // Re-derive on the main thread and re-check everything before showing it.
+  const again = toHex(pubFromPrv(fromHex(prv))), bad = validatePrv(prv);
+  if (again !== pub || !pub.startsWith(p) || bad) { finish('Internal check failed: ' + (bad || 'public key mismatch') + '. Discarded; please retry.', 'err'); return; }
+  result = { prv, pub };
+  $('pub').textContent = pub; $('prv').value = prv;
+  $('chk').textContent = 'Checked: public key re-derived from the private key, prefix matches, not 00/FF.';
+  $('res').hidden = false;
+  finish(`Found after about ${fmt(tried)} keys.`, 'ok');
+}
+
+$('go').onclick = () => {
+  const p = cleanPrefix(), e = checkPrefix(p);
+  if (e) { $('msg').textContent = e; $('msg').className = 'help err'; return; }
+  if (typeof Worker === 'undefined' || typeof BigInt === 'undefined') { $('msg').textContent = 'This browser lacks Web Workers or BigInt; use a current Chrome, Edge, Firefox or Safari.'; $('msg').className = 'help err'; return; }
+  if (p.length > 5 && !confirm(`A ${p.length}-character prefix can take hours to days. Continue?`)) return;
+  $('res').hidden = true; result = null; tried = 0; t0 = performance.now();
+  const n = Math.max(1, navigator.hardwareConcurrency || 4), expected = Math.pow(16, p.length);
+  $('run').hidden = false; $('nw').textContent = n; $('exp').textContent = fmt(expected);
+  $('go').disabled = true; $('stop').disabled = false; $('prefix').disabled = true; $('msg').textContent = 'Running...'; $('msg').className = 'help';
+  try {
+    for (let i = 0; i < n; i++) {
+      const w = new Worker('keygen-worker.js', { type: 'module' });
+      w.onmessage = (ev) => {
+        const d = ev.data;
+        if (d.type === 'progress') tried += d.attempts;
+        else if (d.type === 'match') { tried += d.attempts; show(d); }
+        else if (d.type === 'error') finish('Worker error: ' + d.message, 'err');
+      };
+      w.onerror = (ev) => finish('Worker failed to start (' + (ev.message || 'module workers unsupported, or page opened from file://') + '). Serve this page over http(s).', 'err');
+      w.postMessage({ type: 'start', prefix: p, progressInterval: 250 });
+      workers.push(w);
+    }
+  } catch (err) { finish('Could not start workers: ' + err.message, 'err'); return; }
+  timer = setInterval(() => {
+    const s = (performance.now() - t0) / 1000, rate = tried / Math.max(s, 0.001);
+    $('rate').textContent = fmt(rate); $('tried').textContent = fmt(tried);
+    $('bar').value = Math.min(1, tried / expected);
+    $('eta').textContent = rate > 0 ? dur((expected * 0.693 - tried) / rate) : '-';
+  }, 500);
+};
+$('stop').onclick = () => finish('Stopped.');
+const flash = (id, t) => { const b = $(id), o = b.textContent; b.textContent = t; setTimeout(() => b.textContent = o, 1500); };
+const copy = async (text, id) => { try { await navigator.clipboard.writeText(text); flash(id, 'Copied'); } catch (e) { $('prv').select(); flash(id, 'Press Ctrl+C'); } };
+$('cp').onclick = () => copy(result.prv, 'cp');
+$('cpc').onclick = () => copy('set prv.key ' + result.prv, 'cpc');
+$('dl').onclick = () => {
+  const a = document.createElement('a'), u = URL.createObjectURL(new Blob([result.prv + '\n'], { type: 'text/plain' }));
+  a.href = u; a.download = `meshcore-${result.pub.slice(0, 8)}-prv.key.txt`; a.click(); setTimeout(() => URL.revokeObjectURL(u), 2000);
+};
+</script>
+</body>
+</html>

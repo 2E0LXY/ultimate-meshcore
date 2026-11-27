@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8"><title>Vanity key self-test</title>
+<style>body{font:14px/1.5 ui-monospace,monospace;padding:20px}.p{color:#1a7f37}.f{color:#cf222e}</style></head>
+<body><h1>Vanity key generator self-test</h1><pre id="o">running...</pre>
+<script type="module">
+import { runTests } from './keygen-tests.js';
+const out = await runTests();
+document.getElementById('o').innerHTML = out.map(r => `<span class="${r.ok ? 'p' : 'f'}">${r.ok ? 'PASS' : 'FAIL'}</span> ${r.name}${r.ok ? '' : ' - ' + r.info}`).join('\n')
+  + '\n\n' + (out.every(r => r.ok) ? 'ALL PASSED' : 'FAILURES');
+</script></body></html>
