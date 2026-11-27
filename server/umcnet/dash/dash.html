@@ -1474,10 +1474,11 @@ function draw() {
 }
 async function loadHist() {
   const keys = ["pkts_pm", "unique_pm", "msgs_pm", "clients", "repeaters", "bytes_rx_1m", "bytes_tx_1m", "pub_rx_1m", "pub_tx_1m", "dropped_1m", "cpu", "mem_pct", "disk_pct"].concat((S.o ? stableDevs(S.o) : []).map(d => "dev:" + d.id.slice(0, 16)));
-  try { S.hist = await jget("/api/history?range=" + S.range + "&k=" + keys.join(",")); } catch {}
+  const generation = S.histGeneration = (S.histGeneration || 0) + 1;
+  try { const data = await jget("/api/history?range=" + S.range + "&k=" + keys.join(",")); if (generation === S.histGeneration) S.hist = data; } catch {}
 }
 const isAdm = o => !(o && o.me) || o.me.role === "admin";
-async function loadEv() { try { S.ev = await jget("/api/events?range=" + (S.evRange || 86400) + (S.evKind ? "&kind=" + S.evKind : "")); } catch {} }
+async function loadEv() { const generation = S.evGeneration = (S.evGeneration || 0) + 1; try { const data = await jget("/api/events?range=" + (S.evRange || 86400) + (S.evKind ? "&kind=" + encodeURIComponent(S.evKind) : "")); if (generation === S.evGeneration) S.ev = data; } catch {} }
 async function tick(first) {
   if (S.polling) return;
   S.polling = true;
@@ -1502,7 +1503,7 @@ async function tick(first) {
 }
 
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-t]"); if (t) { S.tab = t.dataset.t; location.hash = S.tab; S.netUp = false; if (S.tab === "network") { try { S.net = await jget("/api/network"); } catch {} } if (S.tab === "diagnostics") await loadEv(); if (S.tab === "diagnostics" || S.tab === "control") await loadAudit(); draw(); return; }
+  const t = e.target.closest("[data-t]"); if (t) { if (location.hash !== "#" + t.dataset.t) location.hash = t.dataset.t; else navigateTab(t.dataset.t); return; }
   const r = e.target.closest("#rng button"); if (r) { S.range = +r.dataset.r; document.querySelectorAll("#rng button").forEach(b => b.classList.toggle("on", b === r)); await loadHist(); draw(); return; }
   const k = e.target.closest("[data-ek]"); if (k) { S.evKind = k.dataset.ek; await loadEv(); draw(); return; }
   if (e.target.closest("#refresh")) { S.t = 0; tick(); }
@@ -1539,6 +1540,15 @@ function inspectChartPointer(e) {
 document.addEventListener("mousemove", inspectChartPointer);
 document.addEventListener("click", inspectChartPointer);
 
+async function navigateTab(tab) {
+  if (!Object.prototype.hasOwnProperty.call(VIEWS, tab)) tab = "overview";
+  S.tab = tab; S.netUp = false;
+  if (tab === "network") { try { S.net = await jget("/api/network?hours=" + S.nf.hours); } catch {} }
+  if (tab === "diagnostics") await loadEv();
+  if (tab === "diagnostics" || tab === "control") await loadAudit();
+  if (S.tab === tab) draw();
+}
+window.addEventListener("hashchange", () => navigateTab(location.hash.slice(1)));
 S.tab = (location.hash || "#overview").slice(1); if (!VIEWS[S.tab]) S.tab = "overview";
 D.syncTheme();
 tick(true); setInterval(() => tick(), 5000);
