@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.Activity
 import com.composables.icons.lucide.ChartPie
+import com.composables.icons.lucide.Download
 import com.composables.icons.lucide.Globe
 import com.composables.icons.lucide.Hash
 import com.composables.icons.lucide.House
@@ -36,6 +37,7 @@ import com.composables.icons.lucide.Thermometer
 import com.composables.icons.lucide.LocateFixed
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Map
+import com.composables.icons.lucide.MapPin
 import com.composables.icons.lucide.MessageSquare
 import com.composables.icons.lucide.Radio
 import com.composables.icons.lucide.Settings
@@ -59,6 +61,8 @@ enum class Dest(val label: String, val icon: ImageVector) {
     NET("UMC Net", Lucide.Globe),
     RADIOS("Radios", Lucide.Radio),
     LOOK("Look", Lucide.SlidersHorizontal),
+    GEOFENCES("Geofences", Lucide.MapPin),
+    BACKUP("Backup", Lucide.Download),
 }
 
 /** The first screen: a grid of square tiles, two or three across depending on the width. */

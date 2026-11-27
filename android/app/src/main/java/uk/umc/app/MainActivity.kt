@@ -28,6 +28,8 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         AppState.init(this)
         uk.umc.app.net.UmcNet.init(this)
+        uk.umc.app.tools.OfflineMaps.init(this)
+        uk.umc.app.tools.GeoAlerts.init(this)
         createNotificationChannel()
         Updater.start(this)
         setContent { UmcApp() }
@@ -162,6 +164,8 @@ fun UmcApp() {
                         Dest.NET -> UmcNetScreen(onBack = { go(Dest.HOME) }, onMessages = { go(Dest.CHATS) })
                         Dest.RADIOS -> ConnectScreen(onUmcNet = { go(Dest.NET) })
                         Dest.LOOK -> LookScreen()
+                        Dest.GEOFENCES -> GeofenceScreen()
+                        Dest.BACKUP -> BackupScreen()
                     }
                 }
             }
