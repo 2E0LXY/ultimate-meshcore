@@ -168,9 +168,9 @@ private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.corouti
         else -> ""
     }
     val markColour = when (m.status) {
-        "delivered", "replied" -> Color(0xFF2E7D32)
-        "failed" -> Color(0xFFC62828)
-        "queued", "sending", "pending", "sent" -> Color(0xFFEF6C00)
+        "delivered", "replied" -> Dc.ok
+        "failed" -> Dc.bad
+        "queued", "sending", "pending", "sent" -> Dc.warn
         else -> MaterialTheme.colorScheme.outline
     }
     Column(
@@ -182,7 +182,7 @@ private fun MessageBubble(m: ChatMessage, s: MeshSession, scope: kotlinx.corouti
         val glass = onGlass()
         val scheme = MaterialTheme.colorScheme
         val bubble = when {
-            glass && m.outgoing -> Color(0xFF2E7D5B).copy(alpha = 0.55f)
+            glass && m.outgoing -> Dc.accent.copy(alpha = 0.55f)
             glass -> Color.White.copy(alpha = 0.12f)
             m.outgoing -> scheme.primaryContainer
             else -> scheme.surfaceVariant

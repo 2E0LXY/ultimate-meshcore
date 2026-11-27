@@ -66,7 +66,7 @@ fun Backdrop(content: @Composable () -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         when (kind) {
-            Background.SYSTEM -> Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+            Background.SYSTEM -> Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Dc.mainTop, Dc.mainBottom))))
             Background.COLOUR -> Box(Modifier.fillMaxSize().background(pair.second))
             Background.GRADIENT -> Box(
                 Modifier.fillMaxSize().background(
@@ -112,14 +112,13 @@ fun onGlass(): Boolean = AppState.background.collectAsState().value != Backgroun
 @Composable
 fun GlassCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val glass = onGlass()
-    val shape = RoundedCornerShape(12.dp)
-    val c = MaterialTheme.colorScheme
-    // shadcn's card: a flat surface with a 1 dp border; over a photo or gradient it is frosted glass instead
+    val shape = RoundedCornerShape(Dc.radius)
+    // the theme's card: `card` fill, 1 dp `border`; over a photo or gradient it is frosted glass instead
     Box(
         modifier
             .clip(shape)
-            .background(if (glass) Color.White.copy(alpha = 0.08f) else c.surface)
-            .border(1.dp, if (glass) Color.White.copy(alpha = 0.14f) else c.outlineVariant, shape)
+            .background(if (glass) Color.White.copy(alpha = 0.08f) else Dc.card)
+            .border(1.dp, if (glass) Color.White.copy(alpha = 0.14f) else Dc.line, shape)
             .padding(16.dp),
         contentAlignment = Alignment.TopStart,
     ) { content() }

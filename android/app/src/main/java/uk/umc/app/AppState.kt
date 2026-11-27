@@ -126,6 +126,12 @@ object AppState {
     val backgroundColour = MutableStateFlow(0)          // which entry of backgroundPalette
     val backgroundPhoto = MutableStateFlow<String?>(null)   // content URI of a chosen picture
 
+    /** Which UMC theme the whole app wears ("overview" or "analytics"); applied at once, kept across restarts. */
+    fun setTheme(id: uk.umc.app.ui.UmcThemeId) {
+        uk.umc.app.ui.UmcThemeState.set(id)
+        prefs.edit().putString("theme", id.key).apply()
+    }
+
     fun setBackground(kind: Background) {
         background.value = kind
         prefs.edit().putString("bg", kind.name).apply()
@@ -143,6 +149,7 @@ object AppState {
     }
 
     private fun loadLook() {
+        uk.umc.app.ui.UmcThemeState.set(uk.umc.app.ui.UmcThemeId.fromKey(prefs.getString("theme", null)))
         background.value = runCatching { Background.valueOf(prefs.getString("bg", "SYSTEM") ?: "SYSTEM") }
             .getOrDefault(Background.SYSTEM)
         backgroundColour.value = prefs.getInt("bgColour", 0)

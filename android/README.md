@@ -18,6 +18,14 @@ The phone app for Ultimate MeshCore radios — and for any standard MeshCore com
 | **Backup** | Export contacts and nodes, message history (radio and UMC Net) and geofence events to CSV, or everything to a JSON backup, through the system file picker (no storage permission). CSV cells starting `=` `+` `-` `@` get a leading apostrophe so spreadsheets do not run them. The apostrophe is literal text, so it remains when a file is imported as CSV into another tool. A hashtag channel's key is derived from its name, so hashtag channel names in an export are effectively keys: keep exports private. **Restore** shows what it would add or overwrite and asks first. Never exported: radio or channel keys, the UMC Net login, identity key or passwords. **Restore** brings back geofences and their history, regions and channel scopes only: contacts belong to the radio and message history is not injected back. |
 | **Radio** | The radio's own settings: presets, frequency/bandwidth/SF/CR, TX power, name, location, delivery confirmations, location sharing, manual contact adding, Bluetooth PIN, reboot. |
 | **Device** | The full web interface of any Ultimate MeshCore device on your WiFi: every command, neighbours, network status, clock, and **firmware updates** (check and install). |
+| **Appearance** | Two themes, **Overview** (near-black with navy, blue accent) and **Analytics** (graphite, multi-colour charts), chosen in Appearance with preview cards. The choice applies to the whole app at once, with no restart, and is remembered (default Overview). Tokens come from [`docs/umc/theme/tokens.json`](../docs/umc/theme/tokens.json), the same file the dash, repeater web panel and T-Deck use. **Light mode is dropped**: both themes are dark and the app no longer follows the phone's light/dark setting; the status and navigation bars always use light icons. Background (system, colour, gradient, photo) and delivery marks are in the same screen. |
+
+## Themes (developer notes)
+
+- `ui/UmcTokens.kt` holds the token values as plain Kotlin (pure, unit-tested) and the WCAG contrast function; `ui/UmcPalette.kt` turns them into Compose colours, a Material 3 dark colour scheme, shapes from the radius tokens (14/16 dp cards, 8 dp small, pill) and `LocalUmcPalette`.
+- Custom components and charts read `LocalUmcPalette.current` (or `Dc` where there is no composable scope). Chart colours come from `series` in order; status colours are only `ok`/`warn`/`bad`.
+- `UmcThemeTest` checks every token against `docs/umc/theme/tokens.json` (and an embedded copy) and asserts AA contrast for the pairs the UI uses. Change `tokens.json` and `UmcTokens.kt` together.
+- The choice is stored in the `umc` preferences as `theme` (`overview` or `analytics`).
 
 ## Building it yourself
 

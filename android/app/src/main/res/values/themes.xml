@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Umc" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Both UMC themes are dark, so the window behind Compose is dark too (no white flash) and the system bars take
+         light icons. The colours are the Overview theme's surface and page from docs/umc/theme/tokens.json; once running,
+         the Compose theme sets the real bar colours for whichever theme is chosen. -->
+    <style name="Theme.Umc" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0E1626</item>
+        <item name="android:statusBarColor">#FF0E1626</item>
+        <item name="android:navigationBarColor">#FF05070C</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
 </resources>

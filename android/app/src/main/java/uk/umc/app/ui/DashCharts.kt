@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -62,27 +63,6 @@ import java.util.Date
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** The dashboard's own dark-green palette, used on every dashboard panel whatever the app theme is. */
-object Dc {
-    val bg = Color(0xFF07100D)
-    val bgGlow = Color(0xFF10301F)
-    val card1 = Color(0xFF0E1F19)
-    val card2 = Color(0xFF0B1814)
-    val line = Color(0xFF1B3A30)
-    val grid = Color(0xFF17342A)
-    val track = Color(0xFF143027)
-    val g = Color(0xFF2FE27A)
-    val g2 = Color(0xFF8DFFB0)
-    val tx = Color(0xFFE9F7EF)
-    val mu = Color(0xFF7FA392)
-    val am = Color(0xFFF2C14E)
-    val bl = Color(0xFF4AA8FF)
-    val pu = Color(0xFFA58BFF)
-    val rd = Color(0xFFFF5D6C)
-    val or = Color(0xFFFF8F5A)
-    val iconBox = Color(0xFF0F3A28)
-}
-
 /** False in tests, so the screen can go idle and be captured; true on a phone. */
 val LocalDashAnimate = androidx.compose.runtime.compositionLocalOf { true }
 
@@ -92,20 +72,20 @@ data class FlowNode(val title: String, val sub: String, val ok: Boolean)
 
 private fun hm(t: Double): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date((t * 1000).toLong()))
 
+/** A card: `card` fill, 1 dp `border`, the theme radius; header is an optional small icon, the title and a muted note at the right. */
 @Composable
-fun DashPanel(title: String, note: String = "", modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(14.dp)
+fun DashPanel(title: String, note: String = "", modifier: Modifier = Modifier, icon: ImageVector? = null, content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(Dc.radius)
     Column(
-        modifier.fillMaxWidth().clip(shape)
-            .background(Brush.verticalGradient(listOf(Dc.card1, Dc.card2)))
-            .border(1.dp, Dc.line, shape).padding(14.dp),
+        modifier.fillMaxWidth().clip(shape).background(Dc.card).border(1.dp, Dc.line, shape).padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) { Icon(icon, null, tint = Dc.mu, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)) }
             Text(title, color = Dc.tx, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             Spacer(Modifier.weight(1f))
             if (note.isNotEmpty()) Text(note, color = Dc.mu, fontSize = 11.sp)
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         content()
     }
 }
@@ -130,27 +110,36 @@ fun Legend(items: List<Pair<String, Color>>) {
     }
 }
 
+/** A pill like the reference delta badges: arrow and figure on okBg/ok (up) or badBg/bad (down). */
+@Composable
+fun DeltaPill(text: String, up: Boolean, modifier: Modifier = Modifier) {
+    Text(
+        (if (up) "▲ " else "▼ ") + text, color = if (up) Dc.ok else Dc.bad, fontSize = 12.sp, maxLines = 1,
+        modifier = modifier.clip(RoundedCornerShape(99.dp)).background(if (up) Dc.okBg else Dc.badBg).padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+/** A KPI card: icon and muted label, a large number, then an optional delta pill and a note. */
 @Composable
 fun KpiCard(
     icon: ImageVector, label: String, value: String, note: String, noteColor: Color = Dc.mu,
-    spark: List<Double> = emptyList(), sparkColor: Color = Dc.g, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null,
+    spark: List<Double> = emptyList(), sparkColor: Color = Dc.series(0), modifier: Modifier = Modifier,
+    delta: String? = null, deltaUp: Boolean = true, onClick: (() -> Unit)? = null,
 ) {
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(Dc.radius)
     Box(
-        modifier.clip(shape).background(Brush.verticalGradient(listOf(Dc.card1, Dc.card2))).border(1.dp, Dc.line, shape)
-            .let { if (onClick != null) it.clickable { onClick() } else it }.padding(12.dp),
+        modifier.clip(shape).background(Dc.card).border(1.dp, Dc.line, shape)
+            .let { if (onClick != null) it.clickable { onClick() } else it }.padding(14.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(Dc.iconBox).border(1.dp, Color(0xFF1F6A45), RoundedCornerShape(11.dp)),
-                contentAlignment = Alignment.Center,
-            ) { Icon(icon, null, tint = Dc.g, modifier = Modifier.size(20.dp)) }
-            Spacer(Modifier.width(10.dp))
-            Column {
-                Text(label, color = Dc.mu, fontSize = 11.sp, maxLines = 1)
-                Text(value, color = Dc.tx, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(note, color = noteColor, fontSize = 11.sp, maxLines = 2)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, null, tint = Dc.mu, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(label, color = Dc.mu, fontSize = 12.sp, maxLines = 1)
             }
+            Text(value, color = Dc.tx, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            if (delta != null) DeltaPill(delta, deltaUp)
+            if (note.isNotEmpty()) Text(note, color = noteColor, fontSize = 11.sp, maxLines = 2)
         }
         if (spark.size >= 2) Sparkline(spark, sparkColor, Modifier.align(Alignment.BottomEnd).size(52.dp, 20.dp))
     }
@@ -186,7 +175,7 @@ fun AreaChart(series: List<ChartSeries>, modifier: Modifier = Modifier, height: 
     val x0 = pts.minOf { it.first }
     val x1 = pts.maxOf { it.first }
     val ym = DashMath.niceMax(pts.maxOf { it.second } * 1.05)
-    val axis = remember { android.graphics.Paint().apply { color = 0xFF6F9483.toInt(); isAntiAlias = true } }
+    val axis = remember { android.graphics.Paint().apply { isAntiAlias = true } }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val lPad = with(density) { 34.dp.toPx() }
     val rPad = with(density) { 8.dp.toPx() }
@@ -211,6 +200,7 @@ fun AreaChart(series: List<ChartSeries>, modifier: Modifier = Modifier, height: 
                 val plotW = size.width - lPad - rPad
                 val plotH = size.height - t - b
                 axis.textSize = 10.sp.toPx()
+                axis.color = Dc.mu.toArgb()
                 fun px(time: Double) = lPad + ((time - x0) / ((x1 - x0).takeIf { it != 0.0 } ?: 1.0)).toFloat() * plotW
                 fun py(v: Double) = t + (1f - (v / ym).toFloat()) * plotH
                 drawIntoCanvas { c ->
@@ -245,7 +235,7 @@ fun AreaChart(series: List<ChartSeries>, modifier: Modifier = Modifier, height: 
                 }
                 sel?.let { x ->
                     val cx = x.coerceIn(lPad, size.width - rPad)
-                    drawLine(Dc.g.copy(alpha = 0.6f), Offset(cx, t), Offset(cx, t + plotH), 1.dp.toPx())
+                    drawLine(Dc.mu.copy(alpha = 0.6f), Offset(cx, t), Offset(cx, t + plotH), 1.dp.toPx())
                 }
             }
             sel?.let { x ->
@@ -254,7 +244,7 @@ fun AreaChart(series: List<ChartSeries>, modifier: Modifier = Modifier, height: 
                 val lines = series.mapNotNull { s -> s.data.minByOrNull { abs(it.first - time) }?.let { s to it } }
                 Column(
                     Modifier.offset { IntOffset((x.roundToInt() - 70).coerceIn(0, (widthPx - 150).coerceAtLeast(0)), 4) }
-                        .clip(RoundedCornerShape(8.dp)).background(Color(0xE606130D)).border(1.dp, Dc.g, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 5.dp),
+                        .clip(RoundedCornerShape(Dc.radiusSm)).background(Dc.card).border(1.dp, Dc.line, RoundedCornerShape(Dc.radiusSm)).padding(horizontal = 8.dp, vertical = 5.dp),
                 ) {
                     Text(hm(time), color = Dc.tx, fontSize = 11.sp)
                     lines.forEach { (s, p) -> Text("${s.name}: ${DashMath.fmt(p.second - offset)}$unit", color = s.color, fontSize = 11.sp) }
@@ -274,7 +264,7 @@ fun AirtimeBars(rx: List<Point>, tx: List<Point>, modifier: Modifier = Modifier,
     val rows = map.entries.toList()
     if (rows.size < 2) { EmptyNote("Collecting data."); return }
     val ym = DashMath.niceMax(rows.maxOf { it.value[0] + it.value[1] } * 1.1)
-    val axis = remember { android.graphics.Paint().apply { color = 0xFF6F9483.toInt(); isAntiAlias = true } }
+    val axis = remember { android.graphics.Paint().apply { isAntiAlias = true } }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val lPad = with(density) { 34.dp.toPx() }
     Column(modifier) {
@@ -282,6 +272,7 @@ fun AirtimeBars(rx: List<Point>, tx: List<Point>, modifier: Modifier = Modifier,
             val t = 8.dp.toPx(); val b = 20.dp.toPx(); val rPad = 8.dp.toPx()
             val plotW = size.width - lPad - rPad; val plotH = size.height - t - b
             axis.textSize = 10.sp.toPx()
+            axis.color = Dc.mu.toArgb()
             fun py(v: Double) = t + (1f - (v / ym).toFloat()) * plotH
             drawIntoCanvas { c ->
                 for (i in 0..4) {
@@ -301,11 +292,11 @@ fun AirtimeBars(rx: List<Point>, tx: List<Point>, modifier: Modifier = Modifier,
             rows.forEachIndexed { i, r ->
                 val x = lPad + i * slot + 1.dp.toPx()
                 val both = r.value[0] + r.value[1]
-                drawRect(Brush.verticalGradient(listOf(Dc.g2, Color(0xFF1FB85C)), startY = py(both), endY = py(0.0)), Offset(x, py(both)), Size(bw, py(0.0) - py(both)))
-                if (r.value[1] > 0) drawRect(Brush.verticalGradient(listOf(Dc.am, Color(0xFFB8861C)), startY = py(r.value[1]), endY = py(0.0)), Offset(x, py(r.value[1])), Size(bw, py(0.0) - py(r.value[1])))
+                drawRect(Brush.verticalGradient(listOf(Dc.series(0), Dc.series(0).copy(alpha = 0.75f)), startY = py(both), endY = py(0.0)), Offset(x, py(both)), Size(bw, py(0.0) - py(both)))
+                if (r.value[1] > 0) drawRect(Brush.verticalGradient(listOf(Dc.series(1), Dc.series(1).copy(alpha = 0.75f)), startY = py(r.value[1]), endY = py(0.0)), Offset(x, py(r.value[1])), Size(bw, py(0.0) - py(r.value[1])))
             }
         }
-        Legend(listOf("Receiving" to Dc.g, "Transmitting" to Dc.am))
+        Legend(listOf("Receiving" to Dc.series(0), "Transmitting" to Dc.series(1)))
     }
 }
 
@@ -346,7 +337,7 @@ fun DonutChart(parts: List<DonutPart>, centre: String, sub: String, modifier: Mo
                 val stroke = 13.dp.toPx()
                 val inset = stroke / 2 + 2.dp.toPx()
                 val box = Size(size.width - inset * 2, size.height - inset * 2)
-                drawArc(Color(0xFF12291F), 0f, 360f, false, Offset(inset, inset), box, style = Stroke(stroke))
+                drawArc(Dc.track, 0f, 360f, false, Offset(inset, inset), box, style = Stroke(stroke))
                 var start = -90f
                 parts.filter { it.value > 0 }.forEach { p ->
                     val sweep = (p.value / total * 360.0).toFloat()
@@ -400,7 +391,7 @@ fun FlowDiagram(
         val rightX = w * 0.84f
         fun edge(x1: Float, y1: Float, x2: Float, y2: Float, color: Color, on: Boolean, perMin: Double) {
             val path = Path().apply { moveTo(x1, y1); cubicTo((x1 + x2) / 2, y1, (x1 + x2) / 2, y2, x2, y2) }
-            drawPath(path, Color(0xFF1D3D31), style = Stroke(2.2f.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, Dc.line, style = Stroke(2.2f.dp.toPx(), cap = StrokeCap.Round))
             if (on) {
                 val speed = (0.6f + (kotlin.math.log10(1.0 + perMin).toFloat() * 0.7f)).coerceIn(0.6f, 2.6f)
                 drawPath(path, color.copy(alpha = 0.25f), style = Stroke(5.dp.toPx(), cap = StrokeCap.Round))
@@ -409,27 +400,27 @@ fun FlowDiagram(
         }
         fun node(cx: Float, cy: Float, nw: Float, nh: Float, title: String, sub: String, ok: Boolean, hub: Boolean) {
             val tl = Offset(cx - nw / 2, cy - nh / 2)
-            if (hub) drawRoundRect(Dc.g.copy(alpha = 0.16f), tl - Offset(4.dp.toPx(), 4.dp.toPx()), Size(nw + 8.dp.toPx(), nh + 8.dp.toPx()), androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()))
-            drawRoundRect(if (ok) Color(0xFF0C2018) else Color(0xFF0A1511), tl, Size(nw, nh), androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()))
-            drawRoundRect(if (hub) Dc.g else if (ok) Color(0xFF1F6A45) else Color(0xFF2A3A34), tl, Size(nw, nh), androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()), style = Stroke((if (hub) 2f else 1.2f).dp.toPx()))
+            if (hub) drawRoundRect(Dc.accent.copy(alpha = 0.16f), tl - Offset(4.dp.toPx(), 4.dp.toPx()), Size(nw + 8.dp.toPx(), nh + 8.dp.toPx()), androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()))
+            drawRoundRect(Dc.card, tl, Size(nw, nh), androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()))
+            drawRoundRect(if (hub) Dc.accent else if (ok) Dc.ok else Dc.line, tl, Size(nw, nh), androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()), style = Stroke((if (hub) 2f else 1.2f).dp.toPx()))
             drawIntoCanvas { c ->
-                paint.color = 0xFFE9F7EF.toInt(); paint.isFakeBoldText = true; paint.textSize = 12.sp.toPx()
+                paint.color = Dc.tx.toArgb(); paint.isFakeBoldText = true; paint.textSize = 12.sp.toPx()
                 c.nativeCanvas.drawText(if (title.length > 13) title.take(12) + "…" else title, cx, cy - 1.dp.toPx(), paint)
-                paint.color = 0xFF7FA392.toInt(); paint.isFakeBoldText = false; paint.textSize = 10.sp.toPx()
+                paint.color = Dc.mu.toArgb(); paint.isFakeBoldText = false; paint.textSize = 10.sp.toPx()
                 c.nativeCanvas.drawText(if (sub.length > 17) sub.take(16) + "…" else sub, cx, cy + 13.dp.toPx(), paint)
             }
         }
-        edge(leftX + 32.dp.toPx(), hubY - 14.dp.toPx(), hubX - 44.dp.toPx(), hubY - 14.dp.toPx(), Dc.g, rate.first > 0 || rxPerMin > 0, rxPerMin)
-        edge(hubX - 44.dp.toPx(), hubY + 14.dp.toPx(), leftX + 32.dp.toPx(), hubY + 14.dp.toPx(), Dc.am, txPerMin > 0, txPerMin)
+        edge(leftX + 32.dp.toPx(), hubY - 14.dp.toPx(), hubX - 44.dp.toPx(), hubY - 14.dp.toPx(), Dc.series(0), rate.first > 0 || rxPerMin > 0, rxPerMin)
+        edge(hubX - 44.dp.toPx(), hubY + 14.dp.toPx(), leftX + 32.dp.toPx(), hubY + 14.dp.toPx(), Dc.series(1), txPerMin > 0, txPerMin)
         links.forEachIndexed { i, l ->
             val y = if (links.size == 1) hubY else 34.dp.toPx() + i * ((size.height - 68.dp.toPx()) / (links.size - 1))
-            edge(hubX + 44.dp.toPx(), hubY, rightX - 52.dp.toPx(), y, Dc.bl, l.ok, 1.0)
+            edge(hubX + 44.dp.toPx(), hubY, rightX - 52.dp.toPx(), y, Dc.series(2), l.ok, 1.0)
             node(rightX, y, 100.dp.toPx(), 40.dp.toPx(), l.title, l.sub, l.ok, false)
         }
         node(leftX, hubY, 64.dp.toPx(), 52.dp.toPx(), "LoRa", freq, true, false)
         node(hubX, hubY, 88.dp.toPx(), 60.dp.toPx(), name, role, true, true)
         drawIntoCanvas { c ->
-            paint.color = 0xFF7FA392.toInt(); paint.isFakeBoldText = false; paint.textSize = 10.sp.toPx()
+            paint.color = Dc.mu.toArgb(); paint.isFakeBoldText = false; paint.textSize = 10.sp.toPx()
             c.nativeCanvas.drawText("in ${DashMath.fmt(rxPerMin)}/min", (leftX + hubX) / 2 - 2.dp.toPx(), hubY - 22.dp.toPx(), paint)
             c.nativeCanvas.drawText("out ${DashMath.fmt(txPerMin)}/min", (leftX + hubX) / 2 - 2.dp.toPx(), hubY + 34.dp.toPx(), paint)
         }

@@ -188,7 +188,7 @@ private fun ContactSheet(
                 IconButton(onClick = { run("Saving…") { s.setFavourite(c, !c.favourite); "Saved." } }) {
                     Icon(
                         if (c.favourite) Icons.Filled.Star else Icons.Filled.StarBorder, "Favourite",
-                        tint = if (c.favourite) Color(0xFFF9A825) else MaterialTheme.colorScheme.outline,
+                        tint = if (c.favourite) Dc.warn else MaterialTheme.colorScheme.outline,
                     )
                 }
             }
@@ -356,12 +356,12 @@ private fun QuickAction(modifier: Modifier, icon: ImageVector, label: String, on
     }
 }
 
-/** The colour a kind of node is drawn in, matching the radio's own screen. */
+/** The colour a kind of node is drawn in: the palette's series, in order. */
 private fun kindTint(type: Int): Color = when (type) {
-    uk.umc.app.proto.ADV_TYPE_REPEATER -> Color(0xFFEF6C00)
-    uk.umc.app.proto.ADV_TYPE_ROOM -> Color(0xFF2E7D32)
-    uk.umc.app.proto.ADV_TYPE_SENSOR -> Color(0xFF1E88E5)
-    else -> Color(0xFF7E57C2)
+    uk.umc.app.proto.ADV_TYPE_REPEATER -> Dc.series(0)
+    uk.umc.app.proto.ADV_TYPE_ROOM -> Dc.series(1)
+    uk.umc.app.proto.ADV_TYPE_SENSOR -> Dc.series(2)
+    else -> Dc.series(3)
 }
 
 /** Great-circle distance in kilometres. */

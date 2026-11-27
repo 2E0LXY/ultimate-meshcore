@@ -106,7 +106,7 @@ private fun NetBubble(m: NetMessage, now: Long, name: (String) -> String, onRepl
     val (foot, none) = Delivery.text(m, now, name)
     val scheme = MaterialTheme.colorScheme
     val glass = onGlass()
-    val bubble = when { glass && m.outgoing -> androidx.compose.ui.graphics.Color(0xFF2E7D5B).copy(alpha = 0.55f); glass -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.12f)
+    val bubble = when { glass && m.outgoing -> Dc.accent.copy(alpha = 0.55f); glass -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.12f)
                         m.outgoing -> scheme.primaryContainer; else -> scheme.surfaceVariant }
     val ink = when { glass -> androidx.compose.ui.graphics.Color.White; m.outgoing -> scheme.onPrimaryContainer; else -> scheme.onSurfaceVariant }
     // the footer under the bubble: "heard by" lists one repeater per line so a long list wraps cleanly

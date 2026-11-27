@@ -35,8 +35,8 @@ private fun upText(secs: Long): String {
 
 private fun levelColour(v: Double?, good: Double, warn: Double, higherIsBetter: Boolean = true): Color = when {
     v == null -> Dc.mu
-    higherIsBetter -> if (v >= good) Dc.g else if (v >= warn) Dc.am else Dc.rd
-    else -> if (v <= good) Dc.g else if (v <= warn) Dc.am else Dc.rd
+    higherIsBetter -> if (v >= good) Dc.ok else if (v >= warn) Dc.warn else Dc.bad
+    else -> if (v <= good) Dc.ok else if (v <= warn) Dc.warn else Dc.bad
 }
 
 private fun dashAgo(secs: Long): String = when {
@@ -129,16 +129,19 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
     val battPct = batt?.let { DashMath.batteryPercent(it) }
     val upSecs = stats?.let { it.upSecs + (now - (rows.lastOrNull()?.t ?: now)).coerceAtLeast(0) }
     val snr = stats?.lastSnr
+    // the note under a number, and its delta pill when there is a previous hour to compare with
     val trendText = { t: Trend ->
         val p = t.pct
         when {
-            t.cur == null -> "collecting history…" to Dc.mu
-            p == null -> "this hour: ${t.cur.toLong()}" to Dc.mu
-            else -> "${if (p >= 0) "▲" else "▼"} ${Math.abs(p).toLong()}% vs previous hour" to (if (p >= 0) Dc.g else Dc.am)
+            t.cur == null -> "collecting history…"
+            p == null -> "this hour: ${t.cur.toLong()}"
+            else -> "vs previous hour"
         }
     }
+    val trendDelta = { t: Trend -> t.pct?.let { "${Math.abs(it).toLong()}%" } }
+    val trendUp = { t: Trend -> (t.pct ?: 0.0) >= 0 }
 
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Dc.bgGlow, Dc.bg, Dc.bg)))) {
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Dc.mainTop, Dc.mainBottom, Dc.mainBottom)))) {
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(12.dp),
@@ -149,7 +152,7 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Row {
-                                Text(me?.name ?: "Radio", color = Dc.g, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                                Text(me?.name ?: "Radio", color = Dc.tx, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                                 Text(" Dashboard", color = Dc.tx, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                             }
                             Text(
@@ -163,29 +166,30 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
                         listOf(3600L to "1 h", 21600L to "6 h", 86400L to "24 h").forEach { (v, label) ->
                             val on = range == v
                             Text(
-                                label, color = if (on) Color(0xFF06140C) else Dc.mu, fontSize = 12.sp,
-                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) Dc.g else Color(0xFF0D2219))
+                                label, color = if (on) Dc.navActiveInk else Dc.mu, fontSize = 12.sp,
+                                modifier = Modifier.clip(RoundedCornerShape(Dc.radiusSm)).background(if (on) Dc.navActive else Dc.chip)
+                                    .border(1.dp, if (on) Dc.navActive else Dc.line, RoundedCornerShape(Dc.radiusSm))
                                     .clickable { setRange(v) }.padding(horizontal = 12.dp, vertical = 5.dp),
                             )
                         }
                         Spacer(Modifier.weight(1f))
                         Text(
-                            "● live", color = if (linkState is LinkState.Connected) Dc.g else Dc.am, fontSize = 12.sp,
-                            modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Color(0xFF0D2219)).padding(horizontal = 10.dp, vertical = 4.dp),
+                            "● live", color = if (linkState is LinkState.Connected) Dc.ok else Dc.warn, fontSize = 12.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Dc.chip).padding(horizontal = 10.dp, vertical = 4.dp),
                         )
                     }
                 }
             }
 
             item {
-                val (rxNote, rxCol) = trendText(tRx)
-                val (txNote, txCol) = trendText(tTx)
+                val rxNote = trendText(tRx)
+                val txNote = trendText(tTx)
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         KpiCard(Lucide.ArrowDown, "Received this hour", tRx.cur?.toLong()?.toString() ?: "${stats?.let { it.recvFlood + it.recvDirect } ?: "—"}",
-                            if (tRx.cur == null) "since connecting" else rxNote, rxCol, rxS.takeLast(30).map { it.second }, Dc.g, Modifier.weight(1f).fillMaxHeight())
+                            if (tRx.cur == null) "since connecting" else rxNote, Dc.mu, rxS.takeLast(30).map { it.second }, Dc.series(0), Modifier.weight(1f).fillMaxHeight(), trendDelta(tRx), trendUp(tRx))
                         KpiCard(Lucide.ArrowUp, "Sent this hour", tTx.cur?.toLong()?.toString() ?: "${stats?.let { it.sentFlood + it.sentDirect } ?: "—"}",
-                            if (tTx.cur == null) "since connecting" else txNote, txCol, txS.takeLast(30).map { it.second }, Dc.am, Modifier.weight(1f).fillMaxHeight())
+                            if (tTx.cur == null) "since connecting" else txNote, Dc.mu, txS.takeLast(30).map { it.second }, Dc.series(1), Modifier.weight(1f).fillMaxHeight(), trendDelta(tTx), trendUp(tTx))
                     }
                     Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         KpiCard(Lucide.ChartPie, "Airtime this hour", airPct?.let { DashMath.fmt(it) + "%" } ?: "—",
@@ -196,18 +200,18 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
                     Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         KpiCard(Lucide.Timer, "Uptime", upSecs?.let { upText(it) } ?: "—", "radio running time", Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight())
                         KpiCard(Lucide.BatteryFull, "Battery", batt?.let { "%.2f V".format(it / 1000.0) } ?: "—",
-                            battPct?.let { "about $it% full" } ?: "no reading", if ((battPct ?: 100) < 25) Dc.rd else Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight())
+                            battPct?.let { "about $it% full" } ?: "no reading", if ((battPct ?: 100) < 25) Dc.bad else Dc.mu, modifier = Modifier.weight(1f).fillMaxHeight())
                     }
                 }
             }
 
             item {
-                DashPanel("Traffic", "packets per minute") {
-                    AreaChart(listOf(ChartSeries("Received", Dc.g, rxS), ChartSeries("Sent", Dc.am, txS)))
+                DashPanel("Traffic", "packets per minute", icon = Lucide.Activity) {
+                    AreaChart(listOf(ChartSeries("Received", Dc.series(0), rxS), ChartSeries("Sent", Dc.series(1), txS)))
                 }
             }
             item {
-                DashPanel("Airtime", "share of the last hour") {
+                DashPanel("Airtime", "share of the last hour", icon = Lucide.ChartPie) {
                     AirtimeBars(
                         DashMath.series(rows, now, 3600, 120, SeriesMode.PCT) { it.rxAir.toDouble() },
                         DashMath.series(rows, now, 3600, 120, SeriesMode.PCT) { it.txAir.toDouble() },
@@ -216,7 +220,7 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
             }
 
             item {
-                DashPanel("Dials", "live") {
+                DashPanel("Dials", "live", icon = Lucide.Radio) {
                     val contactsUsed = device?.maxContacts?.takeIf { it > 0 }?.let { contacts.size * 100.0 / it }
                     val storagePct = storage?.takeIf { it.second > 0 }?.let { it.first * 100.0 / it.second }
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -235,7 +239,7 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
             }
 
             item {
-                DashPanel("Data flow", "what moves where, right now") {
+                DashPanel("Data flow", "what moves where, right now", icon = Lucide.RadioTower) {
                     val up = linkState is LinkState.Connected
                     val repeaters = contacts.count { it.type == 2 }
                     val links = listOf(
@@ -251,10 +255,10 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
             }
 
             item {
-                DashPanel("Connections") {
-                    val dot = { ok: Boolean, warnIt: Boolean -> if (ok) Dc.g else if (warnIt) Dc.am else Dc.rd }
+                DashPanel("Connections", icon = Lucide.Wifi) {
+                    val dot = { ok: Boolean, warnIt: Boolean -> if (ok) Dc.ok else if (warnIt) Dc.warn else Dc.bad }
                     val list = buildList {
-                        add(Triple("LoRa radio", me?.let { "%.3f MHz · SF%d · %d kHz".format(it.freqKhz / 1000.0, it.sf, it.bwKhz / 1000) } ?: "—", Dc.g))
+                        add(Triple("LoRa radio", me?.let { "%.3f MHz · SF%d · %d kHz".format(it.freqKhz / 1000.0, it.sf, it.bwKhz / 1000) } ?: "—", Dc.ok))
                         add(Triple(
                             if (target?.kind == LinkKind.WIFI) "WiFi app link" else "Bluetooth link",
                             when (val st = linkState) { is LinkState.Connected -> "connected"; is LinkState.Connecting -> "connecting"; is LinkState.Failed -> st.reason; else -> "idle" },
@@ -264,13 +268,14 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
                         add(Triple("Position", me?.let { if (it.lat != 0.0 || it.lon != 0.0) "%.3f, %.3f".format(it.lat, it.lon) else "not shared" } ?: "—", dot(me?.let { it.lat != 0.0 || it.lon != 0.0 } ?: false, true)))
                         stats?.queueLen?.takeIf { it >= 0 }?.let { q ->
                             add(Triple("Transmit queue", if (q == 0) "empty" else "$q packet(s) waiting to be sent" + if (q >= 8) " - the radio cannot get them out" else "",
-                                if (q >= 8) Dc.rd else if (q >= 3) Dc.am else Dc.g))
+                                if (q >= 8) Dc.bad else if (q >= 3) Dc.warn else Dc.ok))
                         }
-                        add(Triple("Channels", "${channels.size} of ${device?.maxChannels ?: "?"}", Dc.g))
-                        add(Triple("Messages", "${messages.count { !it.outgoing }} received · ${messages.size} kept", Dc.g))
+                        add(Triple("Channels", "${channels.size} of ${device?.maxChannels ?: "?"}", Dc.ok))
+                        add(Triple("Messages", "${messages.count { !it.outgoing }} received · ${messages.size} kept", Dc.ok))
                     }
-                    list.forEach { (name, detail, col) ->
-                        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    list.forEachIndexed { i, (name, detail, col) ->
+                        if (i > 0) HorizontalDivider(color = Dc.line)
+                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(9.dp).clip(RoundedCornerShape(5.dp)).background(col))
                             Spacer(Modifier.width(10.dp))
                             Text(name, color = Dc.tx, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
@@ -282,11 +287,10 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
             }
 
             item {
-                DashPanel("Traffic mix", "last ${heard.size} packets") {
-                    val colours = mapOf("ADV" to Dc.g, "GRP" to Dc.bl, "MSG" to Dc.pu, "ACK" to Dc.am, "PATH" to Dc.or, "TRACE" to Color(0xFF5BE3D8), "REQ" to Color(0xFFE977C5), "RSP" to Color(0xFFE977C5))
+                DashPanel("Traffic mix", "last ${heard.size} packets", icon = Lucide.ChartPie) {
                     DonutChart(
                         heard.groupingBy { it.kind }.eachCount().entries.sortedByDescending { it.value }.take(6)
-                            .map { DonutPart(it.key, it.value.toDouble(), colours[it.key] ?: Dc.mu) },
+                            .mapIndexed { i, e -> DonutPart(e.key, e.value.toDouble(), Dc.series(i)) },
                         heard.size.toString(), "packets",
                     )
                 }
@@ -296,8 +300,8 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
                     val st = stats
                     DonutChart(
                         listOf(
-                            DonutPart("Flood received", (st?.recvFlood ?: 0L).toDouble(), Dc.g), DonutPart("Direct received", (st?.recvDirect ?: 0L).toDouble(), Dc.bl),
-                            DonutPart("Flood sent", (st?.sentFlood ?: 0L).toDouble(), Dc.am), DonutPart("Direct sent", (st?.sentDirect ?: 0L).toDouble(), Dc.pu),
+                            DonutPart("Flood received", (st?.recvFlood ?: 0L).toDouble(), Dc.series(0)), DonutPart("Direct received", (st?.recvDirect ?: 0L).toDouble(), Dc.series(1)),
+                            DonutPart("Flood sent", (st?.sentFlood ?: 0L).toDouble(), Dc.series(2)), DonutPart("Direct sent", (st?.sentDirect ?: 0L).toDouble(), Dc.series(3)),
                         ),
                         ((st?.recvFlood ?: 0L) + (st?.recvDirect ?: 0L) + (st?.sentFlood ?: 0L) + (st?.sentDirect ?: 0L)).toString(), "packets",
                     )
@@ -307,8 +311,8 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
                 DashPanel("Signal", "noise floor and last RSSI, dBm") {
                     AreaChart(
                         listOf(
-                            ChartSeries("Noise floor", Dc.or, DashMath.series(rows, now, win, bucket, SeriesMode.AVG) { it.noise.toDouble() }.map { it.first to it.second + 130 }),
-                            ChartSeries("Last RSSI", Dc.g, DashMath.series(rows, now, win, bucket, SeriesMode.AVG) { it.rssi.toDouble() }.map { it.first to it.second + 130 }),
+                            ChartSeries("Noise floor", Dc.series(0), DashMath.series(rows, now, win, bucket, SeriesMode.AVG) { it.noise.toDouble() }.map { it.first to it.second + 130 }),
+                            ChartSeries("Last RSSI", Dc.series(1), DashMath.series(rows, now, win, bucket, SeriesMode.AVG) { it.rssi.toDouble() }.map { it.first to it.second + 130 }),
                         ),
                         offset = 130.0, unit = " dBm",
                     )
@@ -316,12 +320,12 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
             }
 
             item {
-                DashPanel("Repeaters heard", "most recent adverts first") {
+                DashPanel("Repeaters heard", "most recent adverts first", icon = Lucide.RadioTower) {
                     val reps = contacts.filter { it.type == 2 }.sortedByDescending { it.lastAdvert }.take(6)
                     if (reps.isEmpty()) EmptyNote("No repeaters heard yet.") else reps.forEach { c ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(c.name.ifEmpty { c.prefix }, color = Dc.tx, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1)
-                            Text(if (c.hops < 0) "route unknown" else if (c.hops == 0) "direct" else "${c.hops} hop${if (c.hops == 1) "" else "s"}", color = Dc.g, fontSize = 12.sp)
+                            Text(if (c.hops < 0) "route unknown" else if (c.hops == 0) "direct" else "${c.hops} hop${if (c.hops == 1) "" else "s"}", color = Dc.tx, fontSize = 12.sp)
                             Spacer(Modifier.width(10.dp))
                             Text(if (c.lastAdvert > 0) dashAgo((now - c.lastAdvert).coerceAtLeast(0)) else "—", color = Dc.mu, fontSize = 12.sp)
                         }
@@ -329,12 +333,12 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
                 }
             }
             item {
-                DashPanel("Recent activity", "newest first") {
+                DashPanel("Recent activity", "newest first", icon = Lucide.Activity) {
                     val recent = heard.takeLast(10).reversed()
                     if (recent.isEmpty()) EmptyNote("No packets yet.") else recent.forEach { p ->
                         Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("RX", color = Dc.g, fontSize = 11.sp, modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Color(0xFF10301F)).padding(horizontal = 8.dp, vertical = 1.dp))
+                                Text("RX", color = Dc.tx, fontSize = 11.sp, modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Dc.chip).border(1.dp, Dc.line, RoundedCornerShape(99.dp)).padding(horizontal = 8.dp, vertical = 1.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(p.kind, color = Dc.mu, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.width(46.dp))
                                 Text(DashWho.who(p, contacts), color = Dc.tx, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
@@ -376,13 +380,13 @@ fun DashboardContent(d: DashInput, range: Long, setRange: (Long) -> Unit, onOpen
 
 @Composable
 private fun DashAction(icon: ImageVector, title: String, blurb: String, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(Dc.radius)
     Row(
-        Modifier.fillMaxWidth().clip(shape).background(Brush.verticalGradient(listOf(Dc.card1, Dc.card2))).border(1.dp, Dc.line, shape)
+        Modifier.fillMaxWidth().clip(shape).background(Dc.card).border(1.dp, Dc.line, shape)
             .clickable { onClick() }.padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = Dc.g)
+        Icon(icon, null, tint = Dc.accent)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(title, color = Dc.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)

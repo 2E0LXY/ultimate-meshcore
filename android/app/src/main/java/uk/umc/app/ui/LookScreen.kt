@@ -43,6 +43,20 @@ fun LookScreen() {
         item {
             GlassCard(Modifier.fillMaxWidth()) {
                 Column {
+                    Text("Theme", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Both themes are dark. The change applies to the whole app straight away and is remembered.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    ThemePicker()
+                }
+            }
+        }
+
+        item {
+            GlassCard(Modifier.fillMaxWidth()) {
+                Column {
                     Text("Background", style = MaterialTheme.typography.titleMedium)
                     Text(
                         "Pages are cards floating over this. A photo is dimmed and blurred so text stays readable.",
@@ -161,7 +175,7 @@ fun LookScreen() {
                         Column {
                             Text("Net at 8?", fontWeight = FontWeight.Medium)
                             Text("delivered ✓", style = MaterialTheme.typography.labelSmall,
-                                 color = Color(0xFF2E7D32))
+                                 color = Dc.ok)
                         }
                     }
                 }

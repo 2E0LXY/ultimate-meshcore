@@ -60,7 +60,7 @@ enum class Dest(val label: String, val icon: ImageVector) {
     SENSORS("Sensors", Lucide.Thermometer),
     NET("UMC Net", Lucide.Globe),
     RADIOS("Radios", Lucide.Radio),
-    LOOK("Look", Lucide.SlidersHorizontal),
+    LOOK("Appearance", Lucide.SlidersHorizontal),
     GEOFENCES("Geofences", Lucide.MapPin),
     BACKUP("Backup", Lucide.Download),
 }
@@ -88,12 +88,12 @@ private fun HomeTile(d: Dest, glass: Boolean, onClick: () -> Unit) {
     Surface(
         Modifier.aspectRatio(1f).clip(shape).clickable(onClick = onClick),
         shape = shape,
-        color = if (glass) Color.White.copy(alpha = 0.08f) else c.surface,
-        contentColor = if (glass) Color.White else c.onSurface,
-        border = BorderStroke(1.dp, if (glass) Color.White.copy(alpha = 0.14f) else c.outlineVariant),
+        color = if (glass) Color.White.copy(alpha = 0.08f) else Dc.card,
+        contentColor = if (glass) Color.White else Dc.tx,
+        border = BorderStroke(1.dp, if (glass) Color.White.copy(alpha = 0.14f) else Dc.line),
     ) {
         Column(Modifier.fillMaxSize().padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Icon(d.icon, contentDescription = null, modifier = Modifier.size(32.dp), tint = if (glass) Color.White else c.primary)
+            Icon(d.icon, contentDescription = null, modifier = Modifier.size(32.dp), tint = if (glass) Color.White else Dc.accent)
             Spacer(Modifier.height(8.dp))
             Text(d.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2)
         }

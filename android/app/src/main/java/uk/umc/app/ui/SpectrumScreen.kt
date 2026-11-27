@@ -19,20 +19,21 @@ import kotlinx.coroutines.delay
 import uk.umc.app.AppState
 import uk.umc.app.proto.HeardPacket
 
-private val good = Color(0xFF2E7D32)
-private val warn = Color(0xFFEF6C00)
-private val bad = Color(0xFFC62828)
+// status colours come from the theme palette: ok / warn / bad only
+private val good: Color get() = Dc.ok
+private val warn: Color get() = Dc.warn
+private val bad: Color get() = Dc.bad
 
-/** A colour per kind of packet, so the chart and the log agree with each other. */
+/** A colour per kind of packet, from the palette's series in order, so the chart and the log agree with each other. */
 private fun kindColour(kind: String): Color = when (kind) {
-    "ADV" -> Color(0xFF8E24AA)
-    "MSG" -> Color(0xFF1E88E5)
-    "GRP", "GDAT" -> Color(0xFF00897B)
-    "ACK" -> Color(0xFF43A047)
-    "TRACE" -> Color(0xFFD81B60)
-    "PATH" -> Color(0xFF6D4C41)
-    "REQ", "RSP", "ANON" -> Color(0xFFF9A825)
-    else -> Color(0xFF757575)
+    "ADV" -> Dc.series(0)
+    "MSG" -> Dc.series(1)
+    "GRP", "GDAT" -> Dc.series(2)
+    "ACK" -> Dc.series(3)
+    "TRACE" -> Dc.series(4)
+    "PATH" -> Dc.series(5)
+    "REQ", "RSP", "ANON" -> Dc.series(6)
+    else -> Dc.faint
 }
 
 /**
@@ -199,7 +200,7 @@ private fun ChannelChart(packets: List<HeardPacket>, noiseFloor: Int?, windowMin
 
         // the grid, every 30 dB
         listOf(-50f, -80f, -110f).forEach { line ->
-            drawLine(outline.copy(alpha = 0.25f), Offset(0f, y(line)), Offset(size.width, y(line)), 1f)
+            drawLine(Dc.line, Offset(0f, y(line)), Offset(size.width, y(line)), 1f)
         }
         // where the noise sits: anything below this line is lost in it
         noiseFloor?.let { nf ->

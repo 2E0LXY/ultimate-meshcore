@@ -17,7 +17,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import uk.umc.app.link.LinkState
 import uk.umc.app.ui.*
@@ -53,10 +58,23 @@ class MainActivity : ComponentActivity() {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("DEPRECATION")
 @Composable
 fun UmcApp() {
-    val dark = androidx.compose.foundation.isSystemInDarkTheme()
-    ShadTheme(dark) {
+    // Both UMC themes are dark and the choice is the app's own (Look > Appearance), not the phone's light/dark setting.
+    // UmcThemeState is snapshot state, so changing it recomposes everything at once.
+    ShadTheme(UmcThemeState.id) {
+        val palette = LocalUmcPalette.current
+        val view = LocalView.current
+        // light icons on the dark bars, and bar colours that match the top and bottom of the app
+        SideEffect {
+            val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+            window.statusBarColor = palette.mainTop.toArgb()
+            window.navigationBarColor = palette.mainBottom.toArgb()
+            val bars = WindowCompat.getInsetsController(window, view)
+            bars.isAppearanceLightStatusBars = false
+            bars.isAppearanceLightNavigationBars = false
+        }
         // kept across rotation: where we are, and the open conversation ("ch:<idx>", "c:<prefix>" or "net:<channel>")
         var destName by rememberSaveable { mutableStateOf(Dest.HOME.name) }
         var openChat by rememberSaveable { mutableStateOf<String?>(null) }
@@ -101,6 +119,7 @@ fun UmcApp() {
                                     else -> "not connected"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
+                                color = if (onGlass()) ink else palette.muted,
                             )
                         }
                     },
@@ -110,10 +129,15 @@ fun UmcApp() {
                             IconButton(onClick = { menuOpen = true }) { Icon(Lucide.Menu, contentDescription = "Menu") }
                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                 Dest.entries.forEach { d ->
+                                    // the current place: Overview fills it with the accent, Analytics with a quiet chip
+                                    val active = d == dest && openChat == null
                                     DropdownMenuItem(
-                                        text = { Text(d.label, color = if (d == dest && openChat == null) MaterialTheme.colorScheme.primary else Color.Unspecified) },
-                                        leadingIcon = { Icon(d.icon, contentDescription = null) },
+                                        text = { Text(d.label, color = if (active) palette.navActiveInk else Color.Unspecified) },
+                                        leadingIcon = { Icon(d.icon, contentDescription = null, tint = if (active) palette.navActiveInk else LocalContentColor.current) },
                                         onClick = { menuOpen = false; go(d) },
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                            .clip(RoundedCornerShape(palette.radiusSm))
+                                            .background(if (active) palette.navActive else Color.Transparent),
                                     )
                                 }
                                 DropdownMenuItem(
