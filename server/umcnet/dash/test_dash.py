@@ -1079,3 +1079,189 @@ class NewNodes(unittest.TestCase):
         raw = bytes([(4 << 2) | 1, 0]) + body
         dash.note_network("R" * 64, dash.parse_packet(raw), 1, -90, time.time())
         self.assertEqual([key.upper()], [n["key"] for n in dash.newnodes_recent()])
+
+
+class RouteHealth(unittest.TestCase):
+    RX = "AA" * 32
+    def setUp(self):
+        dash.db_init(); [dash.DB.execute("DELETE FROM " + t) for t in ("routes", "snr", "traffic", "alertstate")]
+        dash.ROUTE_BUF.clear(); dash.SNR_BUF.clear(); dash.TRAFFIC_BUF.clear(); dash.DEV.clear(); dash.NODES.clear()
+        self.now = int(time.time()); dash.DEV[self.RX] = {"id": self.RX, "name": "Hilltop", "last": self.now, "first": 0}
+        self.start = dash.START; dash.START = self.now - 10 * 86400
+    def tearDown(self): dash.START = self.start; dash.CONF["alerts"]["route_silent"] = False
+    def put(self, path, ago_s, n=1, rx=None):
+        t = self.now - ago_s
+        dash.DB.execute("INSERT INTO routes VALUES(?,?,?,?,?) ON CONFLICT(h,path,rx) DO UPDATE SET n=n+excluded.n, last=MAX(last,excluded.last)", (t // 3600 * 3600, path, rx or self.RX, n, t))
+    def test_state_rules(self):
+        s = dash.route_state
+        self.assertEqual(("live", ""), s(60, 3600, 43200, True, 10 ** 6)); self.assertEqual("stale", s(7200, 3600, 43200, True, 10 ** 6)[0])
+        self.assertEqual("silent", s(50000, 3600, 43200, True, 10 ** 6)[0])
+        self.assertEqual("unknown", s(50000, 3600, 43200, False, 10 ** 6)[0]); self.assertEqual("unknown", s(50000, 3600, 43200, True, 600)[0])
+        self.assertEqual("live", s(60, 3600, 43200, True, 5)[0])             # fresh evidence needs no long watching
+    def test_note_records_flood_paths_only(self):
+        info = {"type": "CHAN", "flood": True, "hops": 2, "path": ["A1", "B2"], "pkt": None}
+        dash.note_network(self.RX, info, 5.5, -90, self.now); dash.note_network(self.RX, dict(info), 5.5, -90, self.now + 1)
+        dash.note_network(self.RX, {"type": "REQ", "flood": False, "hops": 2, "path": ["A1", "B2"], "src": "", "pkt": None}, 5, -90, self.now)
+        dash.note_network(self.RX, {"type": "CHAN", "flood": True, "hops": 0, "path": [], "src": "", "pkt": None}, 5, -90, self.now)
+        dash.traffic_flush()
+        self.assertEqual([("A1,B2", self.RX, 2)], dash.DB.execute("SELECT path, rx, n FROM routes").fetchall())
+    def test_view_counts_windows_and_labels(self):
+        self.put("A1,B2", 600, 5); self.put("A1,B2", 30 * 3600, 7); self.put("C3", 8 * 86400, 9)
+        v = dash.route_view(self.now); self.assertEqual(1, v["total"]); r = v["routes"][0]
+        self.assertEqual((5, 12, "live"), (r["n24"], r["n7d"], r["state"])); self.assertEqual(["A1", "B2"], [h["h"] for h in r["path"]]); self.assertEqual("Hilltop", r["rx_name"])
+        self.assertIn("Not a measure of link quality", v["note"])
+    def test_silent_needs_connected_receiver_and_a_long_enough_watch(self):
+        self.put("A1", 2 * 86400, 30); self.assertEqual("silent", dash.route_view(self.now)["routes"][0]["state"])
+        dash.DEV[self.RX]["last"] = self.now - 7200; self.assertEqual("unknown", dash.route_view(self.now)["routes"][0]["state"])
+        dash.DEV[self.RX]["last"] = self.now; dash.START = self.now - 600; self.assertEqual("unknown", dash.route_view(self.now)["routes"][0]["state"])
+        dash.DEV.clear(); dash.START = self.now - 10 * 86400; self.assertEqual("unknown", dash.route_view(self.now)["routes"][0]["state"])
+    def test_alert_step_hysteresis_and_cooldown(self):
+        f = dash.route_alert_step
+        self.assertEqual("fire", f(False, "silent", True)); self.assertIsNone(f(False, "silent", False)); self.assertIsNone(f(False, "unknown", True)); self.assertIsNone(f(True, "silent", True))
+        self.assertIsNone(f(True, "stale", True)); self.assertIsNone(f(True, "unknown", True)); self.assertEqual("recover", f(True, "live", True))
+        self.assertIsNone(f(False, "silent", True, since_recover=60)); self.assertEqual("fire", f(False, "silent", True, since_recover=10 ** 6))
+    def test_alert_off_by_default_once_persistent_and_grouped(self):
+        sent = []; real = dash.send_alert; dash.send_alert = lambda t, *a, **k: sent.append(t)
+        try:
+            self.assertFalse(dash.CONF["alerts"]["route_silent"])
+            self.put("A1", 2 * 86400, 30); dash.route_alerts(self.now); dash.route_alerts(self.now + 60); self.assertEqual(1, len(sent))
+            dash.ALERT_STATE.clear(); dash.route_alerts(self.now + 120); self.assertEqual(1, len(sent))          # a restart changes nothing: the state is in the database
+            self.put("A1", 60, 1); dash.route_alerts(self.now); self.assertEqual(2, len(sent)); self.assertTrue(sent[1].startswith("Route back"))
+            self.put("A1", 3 * 86400, 0); dash.DB.execute("DELETE FROM routes"); dash.route_alerts(self.now); self.assertEqual([], dash.alert_keys("route:"))
+            for i in range(5): self.put("B%d" % i, 2 * 86400, 30)
+            sent.clear(); dash.route_alerts(self.now); self.assertEqual(1, len(sent)); self.assertIn("5 routes", sent[0])
+        finally: dash.send_alert = real
+    def test_busy_threshold_blocks_quiet_routes(self):
+        sent = []; real = dash.send_alert; dash.send_alert = lambda t, *a, **k: sent.append(t)
+        try: self.put("Q1", 2 * 86400, 3); dash.route_alerts(self.now); self.assertEqual([], sent)
+        finally: dash.send_alert = real
+    def test_live_must_be_below_silent(self):
+        self.assertIsNotNone(dash.conf_update({"route_live_minutes": 900, "route_silent_minutes": 600})); self.assertEqual(60, dash.CONF["route_live_minutes"])
+        self.assertIsNone(dash.conf_update({"route_live_minutes": 30, "route_silent_minutes": 600, "alerts": {"route_silent": True}})); self.assertTrue(dash.CONF["alerts"]["route_silent"])
+        dash.conf_update({"route_live_minutes": 60, "route_silent_minutes": 720, "alerts": {"route_silent": False}})
+    def test_retention_trims_routes_and_snr(self):
+        self.put("A1", 40 * 86400); dash.DB.execute("INSERT INTO snr VALUES(?,?,?,?,?,?)", (self.now - 40 * 86400, "N", 1, 1.0, 1.0, 1.0)); self.put("A1", 60)
+        r = dash.retention_run(self.now); self.assertEqual((1, 1), (r["routes"], r["snr"])); self.assertEqual(1, dash.DB.execute("SELECT COUNT(*) FROM routes").fetchone()[0])
+
+
+class NodeAnalytics(unittest.TestCase):
+    RX = "AA" * 32; N = "BB" * 32
+    def setUp(self):
+        dash.db_init(); [dash.DB.execute("DELETE FROM " + t) for t in ("routes", "snr", "traffic")]
+        dash.ROUTE_BUF.clear(); dash.SNR_BUF.clear(); dash.TRAFFIC_BUF.clear(); dash.NODES.clear()
+        self.now = (int(time.time()) // 3600) * 3600 + 120
+    def traffic(self, ago_h, node=None, hops=0, n=1): dash.DB.execute("INSERT INTO traffic VALUES(?,?,?,?,?,?) ON CONFLICT(h,node,rx,ptype,hops) DO UPDATE SET n=n+excluded.n", (self.now // 3600 * 3600 - ago_h * 3600, node or self.N, self.RX, "ADVERT", hops, n))
+    def test_snr_only_for_direct_flood_and_missing_is_not_zero(self):
+        for hops, flood, snr in ((0, True, 6.5), (0, True, None), (0, True, "bad"), (0, True, float("nan")), (2, True, 3.0), (0, False, 4.0)):
+            dash.note_network(self.RX, {"type": "ADVERT", "flood": flood, "hops": hops, "path": ["A1"] * hops, "fkey": self.N, "name": "n", "atype": 2, "pkt": None}, snr, -90, self.now)
+        dash.traffic_flush(); r = dash.DB.execute("SELECT n, s, lo, hi FROM snr").fetchall()
+        self.assertEqual([(1, 6.5, 6.5, 6.5)], r)
+    def test_snr_aggregates_per_hour(self):
+        for v in (4, 8, 6): dash.snr_note(self.N, v, self.now)
+        dash.snr_note(self.N, -2, self.now - 3600); dash.traffic_flush(); dash.snr_note(self.N, 10, self.now); dash.traffic_flush()
+        a = dash.node_analytics(self.N, 1, self.now)["snr"]; self.assertEqual(2, len(a["points"]))
+        self.assertEqual([-2.0, -2.0, -2.0, 1], a["points"][0][1:]); self.assertEqual([7.0, 4, 10, 4], a["points"][1][1:])
+        self.assertEqual({"n": 5, "avg": 5.2, "min": -2.0, "max": 10.0}, {k: a["summary"][k] for k in ("n", "avg", "min", "max")})
+    def test_no_snr_data_is_none_not_zero(self):
+        self.traffic(1); a = dash.node_analytics(self.N, 7, self.now); self.assertIsNone(a["snr"]); self.assertEqual(1, a["total"])
+        self.assertIsNone(dash.node_analytics("CC" * 32, 7, self.now)["snr"])
+    def test_hops_distribution_and_window(self):
+        self.traffic(1, hops=0, n=3); self.traffic(2, hops=2, n=5); self.traffic(24 * 10, hops=1, n=9)
+        a = dash.node_analytics(self.N, 7, self.now); self.assertEqual([{"hops": 0, "n": 3}, {"hops": 2, "n": 5}], a["hops"]); self.assertEqual(8, a["total"])
+        self.assertEqual(8 + 9, dash.node_analytics(self.N, 30, self.now)["total"])
+    def test_heatmap_distinguishes_no_data_from_zero(self):
+        self.traffic(1, n=4); self.traffic(5, node="CC" * 32, n=2)           # hour -1 has our node; hour -5 only another node (so it was being recorded)
+        a = dash.node_analytics(self.N, 7, self.now); cells = {d["day"] + i * 3600: c for d in a["heatmap"]["days"] for i, c in enumerate(d["h"])}
+        cur = self.now // 3600 * 3600
+        self.assertEqual(4, cells[cur - 3600]); self.assertEqual(0, cells[cur - 5 * 3600]); self.assertIsNone(cells[cur - 7 * 3600]); self.assertNotIn(cur + 3600, [k for k, c in cells.items() if c is not None])
+        self.assertTrue(a["heatmap"]["utc"]); self.assertTrue(all(len(d["h"]) == 24 for d in a["heatmap"]["days"]))
+        self.assertEqual([], [d for d in dash.node_analytics(self.N, 7, self.now - 20 * 86400)["heatmap"]["days"] if any(c is not None for c in d["h"])])
+    def test_picker_and_name(self):
+        dash.NODES[self.N] = {"name": "Hill"}; self.traffic(1, n=2); c = dash.node_choices(now=self.now); self.assertEqual([(self.N, "Hill", 2)], [(x["id"], x["name"], x["n"]) for x in c])
+        self.assertEqual("Hill", dash.node_analytics(self.N, 7, self.now)["name"])
+
+
+class BatteryTrend(unittest.TestCase):
+    D = "DD" * 32
+    def setUp(self): dash.db_init(); dash.DB.execute("DELETE FROM telem"); dash.DEV.clear(); self.now = int(time.time())
+    def rows(self, hours, v0, slope, every=900, end_ago=0):
+        n = int(hours * 3600 / every); t1 = self.now - end_ago
+        return [(t1 - (n - i) * every, v0 + slope * (i * every / 3600.0)) for i in range(n + 1)]
+    def test_falling_gives_an_estimate(self):
+        r = self.rows(10, 4.0, -0.02); est, why = dash.battery_estimate(r, self.now, 3.5)
+        self.assertEqual("", why); self.assertAlmostEqual(-0.02, est["slope_v_per_h"], 3); last = r[-1][1]; self.assertAlmostEqual((last - 3.5) / 0.02, est["eta_hours"], 0)
+    def test_needs_six_hours_and_recent_data(self):
+        self.assertIn("6 hours", dash.battery_estimate(self.rows(5, 4.0, -0.02), self.now, 3.5)[1])
+        self.assertIn("last hour", dash.battery_estimate(self.rows(10, 4.0, -0.02, end_ago=7200), self.now, 3.5)[1])
+        self.assertEqual((None, "not enough readings"), dash.battery_estimate([], self.now, 3.5)); self.assertEqual((None, "not enough readings"), dash.battery_estimate([(self.now, 4.0)], self.now, 3.5))
+    def test_flat_or_rising_gives_none(self):
+        self.assertEqual("not falling", dash.battery_estimate(self.rows(10, 3.9, 0.0), self.now, 3.5)[1]); self.assertEqual("not falling", dash.battery_estimate(self.rows(10, 3.6, 0.02), self.now, 3.5)[1])
+    def test_charge_or_gap_restarts_the_basis(self):
+        r = self.rows(12, 4.0, -0.02); r = [(t, v + (0.4 if t > r[len(r) // 2][0] else 0)) for t, v in r]        # a step up in the middle: a charge
+        est, why = dash.battery_estimate(r, self.now, 3.5)
+        self.assertTrue(est is None or est["basis_hours"] < 7)
+        g = [(self.now - 10 * 3600 + i * 900, 4.0 - 0.02 * i * 0.25) for i in range(20)] + [(self.now - 2 * 3600 + i * 900, 3.9 - 0.005 * i) for i in range(9)]       # a 3.25 h hole in the readings
+        est, why = dash.battery_estimate(g, self.now, 3.5); self.assertIsNone(est); self.assertIn("6 hours", why)
+    def test_noisy_sawtooth_is_not_estimated(self):
+        r = [(self.now - (40 - i) * 900, 3.8 + (0.1 if i % 2 else -0.1) + (i % 10) * 0.0) for i in range(41)]
+        self.assertIsNone(dash.battery_estimate(r, self.now, 3.5)[0])
+        w = [(self.now - (40 - i) * 900, 3.8 + (0.04 if i % 2 else -0.04)) for i in range(41)]; self.assertEqual("not falling", dash.battery_estimate(w, self.now, 3.5)[1])
+    def test_already_low_is_zero_hours(self):
+        est, _ = dash.battery_estimate(self.rows(10, 3.55, -0.02), self.now, 3.5); self.assertEqual(0.0, est["eta_hours"])
+    def test_view_ranges_and_missing_devices(self):
+        for t, v in self.rows(10, 4.0, -0.02): dash.DB.execute("INSERT INTO telem VALUES(?,?,?,?,?,?,?)", (self.D, "x", t, 1, 116, "voltage", v))
+        dash.DB.execute("INSERT INTO telem VALUES(?,?,?,?,?,?,?)", ("EE" * 32, "x", self.now, 2, 116, "voltage", 3.9))        # not channel 1: not the repeater's own battery
+        v = dash.battery_view(24, self.now); self.assertEqual([self.D], [d["id"] for d in v["devices"]]); self.assertIsNotNone(v["devices"][0]["est"]); self.assertIn("rough guide", v["note"])
+        v1 = dash.battery_view(1, self.now); self.assertIsNone(v1["devices"][0]["est"]); self.assertIn("6 hours", v1["devices"][0]["why"])
+        self.assertEqual(24, dash.battery_view(7, self.now)["hours"]); self.assertEqual([], dash.battery_view(24, self.now, allowed=set())["devices"])
+        self.assertEqual([], dash.battery_view(1, self.now + 5 * 3600)["devices"])           # no readings in the range: absent, not zero
+    def test_low_limit_is_configurable(self):
+        self.assertIsNone(dash.conf_update({"battery_low_mv": 3600})); self.assertEqual(3.6, dash.battery_view(24, self.now)["low_v"]); self.assertIsNotNone(dash.conf_update({"battery_low_mv": 2000})); dash.conf_update({"battery_low_mv": 3500})
+
+
+class SilentThreshold(unittest.TestCase):
+    D = "DD" * 32
+    def setUp(self):
+        dash.db_init(); dash.DB.execute("DELETE FROM alertstate"); dash.DEV.clear(); dash.CONF["silent_overrides"] = {}; dash.CONF["stale_minutes"] = 15; self.now = int(time.time())
+        dash.DEV[self.D] = {"id": self.D, "name": "Hill", "last": self.now, "first": 0}; self.m = dict(dash.MQTT); dash.MQTT.update(state="connected", since=self.now - 3600)
+    def tearDown(self): dash.MQTT.clear(); dash.MQTT.update(self.m); dash.CONF["silent_overrides"] = {}
+    def test_threshold_override_and_default(self):
+        self.assertEqual(15, dash.silent_minutes(self.D)); dash.CONF["silent_overrides"] = {self.D: 45}; self.assertEqual(45, dash.silent_minutes(self.D)); self.assertEqual(15, dash.silent_minutes("EE" * 32))
+    def test_config_validation_merge_and_clear(self):
+        self.assertIsNone(dash.conf_update({"silent_overrides": {self.D: "30"}})); self.assertEqual({self.D: 30}, dash.CONF["silent_overrides"])
+        self.assertIsNone(dash.conf_update({"silent_overrides": {("ee" * 32): 60}})); self.assertEqual(2, len(dash.CONF["silent_overrides"]))     # merged, lower case accepted
+        for bad in ({"x": 5}, {self.D: 1}, {self.D: 5000}, {self.D: "abc"}, [1]): self.assertIsNotNone(dash.conf_update({"silent_overrides": bad}))
+        self.assertEqual(2, len(dash.CONF["silent_overrides"]))
+        self.assertIsNone(dash.conf_update({"silent_overrides": {self.D: ""}, "alerts": {}})); self.assertNotIn(self.D, dash.CONF["silent_overrides"])
+    def test_step_cooldown_hysteresis_unknown(self):
+        f = dash.silent_step
+        self.assertEqual("fire", f(False, 1000, 900)); self.assertIsNone(f(False, 800, 900)); self.assertIsNone(f(True, 1000, 900)); self.assertIsNone(f(True, 600, 900)); self.assertEqual("recover", f(True, 100, 900))
+        self.assertIsNone(f(False, None, 900)); self.assertIsNone(f(True, None, 900))
+        self.assertIsNone(f(False, 1000, 900, since_recover=100)); self.assertEqual("fire", f(False, 1000, 900, since_recover=7200))
+    def test_alerts_fire_once_use_override_recover_and_persist(self):
+        sent = []; real = dash.send_alert; dash.send_alert = lambda t, *a, **k: sent.append(t); dash.CONF["alerts"].update(offline=True, online=True)
+        try:
+            dash.DEV[self.D]["last"] = self.now - 20 * 60
+            dash.CONF["silent_overrides"] = {self.D: 30}; self.assertEqual([], dash.silent_alerts(self.now)); self.assertEqual([], sent)           # 20 min is fine under its own 30
+            dash.CONF["silent_overrides"] = {}; self.assertEqual([("fire", "Hill")], dash.silent_alerts(self.now)); dash.silent_alerts(self.now + 30); self.assertEqual(1, len(sent))
+            self.assertEqual("active", dash.alert_get("off:" + self.D)[0])
+            dash.DEV[self.D]["last"] = self.now + 60; self.assertEqual([("recover", "Hill")], dash.silent_alerts(self.now + 61)); self.assertTrue(sent[1].startswith("Repeater back"))
+            dash.DEV[self.D]["last"] = self.now - 3600 + 100; self.assertEqual([], dash.silent_alerts(self.now + 1000))             # silent again inside the cooldown: held back
+            self.assertEqual([("fire", "Hill")], dash.silent_alerts(self.now + 61 + dash.SILENT_COOLDOWN + 5))
+        finally: dash.send_alert = real
+    def test_never_heard_and_dead_broker_link_are_not_silence(self):
+        dash.DEV[self.D]["last"] = 0; self.assertEqual([], dash.silent_alerts(self.now))
+        dash.DEV[self.D]["last"] = self.now - 3600; dash.MQTT["state"] = "connecting"; self.assertEqual([], dash.silent_alerts(self.now))
+        dash.MQTT.update(state="connected", since=self.now - 5); self.assertEqual([], dash.silent_alerts(self.now))
+        dash.MQTT["since"] = self.now - 600; self.assertEqual(1, len(dash.silent_alerts(self.now)))
+    def test_checks_line_uses_the_override(self):
+        dash.DEV[self.D].update(last=self.now - 20 * 60, skew=None, status="online"); dash.CONF["silent_overrides"] = {self.D: 60}
+        titles = [d["title"] for d in dash.diagnostics(dash.system(), [], None) if "No data from Hill" in d["title"]]; self.assertEqual([], titles)
+        dash.CONF["silent_overrides"] = {}; self.assertTrue([d for d in dash.diagnostics(dash.system(), [], None) if "No data from Hill" in d["title"]])
+
+
+class OneByteClashStaysAQuietLine(unittest.TestCase):
+    def test_single_ok_line_not_a_warning(self):
+        dash.NODES.clear(); dash.DEV.clear(); now = time.time()
+        for i in range(3): dash.NODES[("%02X" % 0xA1) + "%062X" % i] = {"name": "r%d" % i, "type": 2, "last": now}
+        out = [d for d in dash.extra_diagnostics(now) if "1-byte" in d["title"]]; self.assertEqual(1, len(out)); self.assertEqual("ok", out[0]["level"]); dash.NODES.clear()

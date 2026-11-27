@@ -28,7 +28,7 @@ CFG = {
 }
 LOCK = threading.RLock()
 START = time.time()
-VERSION = "2.34"
+VERSION = "2.35"
 
 # ----------------------------------------------------------------------------- state
 SYS = {}                                   # "$SYS/..." -> [value, ts]
@@ -128,6 +128,10 @@ def note_network(did, info, snr, rssi, now):
             if snr is not None and (l["snr"] is None or float(snr) > l["snr"]): l["snr"] = float(snr)
             if rssi is not None and (l["rssi"] is None or int(rssi) > l["rssi"]): l["rssi"] = int(rssi)
         except (ValueError, TypeError): pass
+    if info.get("flood") and info.get("path"):
+        try: route_note(info["path"], did, now)
+        except Exception as e: sys.stderr.write("route: %s\n" % e)
+    if sender and info.get("flood") and info.get("hops") == 0: snr_note(sender, snr, now)       # only then is the signal the sender's own, not a repeater's
     if sender:
         with TRAFFIC_LOCK: TRAFFIC_BUF[(int(now) // 3600 * 3600, sender, did, str(info["type"]), min(int(info.get("hops") or 0), 15))] += 1
     if sender or info.get("path"):
@@ -690,6 +694,9 @@ def db_init():
     DB.execute("CREATE INDEX IF NOT EXISTS t_ts ON telem(ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS airtime(did TEXT, ts INTEGER, tx REAL, rx REAL, boot TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS air_k ON airtime(did, ts)")
     if "boot" not in [r[1] for r in DB.execute("PRAGMA table_info(airtime)")]: DB.execute("ALTER TABLE airtime ADD COLUMN boot TEXT")
+    DB.execute("CREATE TABLE IF NOT EXISTS routes(h INTEGER, path TEXT, rx TEXT, n INTEGER, last INTEGER, PRIMARY KEY(h, path, rx))")
+    DB.execute("CREATE TABLE IF NOT EXISTS snr(h INTEGER, node TEXT, n INTEGER, s REAL, lo REAL, hi REAL, PRIMARY KEY(h, node))"); DB.execute("CREATE INDEX IF NOT EXISTS snr_n ON snr(node, h)")
+    DB.execute("CREATE TABLE IF NOT EXISTS alertstate(key TEXT PRIMARY KEY, state TEXT, ts INTEGER)")
     DB.execute("CREATE TABLE IF NOT EXISTS newnodes(key TEXT PRIMARY KEY, ts INTEGER, name TEXT, kind INTEGER, rx TEXT, state TEXT)"); DB.execute("CREATE INDEX IF NOT EXISTS nn_ts ON newnodes(ts)")
     DB.execute("CREATE TABLE IF NOT EXISTS audit(ts INTEGER, who TEXT, action TEXT, target TEXT, detail TEXT, ok INTEGER)"); DB.execute("CREATE INDEX IF NOT EXISTS a_ts ON audit(ts)")
 
@@ -774,12 +781,13 @@ MSG_DEFAULTS = {"tx_enabled": True, "sender": "UMC-DASH", "keep_days": 30,
                 "regions": ["yorkshire", "eng-yh", "northwest", "eng-ne", "derbyshire", "lincolnshire", "sheffield", "wakefield"]}
 DEFAULTS = {"publish_decoded": True, "web_users": {}, "messages": MSG_DEFAULTS, "map_hours": 24, "enrol_enabled": True, "join_bridge": True, "join_iata": "LBA", "title": "UMC Net", "stale_minutes": 15, "cert_warn_days": 14, "cert_bad_days": 5, "disk_warn_pct": 85, "mem_warn_pct": 85, "flap_count": 5, "skew_seconds": 120,
             "auth_fail_warn": 1, "auth_fail_bad": 20, "keep_days": 14,
-            "traffic_keep_days": 30, "telem_keep_days": 90, "backup_keep": 7, "backup_hour": 3, "airtime_warn_pct": 10, "airtime_warn_minutes": 15, "newnode_max_per_hour": 6, "newnode_warmup_minutes": 30, "confirm_risky": True, "control_enabled": True,
-            "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True, "collision": True, "airtime": True, "newnode": True},
+            "traffic_keep_days": 30, "telem_keep_days": 90, "backup_keep": 7, "backup_hour": 3, "airtime_warn_pct": 10, "airtime_warn_minutes": 15, "newnode_max_per_hour": 6, "newnode_warmup_minutes": 30, "route_live_minutes": 60, "route_silent_minutes": 720, "route_busy_packets": 20, "battery_low_mv": 3500, "silent_overrides": {}, "confirm_risky": True, "control_enabled": True,
+            "alerts": {"enabled": False, "url": "", "offline": True, "online": True, "pending": True, "auth_fail": True, "cert": True, "disk": True, "control": True, "collision": True, "airtime": True, "newnode": True, "route_silent": False},
             "labels": {}}
 RANGES = {"map_hours": (1, 8760), "stale_minutes": (2, 1440), "cert_warn_days": (2, 60), "cert_bad_days": (1, 30), "disk_warn_pct": (50, 99), "mem_warn_pct": (50, 99), "flap_count": (2, 50),
           "skew_seconds": (5, 3600), "auth_fail_warn": (1, 1000), "auth_fail_bad": (2, 10000), "keep_days": (1, 90),
-          "traffic_keep_days": (7, 1000), "telem_keep_days": (8, 730), "backup_keep": (1, 60), "backup_hour": (0, 23), "airtime_warn_pct": (1, 100), "airtime_warn_minutes": (5, 120), "newnode_max_per_hour": (1, 100), "newnode_warmup_minutes": (0, 1440)}
+          "traffic_keep_days": (7, 1000), "telem_keep_days": (8, 730), "backup_keep": (1, 60), "backup_hour": (0, 23), "airtime_warn_pct": (1, 100), "airtime_warn_minutes": (5, 120), "newnode_max_per_hour": (1, 100), "newnode_warmup_minutes": (0, 1440),
+          "route_live_minutes": (5, 1440), "route_silent_minutes": (30, 10080), "route_busy_packets": (1, 100000), "battery_low_mv": (3000, 4000)}
 CONF = json.loads(json.dumps(DEFAULTS))
 
 def conf_path(): return os.path.join(CFG["data"], "config.json")
@@ -854,6 +862,18 @@ def conf_update(patch):
                         if len(e["name"]) > 31 or not re.match(r"^[A-Za-z0-9#][A-Za-z0-9 #_-]*$", e["name"]): return "channel names are letters, digits, # _ - and spaces"
                         out.append(e)
                     m[a] = out
+        elif k == "silent_overrides":
+            if not isinstance(v, dict): return "silent_overrides must be an object"
+            so = dict(new["silent_overrides"])
+            for dev, m in v.items():
+                dev = str(dev).upper()
+                if not re.match(r"^[0-9A-F]{64}$", dev): return "silent_overrides: a repeater id is 64 hex characters"
+                if m is None or (isinstance(m, str) and not m.strip()): so.pop(dev, None); continue      # empty = back to the global default
+                try: m = int(m)
+                except (TypeError, ValueError): return "the silent limit for a repeater must be a whole number of minutes"
+                if not 2 <= m <= 1440: return "the silent limit for a repeater must be between 2 and 1440 minutes"
+                so[dev] = m
+            new["silent_overrides"] = so
         elif k == "labels":
             if not isinstance(v, dict): return "labels must be an object"
             lab = {}
@@ -861,6 +881,7 @@ def conf_update(patch):
                 if re.match(r"^[0-9A-F]{64}$", dev) and isinstance(d, dict): lab[dev] = {"label": str(d.get("label", ""))[:40], "note": str(d.get("note", ""))[:300]}
             new["labels"] = lab
     if new["cert_bad_days"] >= new["cert_warn_days"]: return "the red certificate limit must be below the amber one"
+    if new["route_live_minutes"] >= new["route_silent_minutes"]: return "a route is live for fewer minutes than it takes to be called silent"
     CONF.clear(); CONF.update(new); conf_save()
     return None
 
@@ -1575,14 +1596,50 @@ def confirmed_links(hours=48):
 # Every heard packet with a known sender is counted per hour, per node, per receiving repeater, per type and per hop count.
 # Counts are held in memory and written to the traffic table every minute, so the history survives a restart.
 TRAFFIC_BUF = collections.Counter(); TRAFFIC_LOCK = threading.Lock()
+ROUTE_BUF = {}      # (hour, path, receiving repeater) -> [receptions, newest time]; flood packets only (their path is the one actually travelled)
+SNR_BUF = {}        # (hour, node) -> [count, sum, min, max]; only packets heard with no repeater between (flood, 0 hops)
+BUF_CAP = 20000
+
+def route_note(path, rx, now):
+    key = (int(now) // 3600 * 3600, ",".join(path), rx)
+    with TRAFFIC_LOCK:
+        e = ROUTE_BUF.get(key)
+        if e is None:
+            if len(ROUTE_BUF) >= BUF_CAP: return False
+            ROUTE_BUF[key] = [1, int(now)]
+        else: e[0] += 1; e[1] = max(e[1], int(now))
+    return True
+
+def snr_value(v):
+    """A usable SNR in dB or None. A missing or unreadable value is not 0 dB."""
+    try: f = float(v)
+    except (TypeError, ValueError): return None
+    return f if f == f and abs(f) < 200 else None
+
+def snr_note(node, snr, now):
+    f = snr_value(snr)
+    if f is None: return False
+    key = (int(now) // 3600 * 3600, node)
+    with TRAFFIC_LOCK:
+        e = SNR_BUF.get(key)
+        if e is None:
+            if len(SNR_BUF) >= BUF_CAP: return False
+            SNR_BUF[key] = [1, f, f, f]
+        else: e[0] += 1; e[1] += f; e[2] = min(e[2], f); e[3] = max(e[3], f)
+    return True
 
 def traffic_flush():
     with TRAFFIC_LOCK:
         items = list(TRAFFIC_BUF.items()); TRAFFIC_BUF.clear()
-    if not items: return
+        routes = list(ROUTE_BUF.items()); ROUTE_BUF.clear(); snrs = list(SNR_BUF.items()); SNR_BUF.clear()
+    if not (items or routes or snrs): return
     with LOCK:
-        DB.executemany("INSERT INTO traffic VALUES(?,?,?,?,?,?) ON CONFLICT(h, node, rx, ptype, hops) DO UPDATE SET n = n + excluded.n",
-                       [(h, node, rx, pt, hp, n) for (h, node, rx, pt, hp), n in items])
+        if items: DB.executemany("INSERT INTO traffic VALUES(?,?,?,?,?,?) ON CONFLICT(h, node, rx, ptype, hops) DO UPDATE SET n = n + excluded.n",
+                                 [(h, node, rx, pt, hp, n) for (h, node, rx, pt, hp), n in items])
+        if routes: DB.executemany("INSERT INTO routes VALUES(?,?,?,?,?) ON CONFLICT(h, path, rx) DO UPDATE SET n = n + excluded.n, last = MAX(last, excluded.last)",
+                                  [(h, p, rx, n, last) for (h, p, rx), (n, last) in routes])
+        if snrs: DB.executemany("INSERT INTO snr VALUES(?,?,?,?,?,?) ON CONFLICT(h, node) DO UPDATE SET n = n + excluded.n, s = s + excluded.s, lo = MIN(lo, excluded.lo), hi = MAX(hi, excluded.hi)",
+                                [(h, node, n, sm, lo, hi) for (h, node), (n, sm, lo, hi) in snrs])
 
 def traffic_loop():
     time.sleep(30)
@@ -1699,6 +1756,8 @@ def retention_run(now=None):
     now = int(now or time.time()); C = CONF
     return {"traffic": prune_batched("traffic", "h", now - max(7, C["traffic_keep_days"]) * 86400),
             "telem": telem_prune(now),
+            "routes": prune_batched("routes", "h", now - max(8, C["traffic_keep_days"]) * 86400),
+            "snr": prune_batched("snr", "h", now - max(8, C["traffic_keep_days"]) * 86400),
             "airtime": prune_batched("airtime", "ts", now - max(8, C["telem_keep_days"]) * 86400),
             "newnodes": prune_batched("newnodes", "ts", now - 365 * 86400)}
 
@@ -1960,6 +2019,174 @@ def newnodes_recent(limit=20):
     with LOCK: rows = DB.execute("SELECT key,ts,name,kind,rx,state FROM newnodes WHERE state!='baseline' ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
     return [{"key": k, "ts": ts, "name": nm or "", "kind": NODE_KIND.get(kd, "node"), "rx": (DEV.get(rx) or {}).get("name") or (rx or "")[:8], "state": st} for k, ts, nm, kd, rx, st in rows if st != "baseline"]
 
+# --- persistent alert state (survives a restart, so nothing is announced twice and a recovery is not lost)
+def alert_get(key):
+    with LOCK: r = DB.execute("SELECT state, ts FROM alertstate WHERE key=?", (key,)).fetchone()
+    return (r[0], r[1]) if r else (None, 0)
+
+def alert_put(key, state, ts):
+    with LOCK: DB.execute("INSERT OR REPLACE INTO alertstate VALUES(?,?,?)", (key, state, int(ts)))
+
+def alert_keys(prefix):
+    with LOCK: return [r[0] for r in DB.execute("SELECT key FROM alertstate WHERE key LIKE ? AND state='active'", (prefix.replace("%", "") + "%",)).fetchall()]
+
+def alert_drop(key):
+    with LOCK: DB.execute("DELETE FROM alertstate WHERE key=?", (key,))
+
+# --- D7: a repeater silent for longer than its own limit (or the global one)
+SILENT_COOLDOWN = 1800
+def silent_minutes(did):
+    """Minutes of silence before this repeater is called silent: its own override, else the global default."""
+    m = (CONF.get("silent_overrides") or {}).get(did)
+    return m if isinstance(m, int) and 2 <= m <= 1440 else CONF["stale_minutes"]
+
+def silent_step(active, age, thr, since_recover=None, cooldown=SILENT_COOLDOWN):
+    """age and thr in seconds; None age = never heard, which is unknown, not silent. 'fire' once past thr (not within `cooldown` of the last recovery);
+    'recover' only when well back under it (half of thr), so a repeater reporting at about the limit does not flap; else None."""
+    if age is None: return None
+    if not active and age > thr: return None if since_recover is not None and since_recover < cooldown else "fire"
+    if active and age <= thr * 0.5: return "recover"
+    return None
+
+def silent_alerts(now=None):
+    now = int(now or time.time()); a = CONF["alerts"]
+    with LOCK: devs = [dict(d) for d in DEV.values()]
+    link_ok = MQTT["state"] == "connected" and now - MQTT.get("since", 0) >= 60      # a dashboard that cannot hear the broker hears nobody: that is not silence
+    out = []
+    for d in devs:
+        key = "off:" + d["id"]; state, ts = alert_get(key); active = state == "active"
+        age = now - d["last"] if d["last"] else None; thr = silent_minutes(d["id"]) * 60
+        if not link_ok and not active: continue
+        step = silent_step(active, age, thr, now - ts if state == "clear" else None); name = d["name"] or d["id"][:12]
+        if step == "fire":
+            alert_put(key, "active", now); out.append(("fire", name))
+            if a["offline"]: send_alert("Repeater silent: " + name, "nothing heard for %d minutes (limit %d)" % (age // 60, thr // 60), "warn", "offline")
+        elif step == "recover":
+            alert_put(key, "clear", now); out.append(("recover", name))
+            if a["online"]: send_alert("Repeater back: " + name, "it is sending again", "ok", "online")
+    return out
+
+# --- D5: route health. A route here is a path a flood packet was heard to have taken, as the last repeater of it received it. This is what our
+# repeaters observed, not a measure of link quality, and a route that is quiet may only be unused.
+ROUTE_COOLDOWN = 6 * 3600
+def route_state(age, live_s, silent_s, rx_ok, watched_s):
+    """-> (state, why). 'unknown' when we cannot tell: the receiving repeater is not connected now, or the dashboard has not been watching long enough."""
+    if not rx_ok: return "unknown", "the repeater that heard it is not connected now"
+    if age <= live_s: return "live", ""
+    if age < silent_s: return "stale", ""
+    if watched_s < silent_s: return "unknown", "the dashboard has not been watching long enough to call it silent"
+    return "silent", ""
+
+def route_view(now=None):
+    now = int(now or time.time()); C = CONF; live_s = C["route_live_minutes"] * 60; silent_s = C["route_silent_minutes"] * 60
+    traffic_flush(); cur = now // 3600 * 3600; h24 = cur - 23 * 3600; h7 = cur - 167 * 3600
+    with LOCK:
+        rows = DB.execute("SELECT path, rx, SUM(CASE WHEN h >= ? THEN n ELSE 0 END), SUM(n), MAX(last) FROM routes WHERE h >= ? GROUP BY path, rx", (h24, h7)).fetchall()
+    out = []
+    for path, rx, n24, n7, last in rows:
+        d = DEV.get(rx); rx_ok = bool(d and d["last"] and now - d["last"] < C["stale_minutes"] * 60)
+        st, why = route_state(max(0, now - last), live_s, silent_s, rx_ok, now - START)
+        out.append({"key": path + "|" + rx, "path": [{"h": h, "n": hop_name(h)} for h in path.split(",")], "rx": rx, "rx_name": (d["name"] if d and d["name"] else rx[:8]), "last": last, "n24": n24, "n7d": n7,
+                    "state": st, "why": why, "busy": n7 >= C["route_busy_packets"]})
+    out.sort(key=lambda r: (-r["n7d"], r["key"]))
+    return {"now": now, "live_minutes": C["route_live_minutes"], "silent_minutes": C["route_silent_minutes"], "busy_packets": C["route_busy_packets"], "total": len(out), "routes": out[:100],
+            "note": "Observed receptions by our own repeaters. Not a measure of link quality: a quiet route may only be unused. Counts are receptions per whole clock hour."}
+
+def route_alert_step(active, state, busy, since_recover=None, cooldown=ROUTE_COOLDOWN):
+    """'fire' when a busy route is silent (not within `cooldown` of its last recovery); 'recover' only when it is live again (stale is not enough); unknown changes nothing."""
+    if not active: return ("fire" if not (since_recover is not None and since_recover < cooldown) else None) if state == "silent" and busy else None
+    return "recover" if state == "live" else None
+
+def route_alerts(now=None):
+    now = int(now or time.time()); v = route_view(now); seen = set(); fires = []; backs = []
+    for r in v["routes"]:
+        key = "route:" + r["key"]; seen.add(key); state, ts = alert_get(key); active = state == "active"
+        step = route_alert_step(active, r["state"], r["busy"], now - ts if state == "clear" else None)
+        label = " > ".join((h["n"] or h["h"]) for h in r["path"]) + " > " + r["rx_name"]
+        if step == "fire": alert_put(key, "active", now); fires.append("%s (%d packets in 7 days, last %d min ago)" % (label, r["n7d"], (now - r["last"]) // 60))
+        elif step == "recover": alert_put(key, "clear", now); backs.append(label)
+    for key in alert_keys("route:"):
+        if key not in seen: alert_drop(key)          # it has left the 7 day window: nothing more to say about it
+    def send(title, items, level, noun):
+        if not items: return
+        if len(items) <= 3:
+            for t in items: send_alert("%s: %s" % (title, t.split(" (")[0]), t, level, "route")
+        else: send_alert("%s: %d routes" % (title, len(items)), "; ".join(items[:8]) + ("; and %d more" % (len(items) - 8) if len(items) > 8 else ""), level, "route")
+    send("Busy route silent", fires, "warn", "silent"); send("Route back", backs, "ok", "back")
+    return {"fired": len(fires), "recovered": len(backs)}
+
+# --- D6: per-node analytics from the traffic history: SNR over time (direct receptions only), hop counts and an hourly heatmap
+def node_analytics(key, days=7, now=None):
+    try: days = int(days) if str(days).strip() != "" else 7
+    except (TypeError, ValueError): days = 7
+    days = max(1, min(30, days)); now = int(now or time.time()); cur = now // 3600 * 3600
+    start = cur - (days * 24 - 1) * 3600; hstart = cur - 7 * 86400 + 3600
+    traffic_flush()
+    with LOCK:
+        hops = DB.execute("SELECT hops, SUM(n) FROM traffic WHERE node=? AND h>=? GROUP BY hops ORDER BY hops", (key, start)).fetchall()
+        hrs = DB.execute("SELECT h, SUM(n) FROM traffic WHERE node=? AND h>=? GROUP BY h", (key, hstart)).fetchall()
+        covered = {r[0] for r in DB.execute("SELECT DISTINCT h FROM traffic WHERE h>=?", (hstart,)).fetchall()}      # hours in which anything at all was recorded
+        snr = DB.execute("SELECT h, n, s, lo, hi FROM snr WHERE node=? AND h>=? ORDER BY h", (key, start)).fetchall()
+    by = dict(hrs); total = sum(n for _, n in hops)
+    day0 = (hstart // 86400) * 86400; grid = []
+    for di in range(8):
+        d0 = day0 + di * 86400; row = []
+        for hr in range(24):
+            t = d0 + hr * 3600
+            row.append(None if t < hstart or t > cur or t not in covered else by.get(t, 0))       # None = nothing was being recorded, which is not the same as quiet
+        if any(c is not None for c in row): grid.append({"day": d0, "h": row})
+    pts = [[h, round(s / n, 1), round(lo, 1), round(hi, 1), n] for h, n, s, lo, hi in snr if n > 0]
+    sn = sum(p[4] for p in pts)
+    summary = {"n": sn, "avg": round(sum(r[2] for r in snr if r[1] > 0) / sn, 1), "min": min(p[2] for p in pts), "max": max(p[3] for p in pts)} if sn else None
+    nd = NODES.get(key) or {}
+    return {"id": key, "name": nd.get("name") or key[:8], "days": days, "since": start, "now": now, "total": total, "hops": [{"hops": h, "n": n} for h, n in hops],
+            "heatmap": {"utc": True, "days": grid}, "snr": {"points": pts, "summary": summary, "note": "SNR of packets heard with no repeater between (flood, 0 hops); history starts when this version was installed"} if pts else None}
+
+def node_choices(limit=60, now=None):
+    """Nodes with the most traffic in the last 7 days, for the picker."""
+    now = int(now or time.time()); traffic_flush()
+    with LOCK: rows = DB.execute("SELECT node, SUM(n) FROM traffic WHERE h>=? GROUP BY node ORDER BY 2 DESC LIMIT ?", (now // 3600 * 3600 - 167 * 3600, limit)).fetchall()
+    return [{"id": k, "name": (NODES.get(k) or {}).get("name") or k[:8], "n": n} for k, n in rows]
+
+# --- D7: battery voltage trend from the sensor readings (channel 1 = the repeater itself), with a rough time-to-low estimate when the data allows
+BATT_CH, BATT_TYPE = 1, 116
+def battery_estimate(rows, now, low_v, min_hours=6, jump=0.15, gap=3 * 3600):
+    """rows: [(ts, volts)] oldest first -> (estimate dict or None, why). Uses only the readings since the last charge (a rise of `jump` V) or the last
+    gap of readings, needs at least `min_hours` of them and a fall that a straight line fits, and says nothing otherwise."""
+    rows = [(t, v) for t, v in rows if v is not None and 1.0 <= v <= 30.0]
+    if len(rows) < 2: return None, "not enough readings"
+    cut = 0
+    for i in range(1, len(rows)):
+        if rows[i][1] - rows[i - 1][1] >= jump or rows[i][0] - rows[i - 1][0] > gap: cut = i
+    seg = rows[cut:]
+    if len(seg) < 6 or seg[-1][0] - seg[0][0] < min_hours * 3600:
+        return None, "needs at least %d hours of readings since the last charge or gap" % min_hours
+    if now - seg[-1][0] > 3600: return None, "no reading in the last hour"
+    t0 = seg[0][0]; xs = [(t - t0) / 3600.0 for t, _ in seg]; ys = [v for _, v in seg]; n = len(seg)
+    mx = sum(xs) / n; my = sum(ys) / n; sxx = sum((x - mx) ** 2 for x in xs); syy = sum((y - my) ** 2 for y in ys)
+    if sxx <= 0: return None, "not enough readings"
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys)); slope = sxy / sxx; r2 = (sxy * sxy) / (sxx * syy) if syy > 0 else 0.0
+    if slope > -0.002: return None, "not falling"
+    if r2 < 0.5: return None, "too uneven to estimate"
+    last = ys[-1]; eta = 0.0 if last <= low_v else (last - low_v) / -slope
+    return {"slope_v_per_h": round(slope, 4), "eta_hours": round(eta, 1), "low_v": low_v, "basis_hours": round(xs[-1], 1), "n": n, "fit": round(r2, 2)}, ""
+
+def battery_view(hours=24, now=None, allowed=None):
+    now = int(now or time.time()); hours = {1: 1, 6: 6, 24: 24, 168: 168}.get(int(hours), 24); since = now - hours * 3600; low_v = CONF["battery_low_mv"] / 1000.0; out = []
+    with LOCK:
+        ids = [r[0] for r in DB.execute("SELECT DISTINCT did FROM telem WHERE ch=? AND type=? AND ts>=?", (BATT_CH, BATT_TYPE, since)).fetchall()]
+        for did in ids:
+            if allowed is not None and did not in allowed: continue
+            rows = DB.execute("SELECT ts, v FROM telem WHERE did=? AND ch=? AND type=? AND ts>=? ORDER BY ts", (did, BATT_CH, BATT_TYPE, since)).fetchall()
+            est, why = battery_estimate(rows, now, low_v) if hours >= 6 else (None, "choose 6 hours or more")
+            pts = rows
+            if len(pts) > 200: step = len(pts) / 200.0; pts = [pts[int(i * step)] for i in range(200)] + [pts[-1]]
+            out.append({"id": did, "name": (DEV.get(did) or {}).get("name") or did[:8], "points": [[t, v] for t, v in pts], "now_v": rows[-1][1], "age": now - rows[-1][0],
+                        "min": min(v for _, v in rows), "max": max(v for _, v in rows), "n": len(rows), "est": est, "why": why})
+    out.sort(key=lambda r: r["name"].lower())
+    return {"hours": hours, "since": since, "now": now, "low_v": low_v, "devices": out,
+            "note": "The estimate is a straight line through the readings since the last charge, and only a rough guide: weather, load and temperature change it."}
+
 def extra_diagnostics(now):
     """Checks lines for backup, ID collisions and airtime."""
     out = []
@@ -2011,12 +2238,8 @@ def alert_loop():
     while True:
         try:
             now = time.time(); a = CONF["alerts"]; st = ALERT_STATE
-            with LOCK: devs = [dict(d) for d in DEV.values()]
-            for d in devs:
-                name = d["name"] or d["id"][:12]; off = d["last"] and now - d["last"] > CONF["stale_minutes"] * 60; was = st.get("off:" + d["id"], False)
-                if off and not was and a["offline"]: send_alert("Repeater silent: " + name, "nothing heard for %d minutes" % CONF["stale_minutes"], "warn", "offline")
-                if not off and was and a["online"]: send_alert("Repeater back: " + name, "it is sending again", "ok", "online")
-                st["off:" + d["id"]] = bool(off)
+            try: silent_alerts(now)
+            except Exception as e: sys.stderr.write("silent: %s\n" % e)
             for p in pending_list():
                 k = "pend:" + p["name"] + p.get("prefix", "")
                 if k not in st and a["pending"]: send_alert("A repeater is waiting for approval", "account %s from %s (device %s...)" % (p["name"], p.get("ip", "?"), p.get("prefix", "?")), "warn", "pending")
@@ -2032,6 +2255,7 @@ def alert_loop():
                 st["disk"] = now; send_alert("Disk nearly full", "%.0f%% used" % used, "warn", "disk")
             if now - st.get("slow", 0) > 60:
                 st["slow"] = now; airtime_alerts(now)
+                if a.get("route_silent"): route_alerts(now)
                 if now - st.get("coll", 0) > 300: st["coll"] = now; collision_alerts(now)
         except Exception as e:
             sys.stderr.write("alerts: %s\n" % e)
@@ -2109,7 +2333,7 @@ def diagnostics(sysinfo, accs, cert):
     for d in DEV.values():
         age = now - d["last"] if d["last"] else None; nm = d["name"] or d["id"][:12]
         if age is None: add("warn", "No data yet from %s" % nm, "known only from its saved status message; nothing live since the dashboard started")
-        elif age > C["stale_minutes"] * 60: add("warn", "No data from %s" % nm, "last heard %d min ago" % (age // 60))
+        elif age > silent_minutes(d["id"]) * 60: add("warn", "No data from %s" % nm, "last heard %d min ago (limit %d)" % (age // 60, silent_minutes(d["id"])))
         if d["skew"] is not None and abs(d["skew"]) > C["skew_seconds"]: add("warn", "Clock off on %s" % nm, "%+.0f s against this server (its NTP may be down)" % d["skew"])
         if d["status"] == "offline" and (age is None or age > 300): add("warn", "%s reports itself offline" % nm, "its last status message said offline and nothing has arrived since")
     dr = sysnum("$SYS/broker/load/publish/dropped/1min")
@@ -2129,7 +2353,7 @@ def diagnostics(sysinfo, accs, cert):
             add("warn", "No position: %s" % (d["name"] or d["id"][:8]), "this repeater has no position, so it cannot be placed on the map")
     for d in DEV.values():
         nm = d["name"] or d["id"][:12]; mv = (d.get("stats") or {}).get("battery_mv")
-        if mv and mv < 3500 and now - d["last"] < 900: add("warn", "Low battery: %s" % nm, "%.2f V" % (mv / 1000))
+        if mv and mv < CONF["battery_low_mv"] and now - d["last"] < 900: add("warn", "Low battery: %s" % nm, "%.2f V" % (mv / 1000))
         b = d.get("bridge") or {}
         if b.get("heard") and b.get("dropped") and b["dropped"] / max(1, b["heard"]) > 0.10:
             add("warn", "Bridge holding back packets: %s" % nm, "%d of %d heard were held back by the rate limit" % (b["dropped"], b["heard"]))
@@ -2353,6 +2577,15 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/network": return self.send(200, json.dumps(network_view(float(parse_qs(u.query).get("hours", [CONF["map_hours"]])[0]))))
             if u.path == "/api/node/stats":
                 q = parse_qs(u.query); return self.send(200, json.dumps(node_stats(str(q.get("key", [""])[0]).upper(), q.get("days", ["7"])[0])))
+            if u.path == "/api/node":
+                key = str(q.get("id", [""])[0]).upper()
+                if not key: return self.send(200, json.dumps({"nodes": node_choices()}))
+                if not re.match(r"^[0-9A-F]{64}$", key): return self.send(400, '{"error":"id is the node\'s 64 character key"}')
+                return self.send(200, json.dumps(node_analytics(key, q.get("days", ["7"])[0])))
+            if u.path == "/api/routes": return self.send(200, json.dumps(route_view()))
+            if u.path == "/api/battery":
+                try: return self.send(200, json.dumps(battery_view(int(float(q.get("hours", ["24"])[0])))))
+                except ValueError: return self.send(400, '{"error":"bad request"}')
             if u.path == "/api/links/checks": return self.send(200, json.dumps(link_checks(int(parse_qs(u.query).get("hours", ["48"])[0]))))
             if u.path == "/api/report/weekly": return self.send(200, weekly_report(), "text/plain")
             if u.path == "/api/export/geojson": return self.send(200, json.dumps(geojson_export(), default=str), "application/geo+json")
